@@ -1,6 +1,13 @@
 // platform/js/store.js
 // 报告数据 store. v1 用 localStorage, v2 切 PG JSONB
 (function (global) {
+  // 本地日期格式化（避免 toISOString 的时区问题）
+  function toLocalDateString(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
   const KEY_PREFIX = "bcy_report_";
   const PERIOD_KEY = "bcy_report_periods";
   const CUSTOM_PERIODS_KEY = "bcy_report_custom_periods";
@@ -12,9 +19,9 @@
   const DEFAULT_CUSTOM_PERIODS = {
     "2026-W18": { start: "2026-04-28", end: "2026-05-04", label: "第18周" },
     "2026-W19": { start: "2026-05-05", end: "2026-05-11", label: "第19周" },
-    "2026-W20": { start: "2026-05-12", end: "2026-05-18", label: "第20周" },
-    "2026-W21": { start: "2026-05-19", end: "2026-05-25", label: "第21周" },
-    "2026-W22": { start: "2026-05-26", end: "2026-06-01", label: "第22周" }
+    "2026-W20": { start: "2026-05-11", end: "2026-05-17", label: "第20周" },
+    "2026-W21": { start: "2026-05-18", end: "2026-05-24", label: "第21周" },
+    "2026-W22": { start: "2026-05-25", end: "2026-05-31", label: "第22周" }
   };
 
   // 获取所有周期
@@ -45,15 +52,28 @@
   
   // 获取自定义周期配置
   function getCustomPeriods() {
+    // 版本检查：如果版本不匹配，清除旧数据
+    const CONFIG_VERSION = "v2_20260518";
     try {
+      const storedVersion = localStorage.getItem(CUSTOM_PERIODS_KEY + '_version');
       const stored = localStorage.getItem(CUSTOM_PERIODS_KEY);
-      if (stored) {
+      if (stored && storedVersion === CONFIG_VERSION) {
         const parsed = JSON.parse(stored);
         return parsed;
       }
+      // 版本不匹配，清除旧数据
+      localStorage.removeItem(CUSTOM_PERIODS_KEY);
     } catch (e) {}
     localStorage.setItem(CUSTOM_PERIODS_KEY, JSON.stringify(DEFAULT_CUSTOM_PERIODS));
+    localStorage.setItem(CUSTOM_PERIODS_KEY + '_version', CONFIG_VERSION);
     return { ...DEFAULT_CUSTOM_PERIODS };
+  }
+
+  // 保存自定义周期配置（同时更新版本号）
+  function setCustomPeriods(customPeriods) {
+    const CONFIG_VERSION = "v2_20260518";
+    localStorage.setItem(CUSTOM_PERIODS_KEY, JSON.stringify(customPeriods));
+    localStorage.setItem(CUSTOM_PERIODS_KEY + '_version', CONFIG_VERSION);
   }
   
   // 获取周期详情（唯一的数据出口）
@@ -69,10 +89,10 @@
         label: custom.label || period,
         start: custom.start,
         end: custom.end,
-        report_date: nextDay.toISOString().split('T')[0]
+        report_date: toLocalDateString(nextDay)
       };
     }
-    
+
     const match = period.match(/(\d+)-W(\d+)/);
     if (!match) return null;
     const year = parseInt(match[1]);
@@ -88,9 +108,9 @@
       year,
       week,
       label: `${year}年第${week}周`,
-      start: monday.toISOString().split('T')[0],
-      end: sunday.toISOString().split('T')[0],
-      report_date: nextDay.toISOString().split('T')[0]
+      start: toLocalDateString(monday),
+      end: toLocalDateString(sunday),
+      report_date: toLocalDateString(nextDay)
     };
   }
 

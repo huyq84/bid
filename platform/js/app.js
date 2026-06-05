@@ -11,6 +11,12 @@
   // ====== 工具 ======
   function $(sel, root) { return (root || document).querySelector(sel); }
   function $$(sel, root) { return Array.from((root || document).querySelectorAll(sel)); }
+  function toLocalDateString(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
   function setField(path, val) {
     const parts = path.split(".");
     let o = report;
@@ -646,12 +652,12 @@
       newPeriods.push({
         key: periodKey,
         weekNum,
-        start: periodStart.toISOString().split('T')[0],
-        end: periodEnd.toISOString().split('T')[0],
+        start: toLocalDateString(periodStart),
+        end: toLocalDateString(periodEnd),
         label: `第${weekNum}周`
       });
     }
-    
+
     document.getElementById('generate-periods-overlay').remove();
     document.getElementById('report-list-overlay').remove();
     
@@ -703,8 +709,8 @@
     const newPeriod = `${year}-W${String(week).padStart(2, '0')}`;
     
     Store.addPeriod(newPeriod, {
-      start: startDate.toISOString().split('T')[0],
-      end: endDate.toISOString().split('T')[0],
+      start: toLocalDateString(startDate),
+      end: toLocalDateString(endDate),
       label: `第${week}周`
     });
     
@@ -762,12 +768,12 @@
       newPeriods.push({
         key: periodKey,
         weekNum,
-        start: periodStart.toISOString().split('T')[0],
-        end: periodEnd.toISOString().split('T')[0],
+        start: toLocalDateString(periodStart),
+        end: toLocalDateString(periodEnd),
         label: `第${weekNum}周`
       });
     }
-    
+
     const existingPeriods = Store.getPeriods();
     const customPeriods = Store.getCustomPeriods();
     const conflicts = [];
@@ -948,8 +954,8 @@
     monday.setDate(reportDate.getDate() - daysToMonday);
     const sunday = new Date(monday);
     sunday.setDate(monday.getDate() + 6);
-    report.period.start = monday.toISOString().split('T')[0];
-    report.period.end = sunday.toISOString().split('T')[0];
+    report.period.start = toLocalDateString(monday);
+    report.period.end = toLocalDateString(sunday);
     Store.save(report, _currentPeriod);
     rerender();
     toast(`✅ 周期已自动填充: ${report.period.start} ~ ${report.period.end}`, "success");
