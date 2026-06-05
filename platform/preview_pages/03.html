@@ -1,0 +1,264 @@
+<!DOCTYPE html><html lang="zh-CN" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>组织架构 - 到岗管理人员名单</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<style data-purpose="custom-layout">
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #f3f4f6;
+    }
+    .header-trapezoid {
+      position: absolute;
+      top: 23px;
+      left: 0;
+      width: 58px;
+      height: 52px;
+      background-color: #37a3eb;
+      clip-path: polygon(0 0, 70% 0, 100% 100%, 0 100%);
+    }
+    .header-line {
+      position: absolute;
+      top: 75px;
+      left: 72px;
+      width: calc(100% - 72px);
+      height: 3px;
+      background-color: #37a3eb;
+    }
+    .sub-title-bg {
+      position: absolute;
+      top: 78.5px;
+      left: 72px;
+      width: 285px;
+      height: 38px;
+      background: linear-gradient(90deg, #ffd93d 0%, #ff4d4d 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .label-gradient {
+      background: linear-gradient(90deg, #ffb84d 0%, #ff4d4d 100%);
+    }
+  </style>
+</head>
+<body class="flex items-center justify-center min-h-screen bg-gray-900">
+<!-- BEGIN: MainContainer -->
+<main class="w-[1280px] h-[720px] bg-white relative overflow-hidden" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuC33aleAA7ZoLu9ZbiUKep4BRIuVcySJXBh6PM3W4gsjd_Pp9qEZr3txPQrhUW1KUtf0n2EhipZl4CxV5bo6CCUkrneoawNf6LZ6fm08WimFC-fImyhDy7aD9AruK5LlG07aoBM2c3ABUzB9qpNyU2GVX0cwVUMgqYGXD6yRpDBfrlffxrbLjONVMTAgpBA4aGixiaerJ2s7PPk-c529TzGE_Tm3wFzFByhz8aT0loD6oHPXZrLuD0LwJfoWbQRDXuYJCNRGcac2KcJ'); background-size: 100% 100%;">
+<!-- BEGIN: TopHeader -->
+<header class="relative w-full" data-purpose="page-header">
+<div class="header-trapezoid"></div>
+<div class="header-line"></div>
+<div class="sub-title-bg"></div>
+<div class="absolute top-5 left-[72px]">
+<h1 class="text-3xl font-bold text-[#37a3eb]">一、组织架构</h1>
+</div>
+<div class="absolute top-[82px] left-[72px]">
+<span class="text-white font-bold text-lg tracking-wider">到岗管理人员名单</span>
+</div>
+</header>
+<!-- END: TopHeader -->
+<!-- BEGIN: ContentContainer -->
+<div class="absolute top-[130px] left-8 right-8 bottom-8 overflow-auto">
+<div class="grid grid-cols-12 gap-8 h-full">
+<!-- BEGIN: LeftSection_Table -->
+<section class="col-span-7">
+
+<div class="overflow-hidden border border-gray-300 rounded-lg shadow-md bg-white">
+<table class="w-full text-xs text-center border-collapse">
+<thead class="bg-gray-100 text-gray-700 font-bold border-b border-gray-300">
+<tr>
+<th class="py-1 border-r border-gray-300 w-12">序号</th>
+<th class="py-1 border-r border-gray-300">职务</th>
+<th class="py-1 border-r border-gray-300">姓名</th>
+<th class="py-1 border-r border-gray-300">联系电话</th>
+<th class="py-1">是否到岗</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-gray-200">
+<tr class="hover:bg-blue-50">
+<td class="py-0.5 border-r border-gray-200">1</td>
+<td class="py-0.5 border-r border-gray-200">项目经理</td>
+<td class="py-0.5 border-r border-gray-200">侯 帅</td>
+<td class="py-0.5 border-r border-gray-200">13051103313</td>
+<td class="py-0.5 text-black font-medium">已到岗</td>
+</tr>
+<tr class="bg-gray-50 hover:bg-blue-50">
+<td class="py-0.5 border-r border-gray-200">2</td>
+<td class="py-0.5 border-r border-gray-200">项目技术负责人兼深化设计负责人</td>
+<td class="py-0.5 border-r border-gray-200">王 健</td>
+<td class="py-0.5 border-r border-gray-200">13818589201</td>
+<td class="py-0.5 text-black font-medium">已到岗</td>
+</tr>
+<tr class="hover:bg-blue-50">
+<td class="py-0.5 border-r border-gray-200">3</td>
+<td class="py-0.5 border-r border-gray-200">计划经理</td>
+<td class="py-0.5 border-r border-gray-200">陈 冲</td>
+<td class="py-0.5 border-r border-gray-200">13651007882</td>
+<td class="py-0.5 text-black font-medium">已到岗</td>
+</tr>
+<tr class="bg-gray-50 hover:bg-blue-50">
+<td class="py-0.5 border-r border-gray-200">4</td>
+<td class="py-0.5 border-r border-gray-200">生产经理（软装）</td>
+<td class="py-0.5 border-r border-gray-200">王亚广</td>
+<td class="py-0.5 border-r border-gray-200">15910813359</td>
+<td class="py-0.5 text-black font-medium">已到岗</td>
+</tr>
+<tr class="hover:bg-blue-50">
+<td class="py-0.5 border-r border-gray-200">5</td>
+<td class="py-0.5 border-r border-gray-200">生产经理（精装）</td>
+<td class="py-0.5 border-r border-gray-200">鲍永春</td>
+<td class="py-0.5 border-r border-gray-200">13382510829</td>
+<td class="py-0.5 text-black font-medium">已到岗</td>
+</tr>
+<tr class="bg-gray-50 hover:bg-blue-50">
+<td class="py-0.5 border-r border-gray-200">6</td>
+<td class="py-0.5 border-r border-gray-200">生产经理（机电）</td>
+<td class="py-0.5 border-r border-gray-200">袁永超</td>
+<td class="py-0.5 border-r border-gray-200">18900125480</td>
+<td class="py-0.5 text-black font-medium">已到岗</td>
+</tr>
+<tr class="hover:bg-blue-50">
+<td class="py-0.5 border-r border-gray-200">7</td>
+<td class="py-0.5 border-r border-gray-200">深化设计经理（软装）</td>
+<td class="py-0.5 border-r border-gray-200">李 欢</td>
+<td class="py-0.5 border-r border-gray-200">17310298646</td>
+<td class="py-0.5 text-black font-medium">已到岗</td>
+</tr>
+<tr class="bg-gray-50 hover:bg-blue-50">
+<td class="py-0.5 border-r border-gray-200">8</td>
+<td class="py-0.5 border-r border-gray-200">深化设计（软装）</td>
+<td class="py-0.5 border-r border-gray-200">乔志广</td>
+<td class="py-0.5 border-r border-gray-200">13939996372</td>
+<td class="py-0.5 text-black font-medium">已到岗</td>
+</tr>
+<tr class="hover:bg-blue-50">
+<td class="py-0.5 border-r border-gray-200">9</td>
+<td class="py-0.5 border-r border-gray-200">深化设计（软装）</td>
+<td class="py-0.5 border-r border-gray-200">李水旺</td>
+<td class="py-0.5 border-r border-gray-200">18310163008</td>
+<td class="py-0.5 text-black font-medium">已到岗</td>
+</tr>
+<tr class="bg-gray-50 hover:bg-blue-50">
+<td class="py-0.5 border-r border-gray-200">10</td>
+<td class="py-0.5 border-r border-gray-200">深化设计（软装）</td>
+<td class="py-0.5 border-r border-gray-200">赵晨星</td>
+<td class="py-0.5 border-r border-gray-200">15011544879</td>
+<td class="py-0.5 text-black font-medium">已到岗</td>
+</tr>
+<tr class="hover:bg-blue-50">
+<td class="py-0.5 border-r border-gray-200">11</td>
+<td class="py-0.5 border-r border-gray-200">深化设计（软装）</td>
+<td class="py-0.5 border-r border-gray-200">龙 方</td>
+<td class="py-0.5 border-r border-gray-200">13974050351</td>
+<td class="py-0.5 text-black font-medium">已到岗</td>
+</tr>
+<tr class="bg-gray-50 hover:bg-blue-50">
+<td class="py-0.5 border-r border-gray-200">12</td>
+<td class="py-0.5 border-r border-gray-200">深化设计经理（精装）</td>
+<td class="py-0.5 border-r border-gray-200">徐诗怡</td>
+<td class="py-0.5 border-r border-gray-200">18013705168</td>
+<td class="py-0.5 text-black font-medium">已到岗</td>
+</tr>
+<tr class="hover:bg-blue-50">
+<td class="py-0.5 border-r border-gray-200">13</td>
+<td class="py-0.5 border-r border-gray-200">深化设计（机电）</td>
+<td class="py-0.5 border-r border-gray-200">苏 尧</td>
+<td class="py-0.5 border-r border-gray-200">13141422281</td>
+<td class="py-0.5 text-black font-medium">已到岗</td>
+</tr>
+<tr class="bg-gray-50 hover:bg-blue-50">
+<td class="py-0.5 border-r border-gray-200">14</td>
+<td class="py-0.5 border-r border-gray-200">成本经理（软装/精装）</td>
+<td class="py-0.5 border-r border-gray-200">郭建欣</td>
+<td class="py-0.5 border-r border-gray-200">15600173618</td>
+<td class="py-0.5 text-black font-medium">已到岗</td>
+</tr>
+<tr class="hover:bg-blue-50">
+<td class="py-0.5 border-r border-gray-200">15</td>
+<td class="py-0.5 border-r border-gray-200">商务经理（软装/精装）</td>
+<td class="py-0.5 border-r border-gray-200">薛智臣</td>
+<td class="py-0.5 border-r border-gray-200">18810013805</td>
+<td class="py-0.5 text-black font-medium">已到岗</td>
+</tr>
+<tr class="bg-gray-50 hover:bg-blue-50">
+<td class="py-0.5 border-r border-gray-200">16</td>
+<td class="py-0.5 border-r border-gray-200">预算员（软装/精装）</td>
+<td class="py-0.5 border-r border-gray-200">王 迪</td>
+<td class="py-0.5 border-r border-gray-200">15726644536</td>
+<td class="py-0.5 text-black font-medium">已到岗</td>
+</tr>
+<tr class="hover:bg-blue-50">
+<td class="py-0.5 border-r border-gray-200">17</td>
+<td class="py-0.5 border-r border-gray-200">电气预算员（软装/精装）</td>
+<td class="py-0.5 border-r border-gray-200">邓明伟</td>
+<td class="py-0.5 border-r border-gray-200">19937244723</td>
+<td class="py-0.5 text-black font-medium">已到岗</td>
+</tr>
+<tr class="bg-gray-50 hover:bg-blue-50">
+<td class="py-0.5 border-r border-gray-200">18</td>
+<td class="py-0.5 border-r border-gray-200">质量经理（软装）</td>
+<td class="py-0.5 border-r border-gray-200">周建忠</td>
+<td class="py-0.5 border-r border-gray-200">13636535828</td>
+<td class="py-0.5 text-black font-medium">已到岗</td>
+</tr>
+<tr class="hover:bg-blue-50">
+<td class="py-0.5 border-r border-gray-200">19</td>
+<td class="py-0.5 border-r border-gray-200">质量经理（精装）</td>
+<td class="py-0.5 border-r border-gray-200">李欣霖</td>
+<td class="py-0.5 border-r border-gray-200">17631518331</td>
+<td class="py-0.5 text-black font-medium">已到岗</td>
+</tr>
+<tr class="bg-gray-50 hover:bg-blue-50">
+<td class="py-0.5 border-r border-gray-200">20</td>
+<td class="py-0.5 border-r border-gray-200">安全经理（软装）</td>
+<td class="py-0.5 border-r border-gray-200">孙攀岳</td>
+<td class="py-0.5 border-r border-gray-200">18501166924</td>
+<td class="py-0.5 text-black font-medium">已到岗</td>
+</tr>
+<tr class="hover:bg-blue-50">
+<td class="py-0.5 border-r border-gray-200">21</td>
+<td class="py-0.5 border-r border-gray-200">安全经理（精装）</td>
+<td class="py-0.5 border-r border-gray-200">赵国显</td>
+<td class="py-0.5 border-r border-gray-200">18516217962</td>
+<td class="py-0.5 text-black font-medium">已到岗</td>
+</tr>
+<tr class="bg-gray-50 hover:bg-blue-50">
+<td class="py-0.5 border-r border-gray-200">22</td>
+<td class="py-0.5 border-r border-gray-200">资料员</td>
+<td class="py-0.5 border-r border-gray-200">蔡丽华</td>
+<td class="py-0.5 border-r border-gray-200">18600371133</td>
+<td class="py-0.5 text-black font-medium">已到岗</td>
+</tr>
+<tr class="hover:bg-blue-50">
+<td class="py-0.5 border-r border-gray-200">23</td>
+<td class="py-0.5 border-r border-gray-200">材料员（软装/精装）</td>
+<td class="py-0.5 border-r border-gray-200">肖自政</td>
+<td class="py-0.5 border-r border-gray-200">15093960151</td>
+<td class="py-0.5 text-black font-medium">已到岗</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<!-- END: LeftSection_Table -->
+<!-- BEGIN: RightSection_Image -->
+<section class="col-span-5 flex flex-col items-center justify-start pt-8">
+<div class="relative w-full max-w-lg">
+<div class="overflow-hidden rounded-xl border-4 border-white shadow-2xl">
+<img alt="办公场景照片" class="w-full h-auto object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDyRYZ3g_BKN7KbipqNkDbb_qbRcn-_xMLqDJQmRTE0dzEw6tO9cg4sCWyshxGZBqCE74CIwOAwe_pO5CuEuP8qjbck0M1DdiidfcBmoHUUXOALAtEP88tUUuteWKD_6_Kc2QNcRYRK66LUBfwhPXPFQJxK1ytMU-QL2B8T25G1-05wS9m6seHBUBLgynxn_CtYRmmbQ1K7_LR4SHb-_CfIcGoiqUSS_MzWREan_AzcD1-8ffaq2iYhzyLyEgN2Y9iVZ8rl_hFnz0VO">
+</div>
+<div class="absolute -bottom-20 left-1/2 -translate-x-1/2 w-[80%]">
+<div class="label-gradient text-white text-center py-3 px-8 rounded-lg shadow-xl font-bold text-xl tracking-widest border border-white/20">
+            百瑞达工坊办公室
+          </div>
+</div>
+</div>
+</section>
+<!-- END: RightSection_Image -->
+</div>
+</div>
+<!-- END: ContentContainer -->
+</main>
+<!-- END: MainContainer -->
+</body></html>

@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>施工计划</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;700&amp;display=swap" rel="stylesheet"/>
+<style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: 'Noto Sans SC', sans-serif;
+        }
+        .page-frame {
+            width: 1280px;
+            height: 720px;
+            margin: 0 auto;
+            position: relative;
+            overflow: hidden;
+            background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBcCP3Q1-tdgKvIA3i01ahvXtYBF3c2paZPWQPDOKRjtsxkFErN2MXkYBK3kZ2JzAVxmavpaDL0hh524RsI7vaO0hkGWLjcO4utPx0h6VhM6mk5NtezpAKLOELiW3GPwzg4us3wyrLDeuLJTVFIeXCG_1Ogoesbzx4DKSUWub6n-JL5yVwrvHCQHgW1ibN9ZHUlz4nwkSN52SVujg1tXpwkThOnWOOA9jatdZhkT6keCA1mn6msWXVhJfFU9wjmN4wirpPH9mc71zVp');
+            background-size: cover;
+            background-position: center;
+        }
+        .header-trapezoid {
+            position: absolute;
+            top: 23px;
+            left: 0;
+            width: 58px;
+            height: 52px;
+            background-color: #37a3eb;
+            clip-path: polygon(0 0, 60% 0, 100% 100%, 0 100%);
+            z-index: 20;
+        }
+        .header-line {
+            position: absolute;
+            top: 75px;
+            left: 72px;
+            width: calc(100% - 72px);
+            height: 3px;
+            background-color: #37a3eb;
+            z-index: 10;
+        }
+        .sub-title-bg {
+            position: absolute;
+            top: 78.5px;
+            left: 72px;
+            width: 340px;
+            height: 38px;
+            background: linear-gradient(to right, #facc15, #f43f5e);
+            z-index: 5;
+        }
+        .sub-title-text {
+            position: absolute;
+            top: 82px;
+            left: 83px;
+            font-size: 22px;
+            font-weight: 700;
+            color: white;
+            letter-spacing: 1px;
+            z-index: 15;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: center;
+            background-color: #f7f7f7;
+            font-size: 12px;
+            color: #333;
+        }
+        th, td {
+            border: 1px solid #999;
+            padding: 4px 2px;
+            height: 28px;
+        }
+        .header-group-1 { background-color: #f4b084; }
+        .header-group-2 { background-color: #a9d08e; }
+        .header-group-3 { background-color: #9dc3e6; }
+        .header-group-4 { background-color: #9dc3e6; }
+        .bg-yellow-highlight { background-color: #ffff00; font-weight: bold;}
+    </style>
+</head>
+<body>
+<div class="page-frame flex flex-col shadow-2xl">
+<div class="header-trapezoid"></div>
+<div class="header-line"></div>
+<header class="relative w-full pt-6 px-12">
+<div class="absolute top-[21px] left-[72px] text-[36px] font-bold text-[#37a3eb]">四、工作计划</div>
+<div class="sub-title-bg"></div>
+<div class="sub-title-text">4.1 食堂区5月份施工计划：</div>
+</header>
+<main class="absolute top-[130px] left-12 right-12 bottom-12 overflow-auto">
+<table>
+<thead>
+<tr>
+<th colspan="16" style="font-size: 14px; background-color: #f2f2f2; height: 36px;">26年5月施工进度计划跟踪表</th>
+</tr>
+<tr>
+<th rowspan="2" style="width: 40px;">序号</th>
+<th rowspan="2" style="width: 50px;">楼栋</th>
+<th rowspan="2" style="width: 50px;">部位</th>
+<th rowspan="2" style="width: 220px;">工序</th>
+<th class="header-group-1" colspan="3">一层</th>
+<th class="header-group-2" colspan="3">二层</th>
+<th class="header-group-3" colspan="3">B1层（1）</th>
+<th class="header-group-4" colspan="3">B1层（2）</th>
+</tr>
+<tr>
+<th style="width: 60px;">开始时间</th>
+<th style="width: 60px;">完成时间</th>
+<th style="width: 40px;">日历天</th>
+<th style="width: 60px;">开始时间</th>
+<th style="width: 60px;">完成时间</th>
+<th style="width: 40px;">日历天</th>
+<th style="width: 60px;">开始时间</th>
+<th style="width: 60px;">完成时间</th>
+<th style="width: 40px;">日历天</th>
+<th style="width: 60px;">开始时间</th>
+<th style="width: 60px;">完成时间</th>
+<th style="width: 40px;">日历天</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>食堂</td>
+<td>墙面</td>
+<td>基层钢架（含墙面配管）</td>
+<td>5/5</td>
+<td>5/15</td>
+<td>10</td>
+<td>5/16</td>
+<td>5/31</td>
+<td>15</td>
+<td>4/30</td>
+<td>5/15</td>
+<td>15</td>
+<td>5/31</td>
+<td>6/20</td>
+<td>20</td>
+</tr>
+<tr>
+<td>2</td>
+<td>食堂</td>
+<td>墙面</td>
+<td>墙柱面基层封板</td>
+<td>5/16</td>
+<td>5/23</td>
+<td>7</td>
+<td></td>
+<td></td>
+<td></td>
+<td>5/16</td>
+<td>5/23</td>
+<td>7</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>3</td>
+<td>食堂</td>
+<td>墙面</td>
+<td>墙柱饰面材料深化下单</td>
+<td>5/15</td>
+<td>6/4</td>
+<td>20</td>
+<td>5/25</td>
+<td>6/14</td>
+<td>20</td>
+<td>5/15</td>
+<td>6/4</td>
+<td>20</td>
+<td>5/25</td>
+<td>6/14</td>
+<td>20</td>
+</tr>
+<tr>
+<td>4</td>
+<td>食堂</td>
+<td>墙面</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>5</td>
+<td>食堂</td>
+<td>天花</td>
+<td class="bg-yellow-highlight">1专业管线移交</td>
+<td>3/20</td>
+<td>3/20</td>
+<td>已移交</td>
+<td>4/20</td>
+<td>4/20</td>
+<td>未移交</td>
+<td>4/30</td>
+<td>4/30</td>
+<td>未移交</td>
+<td>4/30</td>
+<td>4/30</td>
+<td>未移交</td>
+</tr>
+<tr>
+<td>6</td>
+<td>食堂</td>
+<td>天花</td>
+<td>2转换钢架造型龙骨及风管定位</td>
+<td>3/21</td>
+<td>4/15</td>
+<td>25</td>
+<td>4/21</td>
+<td>5/11</td>
+<td>20</td>
+<td>5/1</td>
+<td>5/21</td>
+<td>20</td>
+<td>5/11</td>
+<td>5/31</td>
+<td>20</td>
+</tr>
+<tr>
+<td>7</td>
+<td>食堂</td>
+<td>天花</td>
+<td>3龙骨安装、风管追位、其它机电末端定位</td>
+<td>4/8</td>
+<td>4/28</td>
+<td>20</td>
+<td>5/1</td>
+<td>5/26</td>
+<td>25</td>
+<td>5/11</td>
+<td>6/5</td>
+<td>25</td>
+<td>5/21</td>
+<td>6/15</td>
+<td>25</td>
+</tr>
+<tr>
+<td>8</td>
+<td>食堂</td>
+<td>天花</td>
+<td>4天花末端追位</td>
+<td>4/18</td>
+<td>5/8</td>
+<td>20</td>
+<td>5/11</td>
+<td>5/31</td>
+<td>20</td>
+<td>5/26</td>
+<td>6/15</td>
+<td>20</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>9</td>
+<td>食堂</td>
+<td>天花</td>
+<td>5联合隐蔽验收</td>
+<td class="bg-yellow-highlight">5/8</td>
+<td class="bg-yellow-highlight">5/15</td>
+<td class="bg-yellow-highlight">7</td>
+<td class="bg-yellow-highlight"></td>
+<td class="bg-yellow-highlight"></td>
+<td class="bg-yellow-highlight"></td>
+<td class="bg-yellow-highlight"></td>
+<td class="bg-yellow-highlight"></td>
+<td class="bg-yellow-highlight"></td>
+<td class="bg-yellow-highlight"></td>
+<td class="bg-yellow-highlight"></td>
+<td class="bg-yellow-highlight"></td>
+</tr>
+<tr>
+<td>10</td>
+<td>食堂</td>
+<td>天花</td>
+<td>6天花封板</td>
+<td>5/16</td>
+<td>5/31</td>
+<td>15</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>11</td>
+<td>食堂</td>
+<td>天花</td>
+<td>7天花腻子基层及底漆施工（断灰尘）</td>
+<td>5/23</td>
+<td>6/22</td>
+<td>30</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+</main>
+</div>
+</body></html>

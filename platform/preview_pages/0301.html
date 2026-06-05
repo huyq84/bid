@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>项目重要节点一览表</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;700&amp;display=swap" rel="stylesheet"/>
+<style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: 'Noto Sans SC', sans-serif;
+        }
+        .page-frame {
+            width: 1280px;
+            height: 720px;
+            margin: 0 auto;
+            position: relative;
+            overflow: hidden;
+            background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDlJvtY_7AUPuKsXiCEhtVYATG2-6qIX6sfHSb1FPa_IeErSjMOKckXwCnX9LMdQ5YdapTx1jDdlR6CG-f6zliFPjAlvCmrVKjPoVu1YLI-AJfZZgQgmtR9566uMoxPd1ux8K_Lfwb3EmR22THoNSqQ1o7U1BwYYsgNckfrxI9actZBDf3gX7SKU5wSLO9rEb7h5yTd2urOo-BaVF6VybdxEdYXKw7Eub62po0wi5Tc8jyTwo6l5UpxMHRCpV5iD3_a99vMM81GDcs2');
+            background-size: cover;
+            background-position: center;
+        }
+        .header-trapezoid {
+            position: absolute;
+            top: 23px;
+            left: 0;
+            width: 58px;
+            height: 52px;
+            background-color: #37a3eb;
+            clip-path: polygon(0 0, 60% 0, 100% 100%, 0 100%);
+            z-index: 20;
+        }
+        .header-line {
+            position: absolute;
+            top: 75px;
+            left: 72px;
+            width: calc(100% - 72px);
+            height: 3px;
+            background-color: #37a3eb;
+            z-index: 10;
+        }
+        .sub-title-bg {
+            position: absolute;
+            top: 78.5px;
+            left: 72px;
+            width: 320px;
+            height: 38px;
+            background: linear-gradient(to right, #facc15, #f43f5e);
+            z-index: 5;
+        }
+        .sub-title-text {
+            position: absolute;
+            top: 82px;
+            left: 83px;
+            font-size: 22px;
+            font-weight: 700;
+            color: white;
+            letter-spacing: 1px;
+            z-index: 15;
+        }
+        .schedule-table {
+            border-collapse: collapse;
+            width: 100%;
+            background-color: transparent;
+            table-layout: fixed;
+            font-size: 12px;
+        }
+        .schedule-table th, .schedule-table td {
+            border: 1px solid #94a3b8;
+            vertical-align: top;
+            padding: 4px;
+            line-height: 1.5;
+        }
+        .header-cell {
+            background-color: #3b82f6;
+            color: white;
+            text-align: center;
+            font-weight: normal;
+        }
+        .vertical-label {
+            writing-mode: horizontal-tb;
+            text-align: center;
+            vertical-align: middle !important;
+            background-color: #cbd5e1;
+        }
+        .key-node-cell {
+            background-color: #f1f5f9;
+            text-align: center;
+            vertical-align: middle;
+        }
+    </style>
+</head>
+<body>
+<div class="page-frame flex flex-col shadow-2xl">
+<div class="header-trapezoid"></div>
+<div class="header-line"></div>
+<header class="relative w-full pt-6 px-12">
+<div class="absolute top-[21px] left-[72px] text-[36px] font-bold text-[#37a3eb]">项目重要节点一览表</div>
+<div class="sub-title-bg"></div>
+<div class="sub-title-text">项目重要节点</div>
+</header>
+<main class="absolute top-[130px] left-12 right-12 bottom-12 overflow-auto">
+<table class="schedule-table">
+<thead>
+<tr class="header-cell">
+<th class="py-2 text-base" colspan="2">专业/时间</th>
+<th class="py-2 text-base">2026. 3</th>
+<th class="py-2 text-base">2026. 4</th>
+<th class="py-2 text-base">2026. 5</th>
+<th class="py-2 text-base">2026. 6</th>
+<th class="py-2 text-base">2026. 7</th>
+<th class="py-2 text-base">2026. 8</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="vertical-label w-16 text-center align-middle font-semibold" rowspan="2">软装<br/>(清尚)</td>
+<td class="key-node-cell align-middle h-12">关键节点</td>
+<td class="bg-white/40"></td>
+<td class="bg-white/40"></td>
+<td class="bg-white/40"></td>
+<td class="bg-white/40"></td>
+<td class="bg-white/40 text-xs">食堂、健身房、南塔咖啡厅完工</td>
+<td class="bg-white/40 text-xs">北塔高管区完工</td>
+</tr>
+<tr>
+<td class="key-node-cell align-middle py-16">次要节点</td>
+<td class="bg-white/40 text-xs">
+              1、食堂：墙柱面基层封板（5.30）410评审后方案调整；<br/>
+              2、高管：墙面基层施工（3.30）；<br/>
+              3、健身房：墙柱面基层封板（5.30）410评审后方案调整；<br/>
+              4、南塔咖啡厅：样板段评审（3.30）。
+            </td>
+<td class="bg-white/40 text-xs">
+              1、食堂：天花封板（6.15）410评审后开始龙骨施工，2层430机电移交，B1层510机电移交；<br/>
+              2、高管：吊顶造型及龙骨安装（4.30）；<br/>
+              3、健身房：天花封板（6.15）三局机电支架影响吊顶龙骨安装，风管喷淋追位完成后可提前封板；<br/>
+              4、南塔咖啡厅：天花封板（6.15）需幕墙封闭；<br/>
+              5、北塔咖啡厅：基层钢架（6.30）待样板评审完后整体施工。
+            </td>
+<td class="bg-white/40 text-xs">
+              1、食堂：地面混凝土浇筑（6.10）1层天花腻子基层完成后施工；<br/>
+              2、高管：天花封板（6.30）需地暖施工完成后开始；<br/>
+              3、健身房：地面石材铺贴（7.05）天花腻子基层完成后施工；<br/>
+              4、南塔咖啡厅：墙面石材干挂（6.30）天花腻子施工完成开始；<br/>
+              5、北塔咖啡厅：墙柱面基层封板；（7.15）待样板评审完后整体施工。
+            </td>
+<td class="bg-white/40 text-xs">
+              1、食堂：墙柱面饰面板安装、地面石材铺贴（8.30）根据石材大板供应情况分楼层分区域施工；<br/>
+              2、高管：地面面层施工（6.30）；<br/>
+              3、健身房：运动PVC地板（8.10）；<br/>
+              4、南塔咖啡厅：墙面木饰面安装（7.30）；<br/>
+              5、北塔咖啡厅：天花封板（8.15）需根据幕墙封闭时间。
+            </td>
+<td class="bg-white/40 text-xs">
+              1、食堂（9.30）；<br/>
+              2、南北健身房（8.20）；<br/>
+              3、南塔眼睛咖啡厅（8.30）；<br/>
+              4、北塔咖啡厅：墙面石材干挂（8.30）。
+            </td>
+<td class="bg-white/40 text-xs">
+              1、北塔高管区（8.30）<br/>
+              2、北塔咖啡厅：墙面木饰面（9.30）
+            </td>
+</tr>
+</tbody>
+</table>
+</main>
+</div>
+</body></html>

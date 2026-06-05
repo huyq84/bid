@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>百草园周报填报平台</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script src="https://cdn.jsdelivr.net/npm/mockjs@1.1.0/dist/mock-min.js"></script>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans antialiased">
+
+<!-- ===== 顶部 Header ===== -->
+<header class="bg-white border-b border-slate-200 sticky top-0 z-30">
+  <div class="flex items-center h-14 px-4">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-md bg-blue-600 flex items-center justify-center text-white font-bold text-sm">百</div>
+      <div>
+        <div class="text-sm font-semibold text-slate-900 leading-tight">百草园周报填报平台</div>
+        <div class="text-xs text-slate-500 leading-tight">v0.1 · 静态原型</div>
+      </div>
+    </div>
+    <div class="flex-1"></div>
+    <!-- 周期选择 -->
+    <div id="period-selector" class="flex items-center gap-2 mr-4">
+      <span class="text-xs text-slate-500">周期</span>
+      <select id="period-select" class="text-sm border border-slate-300 rounded px-2 py-1 bg-white"></select>
+    </div>
+    <!-- 项目选择 -->
+    <div class="flex items-center gap-2 mr-4">
+      <span class="text-xs text-slate-500">项目</span>
+      <select id="project-select" class="text-sm border border-slate-300 rounded px-2 py-1 bg-white">
+        <option value="baicaoyuan">百草园城市更新项目</option>
+      </select>
+    </div>
+    <!-- 顶部操作 -->
+    <div class="flex items-center gap-2">
+      <button id="btn-rebuild-ai" class="text-sm px-3 py-1.5 rounded border border-blue-200 text-blue-700 hover:bg-blue-50">
+        <span class="inline-block align-middle">⚙</span> 重新生成 AI 草稿
+      </button>
+      <button id="btn-preview" class="text-sm px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700">
+        👁 预览 12 页周报
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- ===== 主体 ===== -->
+<div class="flex min-h-[calc(100vh-3.5rem)]">
+  <!-- 左侧章节导航 -->
+  <aside class="w-60 border-r border-slate-200 bg-white">
+    <nav id="section-nav" class="p-3 space-y-1"></nav>
+  </aside>
+
+  <!-- 主区 -->
+  <main class="flex-1 p-6 overflow-auto">
+    <!-- 异常条幅（仅在异常时显示） -->
+    <div id="anomaly-banner"></div>
+
+    <!-- 章节内容 -->
+    <div id="section-content"></div>
+  </main>
+</div>
+
+<!-- ===== Toast 容器 ===== -->
+<div id="toast-container" class="fixed top-4 right-4 z-50 space-y-2"></div>
+
+<!-- ===== 顶部 12 页导航（点击 12 章节切换预览）====== -->
+<div id="preview-bar" class="hidden"></div>
+
+<!-- Scripts -->
+<script src="js/store.js"></script>
+<script src="js/llm.js"></script>
+<script src="js/rules.js"></script>
+<script src="js/sections/s01_cover.js"></script>
+<script src="js/sections/s02_toc.js"></script>
+<script src="js/sections/s03_roster.js"></script>
+<script src="js/sections/s0301_milestones.js"></script>
+<script src="js/sections/s04_work_done.js"></script>
+<script src="js/sections/s05_photos.js"></script>
+<script src="js/sections/s06_labor.js"></script>
+<script src="js/sections/s07_ecc.js"></script>
+<script src="js/sections/s08_design.js"></script>
+<script src="js/sections/s09_plan.js"></script>
+<script src="js/sections/s10_sections.js"></script>
+<script src="js/sections/s11_schedule.js"></script>
+<script src="js/sections/s12_coord.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

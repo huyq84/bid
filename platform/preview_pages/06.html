@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Construction Project Weekly Report - Personnel Statistics</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;700&amp;display=swap" rel="stylesheet"/>
+<style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: 'Noto Sans SC', sans-serif;
+        }
+        .page-frame {
+            width: 1280px;
+            height: 720px;
+            margin: 0 auto;
+            position: relative;
+            overflow: hidden;
+            background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDU7TNGR4ZJY5NZVDW3aB8gF9SHDwPneMmddwrOjAxHBWqpUPiPdY89DYLUyK_54gXXl48u-hZjJOlbG-ns0TlIAye7h28-NiasmCXz-woi3snea7cnVd43oJ7zelocgplpYDU2mbV_vNZEGXRhTgmiyDEF740qKNVH593gybowebimS4ghYOaH8nbqhDYy6NfZOxIQRXBfSi6stcNqvTmfkt92ue4ytdj6ifulMPUBcXoRFqe3YPQ2VJZfthXxI7a7EVBA3xzNe7xh');
+            background-size: cover;
+            background-position: center;
+        }
+        .header-trapezoid {
+            position: absolute;
+            top: 23px;
+            left: 0;
+            width: 58px;
+            height: 52px;
+            background-color: #37a3eb;
+            clip-path: polygon(0 0, 60% 0, 100% 100%, 0 100%);
+            z-index: 20;
+        }
+        .header-line {
+            position: absolute;
+            top: 75px;
+            left: 72px;
+            width: calc(100% - 72px);
+            height: 3px;
+            background-color: #37a3eb;
+            z-index: 10;
+        }
+        .sub-title-bg {
+            position: absolute;
+            top: 78.5px;
+            left: 72px;
+            width: 285px;
+            height: 38px;
+            background: linear-gradient(to right, #facc15, #f43f5e);
+            z-index: 5;
+        }
+        .sub-title-text {
+            position: absolute;
+            top: 82px;
+            left: 83px;
+            font-size: 22px;
+            font-weight: 700;
+            color: white;
+            letter-spacing: 1px;
+            z-index: 15;
+        }
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+        .data-table th,
+        .data-table td {
+            padding: 4px 2px;
+            text-align: center;
+            border-right: 1px solid #005e00;
+            border-bottom: 1px solid #005e00;
+            font-size: 12px;
+            vertical-align: middle;
+        }
+        .data-table th:last-child,
+        .data-table td:last-child {
+            border-right: none;
+        }
+        .data-table thead th {
+            background-color: #00a2ff;
+            color: white;
+            font-weight: 700;
+            border-bottom: 2px solid #005e00;
+        }
+        .data-table tbody tr:nth-child(odd) {
+            background-color: #cbe0ff;
+        }
+        .data-table tbody tr:nth-child(even) {
+            background-color: #e7f0ff;
+        }
+        .data-table tfoot td {
+            background-color: rgba(0, 162, 255, 0.1);
+            font-weight: 700;
+            color: #000000;
+            border-top: 2px solid #005e00;
+        }
+    </style>
+</head>
+<body>
+<div class="page-frame flex flex-col shadow-2xl">
+<div class="header-trapezoid"></div>
+<div class="header-line"></div>
+<header class="relative w-full pt-6 px-12">
+<div class="absolute top-[21px] left-[72px] text-[36px] font-bold text-[#37a3eb]">二、上周工作</div>
+<div class="sub-title-bg"></div>
+<div class="sub-title-text">2.12 现场工作：人员统计</div>
+</header>
+<main class="flex-grow flex flex-col px-12 pt-28 pb-8 relative">
+<div class="flex flex-grow gap-6 h-full overflow-hidden">
+<div class="w-1/2 flex flex-col gap-4">
+<div class="bg-white p-2 border border-outline-variant rounded-sm relative overflow-hidden group">
+<img alt="Construction Site Overview" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC5hPeGi9yCv4HmXwvWtxhUc9zkVkvwPJLPEcJVOJGmxgZS6TIzAyA0cBqGfqRQBPrstzdEoLuT118wOpHNWGd_wixV3D6buJp_lIp-j4WTJxyTtEXzfgIBrhFToLSTJm8LWfn54ELU2ZgSEYM4cxrxVH-oZYi2nZ4exXlVjnsAuLwVXYDwPGOcTZ3b-XTXriijkozSqnJF9A8u9_hlrjj8sWpkFhOkSKj_tXPtlz7Ml9kUaYk5DIOvYn_dcobqqSIPUIEZTlXHj5kM"/>
+</div>
+<div class="text-white py-2 px-6 text-center text-base font-bold" style="background-color: #48a0f8; width: fit-content; margin: 0 auto;">
+                            防高坠专项安全会
+                        </div>
+</div>
+<div class="w-1/2 flex flex-col">
+<div class="bg-white border border-[#005e00] shadow-sm overflow-hidden">
+<table class="data-table">
+<thead>
+<tr>
+<th>序号</th>
+<th>工种</th>
+<th>本周人数</th>
+<th>下周人数</th>
+</tr>
+</thead>
+<tbody>
+<tr><td>1</td><td>5S小队</td><td>15</td><td>16</td></tr>
+<tr><td>2</td><td>电工</td><td>5</td><td>5</td></tr>
+<tr><td>3</td><td>电焊工</td><td>13</td><td>13</td></tr>
+<tr><td>4</td><td>工长</td><td>8</td><td>8</td></tr>
+<tr><td>5</td><td>库管</td><td>1</td><td>1</td></tr>
+<tr><td>6</td><td>临电专员</td><td>1</td><td>1</td></tr>
+<tr><td>7</td><td>木工</td><td>87</td><td>90</td></tr>
+<tr><td>8</td><td>水工</td><td>35</td><td>35</td></tr>
+<tr><td>9</td><td>瓦工</td><td>14</td><td>14</td></tr>
+<tr><td>10</td><td>普工</td><td>22</td><td>22</td></tr>
+<tr><td>11</td><td>油工</td><td>10</td><td>14</td></tr>
+<tr><td>12</td><td>防水工</td><td>2</td><td>2</td></tr>
+<tr><td>13</td><td>管理人员</td><td>23</td><td>23</td></tr>
+<tr><td>14</td><td>室内电梯司机</td><td>2</td><td>2</td></tr>
+</tbody>
+<tfoot>
+<tr><td>15</td><td>合计</td><td>238</td><td>246</td></tr>
+</tfoot>
+</table>
+</div>
+<div class="text-white py-2 px-6 text-center text-base font-bold mt-4" style="background-color: #48a0f8; width: fit-content; margin-left: auto; margin-right: auto;">
+                            全部人员在场情况
+                        </div>
+</div>
+</div>
+</main>
+</div>
+</body></html>

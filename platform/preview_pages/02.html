@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-width=1.0" name="viewport"/>
+<title>目录</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<style data-purpose="custom-fonts">
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;700&display=swap');
+    body {
+      font-family: 'Noto Sans SC', sans-serif;
+    }
+  </style>
+<style data-purpose="layout">
+    .slide-container {
+      width: 1280px;
+      height: 720px;
+      background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDU7TNGR4ZJY5NZVDW3aB8gF9SHDwPneMmddwrOjAxHBWqpUPiPdY89DYLUyK_54gXXl48u-hZjJOlbG-ns0TlIAye7h28-NiasmCXz-woi3snea7cnVd43oJ7zelocgplpYDU2mbV_vNZEGXRhTgmiyDEF740qKNVH593gybowebimS4ghYOaH8nbqhDYy6NfZOxIQRXBfSi6stcNqvTmfkt92ue4ytdj6ifulMPUBcXoRFqe3YPQ2VJZfthXxI7a7EVBA3xzNe7xh');
+      background-size: cover;
+      background-position: center;
+      position: relative;
+      overflow: hidden;
+      margin: 0 auto;
+    }
+  </style>
+<style data-purpose="header-styles">
+    .header-trapezoid {
+      width: 58px;
+      height: 52px;
+      background-color: #37a3eb;
+      clip-path: polygon(0 0, 60% 0, 100% 100%, 0 100%);
+      position: absolute;
+      top: 23px;
+      left: 0;
+    }
+    .header-line {
+      position: absolute;
+      top: 75px;
+      left: 72px;
+      width: calc(100% - 72px);
+      height: 3px;
+      background-color: #37a3eb;
+    }
+    .main-title {
+      position: absolute;
+      top: 21px;
+      left: 72px;
+      font-size: 36px;
+      font-weight: 700;
+      color: #37a3eb;
+      letter-spacing: 2px;
+    }
+
+  </style>
+<style data-purpose="toc-styles">
+    .toc-container {
+      position: absolute;
+      top: 126px;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 40px;
+    }
+    .toc-title {
+      font-size: 48px;
+      font-weight: 700;
+      color: #00a2ff;
+      margin-bottom: 40px;
+      letter-spacing: 8px;
+    }
+    .toc-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      width: 100%;
+      max-width: 600px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .toc-item {
+      display: flex;
+      align-items: center;
+      width: 100%;
+    }
+    .toc-hexagon {
+      clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+      width: 56px;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #00a2ff;
+      color: white;
+      font-weight: bold;
+      font-size: 1.1rem;
+      z-index: 10;
+      box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+    }
+    .toc-bar {
+      flex-grow: 1;
+      height: 44px;
+      background: #f5f5f3;
+      margin-left: -12px;
+      padding-left: 32px;
+      display: flex;
+      align-items: center;
+      border-radius: 2px;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+    }
+    .toc-chapter {
+      font-size: 18px;
+      font-weight: 600;
+      color: #00a2ff;
+      margin-right: 16px;
+    }
+    .toc-name {
+      font-size: 18px;
+      font-weight: 600;
+      color: #374151;
+    }
+  </style>
+</head>
+<body class="flex items-center justify-center min-h-screen bg-gray-900">
+<!-- BEGIN: Main Slide Container -->
+<div class="slide-container">
+<!-- BEGIN: Header Section -->
+<div class="header-trapezoid"></div>
+<div class="header-line"></div>
+<div class="main-title">目录/Contents</div>
+<!-- END: Header Section -->
+<!-- BEGIN: TOC Section -->
+<div class="toc-container">
+<div class="toc-title">目录</div>
+<ul class="toc-list">
+<li class="toc-item">
+  <div class="toc-hexagon">1</div>
+  <div class="toc-bar"><span class="toc-chapter">第一章</span><span class="toc-name">组织架构</span></div>
+</li>
+<li class="toc-item">
+  <div class="toc-hexagon">2</div>
+  <div class="toc-bar"><span class="toc-chapter">第二章</span><span class="toc-name">上周工作</span></div>
+</li>
+<li class="toc-item">
+  <div class="toc-hexagon">3</div>
+  <div class="toc-bar"><span class="toc-chapter">第三章</span><span class="toc-name">下周计划</span></div>
+</li>
+<li class="toc-item">
+  <div class="toc-hexagon">4</div>
+  <div class="toc-bar"><span class="toc-chapter">第四章</span><span class="toc-name">工作计划</span></div>
+</li>
+<li class="toc-item">
+  <div class="toc-hexagon">5</div>
+  <div class="toc-bar"><span class="toc-chapter">第五章</span><span class="toc-name">协调事宜</span></div>
+</li>
+</ul>
+</div>
+<!-- END: TOC Section -->
+</div>
+<!-- END: Main Slide Container -->
+</body></html>

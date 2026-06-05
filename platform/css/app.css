@@ -1,0 +1,305 @@
+/* 百草园周报填报平台 - 应用样式
+   主题：中性灰 + 蓝，let data lead */
+
+/* ===== 通用 ===== */
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+
+/* ===== 章节导航 ===== */
+.section-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  color: #334155;
+  cursor: pointer;
+}
+.section-nav-item:hover { background-color: #f1f5f9; }
+.section-nav-item.active {
+  background-color: #dbeafe;
+  color: #1d4ed8;
+  font-weight: 500;
+}
+.section-nav-item .badge {
+  margin-left: auto;
+  font-size: 10px;
+  padding: 0 6px;
+  border-radius: 9999px;
+}
+
+/* ===== 组标题（可折叠）===== */
+.section-nav-group-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  color: #1e293b;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.15s;
+}
+.section-nav-group-header:hover { background-color: #e2e8f0; }
+.section-nav-group-header.active {
+  background-color: #dbeafe;
+  color: #1d4ed8;
+}
+.section-nav-group-header .toggle-icon {
+  font-size: 0.6rem;
+  color: #94a4c8;
+  transition: transform 0.2s ease;
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.section-nav-group-header .toggle-icon.expanded {
+  transform: rotate(0deg);
+}
+.section-nav-group-header .toggle-icon.collapsed {
+  transform: rotate(-90deg);
+}
+
+/* 子项目列表 */
+.section-nav-children {
+  overflow: hidden;
+  transition: max-height 0.25s ease-out, opacity 0.2s ease;
+}
+.section-nav-children.collapsed {
+  max-height: 0 !important;
+  opacity: 0;
+}
+.section-nav-children.expanded {
+  opacity: 1;
+}
+.section-nav-children.collapsing {
+  opacity: 0;
+}
+
+/* 单独页（无子项）*/
+.section-nav-item.pl-8 {
+  padding-left: 2rem;
+}
+
+/* ===== 章节卡片 ===== */
+.section-card {
+  background-color: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+.section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+.section-body { padding: 1rem; }
+
+/* ===== 表单 ===== */
+.form-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #475569;
+  margin-bottom: 0.25rem;
+}
+.form-input {
+  width: 100%;
+  font-size: 0.875rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.375rem;
+  padding: 0.375rem 0.625rem;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  background-color: #fff;
+}
+.form-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 1px #3b82f6;
+}
+.form-select {
+  width: 100%;
+  font-size: 0.875rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.375rem;
+  padding: 0.375rem 0.5rem;
+  background-color: #fff;
+  outline: none;
+  appearance: auto;
+}
+.form-select:focus { border-color: #3b82f6; }
+.dt-table .form-input, .dt-table .form-select { min-width: 60px; }
+
+/* ===== 按钮 ===== */
+.btn-primary, .btn-ghost, .btn-ai {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+.btn-primary {
+  background-color: #2563eb;
+  color: #fff;
+}
+.btn-primary:hover { background-color: #1d4ed8; }
+.btn-primary:disabled { background-color: #cbd5e1; cursor: not-allowed; }
+.btn-ghost {
+  background-color: #fff;
+  color: #334155;
+  border-color: #cbd5e1;
+}
+.btn-ghost:hover { background-color: #f8fafc; }
+.btn-ai {
+  background-color: #fff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+}
+.btn-ai:hover { background-color: #eff6ff; }
+
+/* ===== 异常卡 ===== */
+.anomaly-card {
+  border-left: 4px solid;
+  border-radius: 0 0.375rem 0.375rem 0;
+  padding: 0.75rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+.anomaly-card.red    { border-color: #f87171; background-color: #fef2f2; }
+.anomaly-card.yellow { border-color: #fbbf24; background-color: #fffbeb; }
+.anomaly-card.blue   { border-color: #38bdf8; background-color: #f0f9ff; }
+.anomaly-card .level {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0 6px;
+  border-radius: 0.25rem;
+}
+.anomaly-card.red .level    { background-color: #fecaca; color: #991b1b; }
+.anomaly-card.yellow .level { background-color: #fde68a; color: #92400e; }
+.anomaly-card.blue .level   { background-color: #bae6fd; color: #075985; }
+
+/* ===== 录入 Tab ===== */
+.input-tabs {
+  display: flex;
+  border-bottom: 1px solid #e2e8f0;
+  margin-bottom: 0.75rem;
+}
+.input-tab {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+  color: #475569;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+.input-tab:hover { color: #0f172a; }
+.input-tab.active {
+  color: #1d4ed8;
+  border-bottom-color: #2563eb;
+  font-weight: 500;
+}
+
+/* ===== 表格 ===== */
+.dt-table {
+  width: 100%;
+  font-size: 0.875rem;
+  border-collapse: collapse;
+}
+.dt-table th, .dt-table td {
+  border: 1px solid #e2e8f0;
+  padding: 0.375rem 0.5rem;
+  text-align: left;
+}
+.dt-table th {
+  background-color: #f1f5f9;
+  font-weight: 500;
+  color: #334155;
+}
+.dt-table tbody tr:hover { background-color: #f8fafc; }
+
+/* ===== 进度条 (用于 09 章节) ===== */
+.progress-cell {
+  height: 1.5rem;
+  border: 1px solid #e2e8f0;
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+.progress-cell .progress-fill {
+  height: 100%;
+  background-color: #3b82f6;
+}
+.progress-cell .hidden { display: none; }
+
+/* ===== Toast ===== */
+.toast {
+  background-color: #0f172a;
+  color: #fff;
+  font-size: 0.875rem;
+  border-radius: 0.375rem;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+  padding: 0.5rem 1rem;
+  animation: slideInRight 0.3s ease-out;
+}
+.toast.success { background-color: #059669; }
+.toast.error   { background-color: #dc2626; }
+@keyframes slideInRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+/* ===== 上传区 ===== */
+.upload-zone {
+  border: 2px dashed #cbd5e1;
+  border-radius: 0.5rem;
+  padding: 1.5rem;
+  text-align: center;
+  color: #64748b;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.upload-zone:hover {
+  border-color: #60a5fa;
+  background-color: rgba(239,246,255,0.3);
+}
+
+/* ===== 楼层图标注 ===== */
+.floor-annot-wrap {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+  height: 100%;
+}
+.floor-annot-wrap .marker {
+  position: absolute;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-left: -0.75rem;
+  margin-top: -0.75rem;
+  border-radius: 9999px;
+  background-color: rgba(37, 99, 235, 0.8);
+  color: #fff;
+  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}

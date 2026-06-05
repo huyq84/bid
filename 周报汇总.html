@@ -1,0 +1,1177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <title>百草园城市更新项目 - 周报汇总</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;700&amp;display=swap" rel="stylesheet"/>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #1a1a2e;
+            min-height: 100vh;
+            font-family: 'Noto Sans SC', 'Microsoft YaHei', 'PingFang SC', sans-serif;
+        }
+        .nav-container {
+            background: linear-gradient(135deg, #16213e 0%, #0f3460 100%);
+            padding: 12px 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: center;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .nav-button {
+            padding: 8px 16px;
+            background: linear-gradient(135deg, #37a3eb 0%, #2563eb 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'Noto Sans SC', sans-serif;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-width: 100px;
+        }
+        .nav-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(55, 163, 235, 0.4);
+        }
+        .nav-button.active {
+            background: linear-gradient(135deg, #f43f5e 0%, #facc15 100%);
+            color: #1a1a2e;
+            font-weight: bold;
+        }
+        .content-container {
+            display: flex;
+            justify-content: center;
+            padding: 20px;
+        }
+        .page-wrapper {
+            display: none;
+        }
+        .page-wrapper.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+<div class="nav-container">
+    <button class="nav-button active" onclick="showPage('page01')">01 封面</button>
+    <button class="nav-button" onclick="showPage('page02')">02 目录</button>
+    <button class="nav-button" onclick="showPage('page03')">03 管理人员</button>
+    <button class="nav-button" onclick="showPage('page0301')">0301 重要节点</button>
+    <button class="nav-button" onclick="showPage('page04')">04 工作完成</button>
+    <button class="nav-button" onclick="showPage('page05')">05 工作现场</button>
+    <button class="nav-button" onclick="showPage('page06')">06 人员统计</button>
+    <button class="nav-button" onclick="showPage('page07')">07 ECC销项</button>
+    <button class="nav-button" onclick="showPage('page08')">08 图纸深化</button>
+    <button class="nav-button" onclick="showPage('page09')">09 周计划</button>
+    <button class="nav-button" onclick="showPage('page10')">10 施工段划分</button>
+    <button class="nav-button" onclick="showPage('page11')">11 施工段计划</button>
+    <button class="nav-button" onclick="showPage('page12')">12 协调事宜</button>
+</div>
+<div class="content-container">
+
+<!-- 01封面 -->
+<div id="page01" class="page-wrapper active">
+<div class="main-container bg-white" data-purpose="report-cover" style="width: 1280px; height: 720px; position: relative; overflow: hidden; background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuC7Kq2A2iTUUneEJe_CXRN_OIwQFLIPa5fiHmABzLcb4EVS2a-ZD4AiEPowL0dHNoQC9G-Kx233VJsz6wRwz10Slodu2nTNCxkhAvP4RsOhsus_GfxRzHKyXX_DFqi8nv6HEWP1IZSFgMd2PnJFf1YUFhWv4yBKYh_Ey2ZK8-U_uO089NWr65uzL3gBqsFB_FjCtEnmP9VbtbpYRlVKZN0rmI8rxEi7waCilqgboCfncydeLx7G5WUl5E69lSgg4rzljeUoFqKaQcBN'); background-size: cover; background-position: center center; background-repeat: no-repeat;">
+<div class="content-wrapper h-full" style="position: relative; z-index: 10; height: 100%; display: flex; flex-direction: column;">
+<header class="pt-8 px-12 shrink-0" data-purpose="header-brand">
+<div class="flex items-center gap-4">
+<h1 class="text-[#0081cc] text-2xl font-bold tracking-widest">中建三局集团（深圳）有限公司</h1>
+<div class="flex-grow h-4 bg-[#00adef] mt-1 ml-2"></div>
+</div>
+</header>
+<section class="flex-grow flex items-center justify-center relative" data-purpose="title-section">
+<div class="w-full bg-[#00adef] py-16 px-12 relative overflow-hidden flex flex-col items-center justify-center shadow-lg">
+<div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
+<div class="relative z-10 text-center">
+<h2 class="text-white text-6xl font-bold tracking-[0.2em] mb-4 drop-shadow-md">百草园城市更新项目</h2>
+<h3 class="text-yellow-400 text-6xl font-bold tracking-[0.2em] drop-shadow-md">工作周报</h3>
+</div>
+<div class="absolute bottom-6 right-12 text-right z-10">
+<p class="text-white text-xl font-bold mb-1"><span class="text-yellow-400">汇报单位：</span><span class="text-yellow-400">北京清尚</span></p>
+<p class="text-yellow-400 text-xl font-bold tracking-wider">2026.5.18</p>
+</div>
+</div>
+</section>
+<footer class="pb-8 px-12 shrink-0" data-purpose="footer-brand">
+<div class="flex items-end justify-between">
+<div class="w-2/3 h-4 bg-[#00adef] mb-2"></div>
+<div class="text-right">
+<p class="text-[#005596] text-3xl font-black italic tracking-tighter" style="font-family: 'Kaiti', 'STKaiti', serif;">敢為天下先 永遠争第一</p>
+</div>
+</div>
+</footer>
+</div>
+</div>
+</div>
+
+<!-- 02目录 -->
+<div id="page02" class="page-wrapper">
+<div class="slide-container" style="width: 1280px; height: 720px; background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDU7TNGR4ZJY5NZVDW3aB8gF9SHDwPneMmddwrOjAxHBWqpUPiPdY89DYLUyK_54gXXl48u-hZjJOlbG-ns0TlIAye7h28-NiasmCXz-woi3snea7cnVd43oJ7zelocgplpYDU2mbV_vNZEGXRhTgmiyDEF740qKNVH593gybowebimS4ghYOaH8nbqhDYy6NfZOxIQRXBfSi6stcNqvTmfkt92ue4ytdj6ifulMPUBcXoRFqe3YPQ2VJZfthXxI7a7EVBA3xzNe7xh'); background-size: cover; background-position: center; position: relative; overflow: hidden; margin: 0 auto;">
+<div class="header-trapezoid" style="width: 58px; height: 52px; background-color: #37a3eb; clip-path: polygon(0 0, 60% 0, 100% 100%, 0 100%); position: absolute; top: 23px; left: 0;"></div>
+<div class="header-line" style="position: absolute; top: 75px; left: 72px; width: calc(100% - 72px); height: 3px; background-color: #37a3eb;"></div>
+<div class="main-title" style="position: absolute; top: 21px; left: 72px; font-size: 36px; font-weight: 700; color: #37a3eb; letter-spacing: 2px;">目录/Contents</div>
+<div class="toc-container" style="position: absolute; top: 126px; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 40px;">
+<div class="toc-title" style="font-size: 48px; font-weight: 700; color: #00a2ff; margin-bottom: 40px; letter-spacing: 8px;">目录</div>
+<ul class="toc-list" style="list-style: none; padding: 0; margin: 0; width: 100%; max-width: 600px; display: flex; flex-direction: column; gap: 16px;">
+<li class="toc-item" style="display: flex; align-items: center; width: 100%;">
+  <div class="toc-hexagon" style="clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%); width: 56px; height: 48px; display: flex; align-items: center; justify-content: center; background: #00a2ff; color: white; font-weight: bold; font-size: 1.1rem; z-index: 10; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">1</div>
+  <div class="toc-bar" style="flex-grow: 1; height: 44px; background: #f5f5f3; margin-left: -12px; padding-left: 32px; display: flex; align-items: center; border-radius: 2px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);"><span class="toc-chapter" style="font-size: 18px; font-weight: 600; color: #00a2ff; margin-right: 16px;">第一章</span><span class="toc-name" style="font-size: 18px; font-weight: 600; color: #374151;">组织架构</span></div>
+</li>
+<li class="toc-item" style="display: flex; align-items: center; width: 100%;">
+  <div class="toc-hexagon" style="clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%); width: 56px; height: 48px; display: flex; align-items: center; justify-content: center; background: #00a2ff; color: white; font-weight: bold; font-size: 1.1rem; z-index: 10; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">2</div>
+  <div class="toc-bar" style="flex-grow: 1; height: 44px; background: #f5f5f3; margin-left: -12px; padding-left: 32px; display: flex; align-items: center; border-radius: 2px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);"><span class="toc-chapter" style="font-size: 18px; font-weight: 600; color: #00a2ff; margin-right: 16px;">第二章</span><span class="toc-name" style="font-size: 18px; font-weight: 600; color: #374151;">上周工作</span></div>
+</li>
+<li class="toc-item" style="display: flex; align-items: center; width: 100%;">
+  <div class="toc-hexagon" style="clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%); width: 56px; height: 48px; display: flex; align-items: center; justify-content: center; background: #00a2ff; color: white; font-weight: bold; font-size: 1.1rem; z-index: 10; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">3</div>
+  <div class="toc-bar" style="flex-grow: 1; height: 44px; background: #f5f5f3; margin-left: -12px; padding-left: 32px; display: flex; align-items: center; border-radius: 2px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);"><span class="toc-chapter" style="font-size: 18px; font-weight: 600; color: #00a2ff; margin-right: 16px;">第三章</span><span class="toc-name" style="font-size: 18px; font-weight: 600; color: #374151;">下周计划</span></div>
+</li>
+<li class="toc-item" style="display: flex; align-items: center; width: 100%;">
+  <div class="toc-hexagon" style="clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%); width: 56px; height: 48px; display: flex; align-items: center; justify-content: center; background: #00a2ff; color: white; font-weight: bold; font-size: 1.1rem; z-index: 10; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">4</div>
+  <div class="toc-bar" style="flex-grow: 1; height: 44px; background: #f5f5f3; margin-left: -12px; padding-left: 32px; display: flex; align-items: center; border-radius: 2px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);"><span class="toc-chapter" style="font-size: 18px; font-weight: 600; color: #00a2ff; margin-right: 16px;">第四章</span><span class="toc-name" style="font-size: 18px; font-weight: 600; color: #374151;">工作计划</span></div>
+</li>
+<li class="toc-item" style="display: flex; align-items: center; width: 100%;">
+  <div class="toc-hexagon" style="clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%); width: 56px; height: 48px; display: flex; align-items: center; justify-content: center; background: #00a2ff; color: white; font-weight: bold; font-size: 1.1rem; z-index: 10; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">5</div>
+  <div class="toc-bar" style="flex-grow: 1; height: 44px; background: #f5f5f3; margin-left: -12px; padding-left: 32px; display: flex; align-items: center; border-radius: 2px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);"><span class="toc-chapter" style="font-size: 18px; font-weight: 600; color: #00a2ff; margin-right: 16px;">第五章</span><span class="toc-name" style="font-size: 18px; font-weight: 600; color: #374151;">协调事宜</span></div>
+</li>
+</ul>
+</div>
+</div>
+</div>
+
+<!-- 03管理人员 -->
+<div id="page03" class="page-wrapper">
+<main class="w-[1280px] h-[720px] bg-white relative overflow-hidden" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuC33aleAA7ZoLu9ZbiUKep4BRIuVcySJXBh6PM3W4gsjd_Pp9qEZr3txPQrhUW1KUtf0n2EhipZl4CxV5bo6CCUkrneoawNf6LZ6fm08WimFC-fImyhDy7aD9AruK5LlG07aoBM2c3ABUzB9qpNyU2GVX0cwVUMgqYGXD6yRpDBfrlffxrbLjONVMTAgpBA4aGixiaerJ2s7PPk-c529TzGE_Tm3wFzFByhz8aT0loD6oHPXZrLuD0LwJfoWbQRDXuYJCNRGcac2KcJ'); background-size: 100% 100%;">
+<header class="relative w-full" data-purpose="page-header">
+<div class="header-trapezoid" style="position: absolute; top: 23px; left: 0; width: 58px; height: 52px; background-color: #37a3eb; clip-path: polygon(0 0, 70% 0, 100% 100%, 0 100%);"></div>
+<div class="header-line" style="position: absolute; top: 75px; left: 72px; width: calc(100% - 72px); height: 3px; background-color: #37a3eb;"></div>
+<div class="sub-title-bg" style="position: absolute; top: 78.5px; left: 72px; width: 285px; height: 38px; background: linear-gradient(90deg, #ffd93d 0%, #ff4d4d 100%); display: flex; align-items: center; justify-content: center;"></div>
+<div class="absolute top-5 left-[72px]">
+<h1 class="text-3xl font-bold text-[#37a3eb]">一、组织架构</h1>
+</div>
+<div class="absolute top-[82px] left-[72px]">
+<span class="text-white font-bold text-lg tracking-wider">到岗管理人员名单</span>
+</div>
+</header>
+<div class="absolute top-[130px] left-8 right-8 bottom-8 overflow-auto">
+<div class="grid grid-cols-12 gap-8 h-full">
+<section class="col-span-7">
+<div class="overflow-hidden border border-gray-300 rounded-lg shadow-md bg-white">
+<table class="w-full text-xs text-center border-collapse">
+<thead class="bg-gray-100 text-gray-700 font-bold border-b border-gray-300">
+<tr>
+<th class="py-1 border-r border-gray-300 w-12">序号</th>
+<th class="py-1 border-r border-gray-300">职务</th>
+<th class="py-1 border-r border-gray-300">姓名</th>
+<th class="py-1 border-r border-gray-300">联系电话</th>
+<th class="py-1">是否到岗</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-gray-200">
+<tr class="hover:bg-blue-50"><td class="py-0.5 border-r border-gray-200">1</td><td class="py-0.5 border-r border-gray-200">项目经理</td><td class="py-0.5 border-r border-gray-200">侯 帅</td><td class="py-0.5 border-r border-gray-200">13051103313</td><td class="py-0.5 text-black font-medium">已到岗</td></tr>
+<tr class="bg-gray-50 hover:bg-blue-50"><td class="py-0.5 border-r border-gray-200">2</td><td class="py-0.5 border-r border-gray-200">项目技术负责人兼深化设计负责人</td><td class="py-0.5 border-r border-gray-200">王 健</td><td class="py-0.5 border-r border-gray-200">13818589201</td><td class="py-0.5 text-black font-medium">已到岗</td></tr>
+<tr class="hover:bg-blue-50"><td class="py-0.5 border-r border-gray-200">3</td><td class="py-0.5 border-r border-gray-200">计划经理</td><td class="py-0.5 border-r border-gray-200">陈 冲</td><td class="py-0.5 border-r border-gray-200">13651007882</td><td class="py-0.5 text-black font-medium">已到岗</td></tr>
+<tr class="bg-gray-50 hover:bg-blue-50"><td class="py-0.5 border-r border-gray-200">4</td><td class="py-0.5 border-r border-gray-200">生产经理（软装）</td><td class="py-0.5 border-r border-gray-200">王亚广</td><td class="py-0.5 border-r border-gray-200">15910813359</td><td class="py-0.5 text-black font-medium">已到岗</td></tr>
+<tr class="hover:bg-blue-50"><td class="py-0.5 border-r border-gray-200">5</td><td class="py-0.5 border-r border-gray-200">生产经理（精装）</td><td class="py-0.5 border-r border-gray-200">鲍永春</td><td class="py-0.5 border-r border-gray-200">13382510829</td><td class="py-0.5 text-black font-medium">已到岗</td></tr>
+<tr class="bg-gray-50 hover:bg-blue-50"><td class="py-0.5 border-r border-gray-200">6</td><td class="py-0.5 border-r border-gray-200">生产经理（机电）</td><td class="py-0.5 border-r border-gray-200">袁永超</td><td class="py-0.5 border-r border-gray-200">18900125480</td><td class="py-0.5 text-black font-medium">已到岗</td></tr>
+<tr class="hover:bg-blue-50"><td class="py-0.5 border-r border-gray-200">7</td><td class="py-0.5 border-r border-gray-200">深化设计经理（软装）</td><td class="py-0.5 border-r border-gray-200">李 欢</td><td class="py-0.5 border-r border-gray-200">17310298646</td><td class="py-0.5 text-black font-medium">已到岗</td></tr>
+<tr class="bg-gray-50 hover:bg-blue-50"><td class="py-0.5 border-r border-gray-200">8</td><td class="py-0.5 border-r border-gray-200">深化设计（软装）</td><td class="py-0.5 border-r border-gray-200">乔志广</td><td class="py-0.5 border-r border-gray-200">13939996372</td><td class="py-0.5 text-black font-medium">已到岗</td></tr>
+<tr class="hover:bg-blue-50"><td class="py-0.5 border-r border-gray-200">9</td><td class="py-0.5 border-r border-gray-200">深化设计（软装）</td><td class="py-0.5 border-r border-gray-200">李水旺</td><td class="py-0.5 border-r border-gray-200">18310163008</td><td class="py-0.5 text-black font-medium">已到岗</td></tr>
+<tr class="bg-gray-50 hover:bg-blue-50"><td class="py-0.5 border-r border-gray-200">10</td><td class="py-0.5 border-r border-gray-200">深化设计（软装）</td><td class="py-0.5 border-r border-gray-200">赵晨星</td><td class="py-0.5 border-r border-gray-200">15011544879</td><td class="py-0.5 text-black font-medium">已到岗</td></tr>
+<tr class="hover:bg-blue-50"><td class="py-0.5 border-r border-gray-200">11</td><td class="py-0.5 border-r border-gray-200">深化设计（软装）</td><td class="py-0.5 border-r border-gray-200">龙 方</td><td class="py-0.5 border-r border-gray-200">13974050351</td><td class="py-0.5 text-black font-medium">已到岗</td></tr>
+<tr class="bg-gray-50 hover:bg-blue-50"><td class="py-0.5 border-r border-gray-200">12</td><td class="py-0.5 border-r border-gray-200">深化设计经理（精装）</td><td class="py-0.5 border-r border-gray-200">徐诗怡</td><td class="py-0.5 border-r border-gray-200">18013705168</td><td class="py-0.5 text-black font-medium">已到岗</td></tr>
+<tr class="hover:bg-blue-50"><td class="py-0.5 border-r border-gray-200">13</td><td class="py-0.5 border-r border-gray-200">深化设计（机电）</td><td class="py-0.5 border-r border-gray-200">苏 尧</td><td class="py-0.5 border-r border-gray-200">13141422281</td><td class="py-0.5 text-black font-medium">已到岗</td></tr>
+<tr class="bg-gray-50 hover:bg-blue-50"><td class="py-0.5 border-r border-gray-200">14</td><td class="py-0.5 border-r border-gray-200">成本经理（软装/精装）</td><td class="py-0.5 border-r border-gray-200">郭建欣</td><td class="py-0.5 border-r border-gray-200">15600173618</td><td class="py-0.5 text-black font-medium">已到岗</td></tr>
+<tr class="hover:bg-blue-50"><td class="py-0.5 border-r border-gray-200">15</td><td class="py-0.5 border-r border-gray-200">商务经理（软装/精装）</td><td class="py-0.5 border-r border-gray-200">薛智臣</td><td class="py-0.5 border-r border-gray-200">18810013805</td><td class="py-0.5 text-black font-medium">已到岗</td></tr>
+<tr class="bg-gray-50 hover:bg-blue-50"><td class="py-0.5 border-r border-gray-200">16</td><td class="py-0.5 border-r border-gray-200">预算员（软装/精装）</td><td class="py-0.5 border-r border-gray-200">王 迪</td><td class="py-0.5 border-r border-gray-200">15726644536</td><td class="py-0.5 text-black font-medium">已到岗</td></tr>
+<tr class="hover:bg-blue-50"><td class="py-0.5 border-r border-gray-200">17</td><td class="py-0.5 border-r border-gray-200">电气预算员（软装/精装）</td><td class="py-0.5 border-r border-gray-200">邓明伟</td><td class="py-0.5 border-r border-gray-200">19937244723</td><td class="py-0.5 text-black font-medium">已到岗</td></tr>
+<tr class="bg-gray-50 hover:bg-blue-50"><td class="py-0.5 border-r border-gray-200">18</td><td class="py-0.5 border-r border-gray-200">质量经理（软装）</td><td class="py-0.5 border-r border-gray-200">周建忠</td><td class="py-0.5 border-r border-gray-200">13636535828</td><td class="py-0.5 text-black font-medium">已到岗</td></tr>
+<tr class="hover:bg-blue-50"><td class="py-0.5 border-r border-gray-200">19</td><td class="py-0.5 border-r border-gray-200">质量经理（精装）</td><td class="py-0.5 border-r border-gray-200">李欣霖</td><td class="py-0.5 border-r border-gray-200">17631518331</td><td class="py-0.5 text-black font-medium">已到岗</td></tr>
+<tr class="bg-gray-50 hover:bg-blue-50"><td class="py-0.5 border-r border-gray-200">20</td><td class="py-0.5 border-r border-gray-200">安全经理（软装）</td><td class="py-0.5 border-r border-gray-200">孙攀岳</td><td class="py-0.5 border-r border-gray-200">18501166924</td><td class="py-0.5 text-black font-medium">已到岗</td></tr>
+<tr class="bg-gray-50 hover:bg-blue-50"><td class="py-0.5 border-r border-gray-200">21</td><td class="py-0.5 border-r border-gray-200">安全经理（精装）</td><td class="py-0.5 border-r border-gray-200">赵国显</td><td class="py-0.5 border-r border-gray-200">18516217962</td><td class="py-0.5 text-black font-medium">已到岗</td></tr>
+<tr class="bg-gray-50 hover:bg-blue-50"><td class="py-0.5 border-r border-gray-200">22</td><td class="py-0.5 border-r border-gray-200">资料员</td><td class="py-0.5 border-r border-gray-200">蔡丽华</td><td class="py-0.5 border-r border-gray-200">18600371133</td><td class="py-0.5 text-black font-medium">已到岗</td></tr>
+<tr class="hover:bg-blue-50"><td class="py-0.5 border-r border-gray-200">23</td><td class="py-0.5 border-r border-gray-200">材料员（软装/精装）</td><td class="py-0.5 border-r border-gray-200">肖自政</td><td class="py-0.5 border-r border-gray-200">15093960151</td><td class="py-0.5 text-black font-medium">已到岗</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+<section class="col-span-5 flex flex-col items-center justify-start pt-8">
+<div class="relative w-full max-w-lg">
+<div class="overflow-hidden rounded-xl border-4 border-white shadow-2xl">
+<img alt="办公场景照片" class="w-full h-auto object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDyRYZ3g_BKN7KbipqNkDbb_qbRcn-_xMLqDJQmRTE0dzEw6tO9cg4sCWyshxGZBqCE74CIwOAwe_pO5CuEuP8qjbck0M1DdiidfcBmoHUUXOALAtEP88tUUuteWKD_6_Kc2QNcRYRK66LUBfwhPXPFQJxK1ytMU-QL2B8T25G1-05wS9m6seHBUBLgynxn_CtYRmmbQ1K7_LR4SHb-_CfIcGoiqUSS_MzWREan_AzcD1-8ffaq2iYhzyLyEgN2Y9iVZ8rl_hFnz0VO">
+</div>
+<div class="absolute -bottom-20 left-1/2 -translate-x-1/2 w-[80%]">
+<div style="background: linear-gradient(90deg, #ffb84d 0%, #ff4d4d 100%);" class="text-white text-center py-3 px-8 rounded-lg shadow-xl font-bold text-xl tracking-widest border border-white/20">百瑞达工坊办公室</div>
+</div>
+</div>
+</section>
+</div>
+</div>
+</main>
+</div>
+
+<!-- 0301重要节点 -->
+<div id="page0301" class="page-wrapper">
+<div class="page-frame flex flex-col shadow-2xl" style="width: 1280px; height: 720px; margin: 0 auto; position: relative; overflow: hidden; background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDlJvtY_7AUPuKsXiCEhtVYATG2-6qIX6sfHSb1FPa_IeErSjMOKckXwCnX9LMdQ5YdapTx1jDdlR6CG-f6zliFPjAlvCmrVKjPoVu1YLI-AJfZZgQgmtR9566uMoxPd1ux8K_Lfwb3EmR22THoNSqQ1o7U1BwYYsgNckfrxI9actZBDf3gX7SKU5wSLO9rEb7h5yTd2urOo-BaVF6VybdxEdYXKw7Eub62po0wi5Tc8jyTwo6l5UpxMHRCpV5iD3_a99vMM81GDcs2'); background-size: cover; background-position: center;">
+<div class="header-trapezoid" style="position: absolute; top: 23px; left: 0; width: 58px; height: 52px; background-color: #37a3eb; clip-path: polygon(0 0, 60% 0, 100% 100%, 0 100%); z-index: 20;"></div>
+<div class="header-line" style="position: absolute; top: 75px; left: 72px; width: calc(100% - 72px); height: 3px; background-color: #37a3eb; z-index: 10;"></div>
+<div class="sub-title-bg" style="position: absolute; top: 78.5px; left: 72px; width: 320px; height: 38px; background: linear-gradient(to right, #facc15, #f43f5e); z-index: 5;"></div>
+<div class="sub-title-text" style="position: absolute; top: 82px; left: 83px; font-size: 22px; font-weight: 700; color: white; letter-spacing: 1px; z-index: 15;">项目重要节点</div>
+<div style="position: absolute; top: 21px; left: 72px; font-size: 36px; font-weight: bold; color: #37a3eb;">项目重要节点一览表</div>
+<main class="absolute top-[130px] left-12 right-12 bottom-12 overflow-auto">
+<table class="schedule-table" style="border-collapse: collapse; width: 100%; background-color: transparent; table-layout: fixed; font-size: 12px;">
+<thead>
+<tr class="header-cell" style="background-color: #3b82f6; color: white; text-align: center; font-weight: normal;">
+<th class="py-2 text-base" colspan="2">专业/时间</th>
+<th class="py-2 text-base">2026. 3</th>
+<th class="py-2 text-base">2026. 4</th>
+<th class="py-2 text-base">2026. 5</th>
+<th class="py-2 text-base">2026. 6</th>
+<th class="py-2 text-base">2026. 7</th>
+<th class="py-2 text-base">2026. 8</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="vertical-label w-16 text-center align-middle font-semibold" rowspan="2" style="writing-mode: horizontal-tb; text-align: center; vertical-align: middle !important; background-color: #cbd5e1;">软装<br/>(清尚)</td>
+<td class="key-node-cell align-middle h-12" style="background-color: #f1f5f9; text-align: center; vertical-align: middle;">关键节点</td>
+<td class="bg-white/40"></td>
+<td class="bg-white/40"></td>
+<td class="bg-white/40"></td>
+<td class="bg-white/40"></td>
+<td class="bg-white/40 text-xs">食堂、健身房、南塔咖啡厅完工</td>
+<td class="bg-white/40 text-xs">北塔高管区完工</td>
+</tr>
+<tr>
+<td class="key-node-cell align-middle py-16" style="background-color: #f1f5f9; text-align: center; vertical-align: middle;">次要节点</td>
+<td class="bg-white/40 text-xs">
+1、食堂：墙柱面基层封板（5.30）410评审后方案调整；<br/>
+2、高管：墙面基层施工（3.30）；<br/>
+3、健身房：墙柱面基层封板（5.30）410评审后方案调整；<br/>
+4、南塔咖啡厅：样板段评审（3.30）。
+</td>
+<td class="bg-white/40 text-xs">
+1、食堂：天花封板（6.15）410评审后开始龙骨施工，2层430机电移交，B1层510机电移交；<br/>
+2、高管：吊顶造型及龙骨安装（4.30）；<br/>
+3、健身房：天花封板（6.15）三局机电支架影响吊顶龙骨安装，风管喷淋追位完成后可提前封板；<br/>
+4、南塔咖啡厅：天花封板（6.15）需幕墙封闭；<br/>
+5、北塔咖啡厅：基层钢架（6.30）待样板评审完后整体施工。
+</td>
+<td class="bg-white/40 text-xs">
+1、食堂：地面混凝土浇筑（6.10）1层天花腻子基层完成后施工；<br/>
+2、高管：天花封板（6.30）需地暖施工完成后开始；<br/>
+3、健身房：地面石材铺贴（7.05）天花腻子基层完成后施工；<br/>
+4、南塔咖啡厅：墙面石材干挂（6.30）天花腻子施工完成开始；<br/>
+5、北塔咖啡厅：墙柱面基层封板；（7.15）待样板评审完后整体施工。
+</td>
+<td class="bg-white/40 text-xs">
+1、食堂：墙柱面饰面板安装、地面石材铺贴（8.30）根据石材大板供应情况分楼层分区域施工；<br/>
+2、高管：地面面层施工（6.30）；<br/>
+3、健身房：运动PVC地板（8.10）；<br/>
+4、南塔咖啡厅：墙面木饰面安装（7.30）；<br/>
+5、北塔咖啡厅：天花封板（8.15）需根据幕墙封闭时间。
+</td>
+<td class="bg-white/40 text-xs">
+1、食堂（9.30）；<br/>
+2、南北健身房（8.20）；<br/>
+3、南塔眼睛咖啡厅（8.30）；<br/>
+4、北塔咖啡厅：墙面石材干挂（8.30）。
+</td>
+<td class="bg-white/40 text-xs">
+1、北塔高管区（8.30）<br/>
+2、北塔咖啡厅：墙面木饰面（9.30）
+</td>
+</tr>
+</tbody>
+</table>
+</main>
+</div>
+</div>
+
+<!-- 04工作完成 -->
+<div id="page04" class="page-wrapper">
+<main class="w-[1280px] h-[720px] bg-white relative overflow-hidden" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuC33aleAA7ZoLu9ZbiUKep4BRIuVcySJXBh6PM3W4gsjd_Pp9qEZr3txPQrhUW1KUtf0n2EhipZl4CxV5bo6CCUkrneoawNf6LZ6fm08WimFC-fImyhDy7aD9AruK5LlG07aoBM2c3ABUzB9qpNyU2GVX0cwVUMgqYGXD6yRpDBfrlffxrbLjONVMTAgpBA4aGixiaerJ2s7PPk-c529TzGE_Tm3wFzFByhz8aT0loD6oHPXZrLuD0LwJfoWbQRDXuYJCNRGcac2KcJ'); background-size: 100% 100%;">
+<header class="relative w-full" data-purpose="page-header">
+<div class="header-trapezoid" style="position: absolute; top: 23px; left: 0; width: 58px; height: 52px; background-color: #37a3eb; clip-path: polygon(0 0, 70% 0, 100% 100%, 0 100%);"></div>
+<div class="header-line" style="position: absolute; top: 75px; left: 72px; width: calc(100% - 72px); height: 3px; background-color: #37a3eb;"></div>
+<div class="sub-title-bg" style="position: absolute; top: 78.5px; left: 72px; width: 285px; height: 38px; background: linear-gradient(90deg, #ffd93d 0%, #ff4d4d 100%);"></div>
+<div class="absolute top-5 left-[72px]">
+<h1 class="text-3xl font-bold text-[#37a3eb]">二、上周工作完成情况</h1>
+</div>
+<div class="absolute top-[82px] left-[72px]">
+<span class="text-white font-bold text-lg tracking-wider">2.1 上周重要工作完成</span>
+</div>
+</header>
+<div class="absolute top-[130px] left-8 right-8 bottom-8 overflow-auto">
+<div class="bg-white/90 rounded-lg overflow-hidden shadow-md border border-[#005e00]">
+<table class="w-full border-collapse">
+<thead>
+<tr class="bg-[#00a2ff] text-white">
+<th class="w-16 py-2 border-r border-[#005e00]">序号</th>
+<th class="py-2 px-4 border-r border-[#005e00]">计划事项及完成情况</th>
+<th class="w-36 py-2 text-center border-r border-[#005e00]">责任人</th>
+</tr>
+</thead>
+<tbody class="text-sm">
+<tr class="bg-[#cbe0ff]"><td class="text-center py-2 border-b border-r border-[#005e00]">1</td><td class="px-4 py-2 border-b border-r border-[#005e00] font-semibold text-[#006494]">高管区：</td><td class="text-center py-2 border-b border-r border-[#005e00]"></td></tr>
+<tr class="bg-[#e7f0ff]"><td class="text-center py-2 border-b border-r border-[#005e00]">2</td><td class="px-4 py-2 border-b border-r border-[#005e00]">一层高管办公室龙骨吊顶完成100%</td><td class="text-center py-2 border-b border-r border-[#005e00]">鲍永春</td></tr>
+<tr class="bg-[#cbe0ff]"><td class="text-center py-2 border-b border-r border-[#005e00]">3</td><td class="px-4 py-2 border-b border-r border-[#005e00]">二层房间内地暖盘管完成100%</td><td class="text-center py-2 border-b border-r border-[#005e00]">鲍永春</td></tr>
+<tr class="bg-[#e7f0ff]"><td class="text-center py-2 border-b border-r border-[#005e00]">4</td><td class="px-4 py-2 border-b border-r border-[#005e00]">一层西侧走道龙骨吊顶完成80%</td><td class="text-center py-2 border-b border-r border-[#005e00]">鲍永春</td></tr>
+<tr class="bg-[#cbe0ff]"><td class="text-center py-2 border-b border-r border-[#005e00]">5</td><td class="px-4 py-2 border-b border-r border-[#005e00]">一层北侧走道龙骨吊顶完成80%</td><td class="text-center py-2 border-b border-r border-[#005e00]">鲍永春</td></tr>
+<tr class="bg-[#e7f0ff]"><td class="text-center py-2 border-b border-r border-[#005e00]">6</td><td class="px-4 py-2 border-b border-r border-[#005e00]">一层墙面钢架及龙骨基层完成90%，二层墙面钢架及龙骨基层完成85%</td><td class="text-center py-2 border-b border-r border-[#005e00]">鲍永春</td></tr>
+<tr class="bg-[#cbe0ff]"><td class="text-center py-2 border-b border-r border-[#005e00]">7</td><td class="px-4 py-2 border-b border-r border-[#005e00]">首二层后勤区域地面砖铺贴完成90%</td><td class="text-center py-2 border-b border-r border-[#005e00]">鲍永春</td></tr>
+<tr class="bg-[#e7f0ff]"><td class="text-center py-2 border-b border-r border-[#005e00]">8</td><td class="px-4 py-2 border-b border-r border-[#005e00]">二层焊帘帘盒完成60%（剩余区域等幕墙安装）</td><td class="text-center py-2 border-b border-r border-[#005e00]">鲍永春</td></tr>
+<tr class="bg-[#cbe0ff]"><td class="text-center py-2 border-b border-r border-[#005e00]">9</td><td class="px-4 py-2 border-b border-r border-[#005e00]">首二层地暖房间防水100%</td><td class="text-center py-2 border-b border-r border-[#005e00]">鲍永春</td></tr>
+<tr class="bg-[#e7f0ff]"><td class="text-center py-2 border-r border-[#005e00]">10</td><td class="px-4 py-2 border-r border-[#005e00]">首二层地暖房间回填100%，无地暖区域陶粒回填45%</td><td class="text-center py-2 border-r border-[#005e00]">鲍永春</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+</main>
+</div>
+
+<!-- 05工作现场 -->
+<div id="page05" class="page-wrapper">
+<div class="report-frame" style="width: 1280px; height: 720px; margin: 0 auto; position: relative; overflow: hidden; background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDU7TNGR4ZJY5NZVDW3aB8gF9SHDwPneMmddwrOjAxHBWqpUPiPdY89DYLUyK_54gXXl48u-hZjJOlbG-ns0TlIAye7h28-NiasmCXz-woi3snea7cnVd43oJ7zelocgplpYDU2mbV_vNZEGXRhTgmiyDEF740qKNVH593gybowebimS4ghYOaH8nbqhDYy6NfZOxIQRXBfSi6stcNqvTmfkt92ue4ytdj6ifulMPUBcXoRFqe3YPQ2VJZfthXxI7a7EVBA3xzNe7xh'); background-size: cover; background-position: center;">
+<div class="header-trapezoid" style="position: absolute; top: 23px; left: 0; width: 58px; height: 52px; background-color: #37a3eb; clip-path: polygon(0 0, 70% 0, 100% 100%, 0 100%); z-index: 20;"></div>
+<div class="header-line" style="position: absolute; top: 75px; left: 72px; width: calc(100% - 72px); height: 3px; background-color: #37a3eb; z-index: 10;"></div>
+<div class="sub-title-bg" style="position: absolute; top: 78.5px; left: 72px; width: 285px; height: 38px; background: linear-gradient(to right, #facc15, #f43f5e); z-index: 5;"></div>
+<div class="sub-title-text" style="position: absolute; top: 82px; left: 83px; font-size: 22px; font-weight: 700; color: white; letter-spacing: 1px; z-index: 15;">2.2 高管层现场工作</div>
+<header class="relative w-full pt-6 px-12">
+<div class="absolute top-[21px] left-[72px] text-[36px] font-bold text-[#37a3eb]">二、上周工作</div>
+</header>
+<main class="absolute top-[120px] left-0 right-0 bottom-0 px-12 pb-6">
+<div class="grid grid-cols-3 gap-4 h-full">
+<div class="photo-card overflow-hidden" style="border: 1px solid #cccccc;"><img class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDjQvp04X8hgJB8kkRvNQKDmW7sp8livZH3_9-skoZlBARhbtP-Swx6c9tuLGzndn5RzAI_k_WbYIrTJ7u54KCuPPS1dC4dRvOlS9tCp27x0dYvzQ4Zw0uIMJauBgs8-JZYF-YtvtAbLKNgYvmS3VA-4kR8Emmx1DsZXdQf2NfxXLHTEjnY7aXwNrcAiEjSvhtx7VfoznWxLvBwrLU8V_4Zt32Eo3HZmoRTHkmPZwRgT1FePQsyWKvmkkFEzXNHFNpDR01o3AaWNNU2"/></div>
+<div class="photo-card overflow-hidden" style="border: 1px solid #cccccc;"><img class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAM0JJI2h2GkQbMvRzfmcNoGtZ7vwzgKbywc9h312PEx9lJlAVaa4S2Y7P8Xs393Renns-72fgGH-Z56V9QBj5dY7NwR4KiFc9dtRXlE6d5WPOb8bMNjjvS8_qFXo190M7e7vXc6ZOrMamGmm1L2dMAqwHvVkm6y5E2l45zHe8ZG79ORdMKGvPIQPxQeZn2Js10gg_pJdAGzBCW7FhOhoeKceyGYzldlfyZ2WFq0-DvrOr3srFlRqbYXrRjqSHrAarNFpCNZbBDtfjf"/></div>
+<div class="photo-card overflow-hidden" style="border: 1px solid #cccccc;"><img class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDSDC7nvAu8ZZvUNpqi0GJ4g9D8TojXSZMY00Z0LbYj4cBq8W_9QFHN79Vot_93N1TOtTTObwN4Fzb9LJt99AAbip3ORjCUZlI4frO9aME--0taUjTbvtzgh7x6mEmk_6VrRtIHsbWtW407zk39KRdmF-WU3hvTUrmNdmZeohmmcTT0MswkpLsZGDhzMjq44h_Q3hYnqLnZAnT_6Xs1jd4bg6jTR2bTRA2PMNMlqcl_XvtESP7dKimbygVv3GA9kvo00efmy6Tqse6J"/></div>
+<div class="photo-card overflow-hidden" style="border: 1px solid #cccccc;"><img class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAsPFKOgUPRja-h-ZYmRnY-2uVQt-j_VEP9xsWtvO7TKIv1dM5OH91w5oMV-wxLGOKVrnSvVS_hwsoMKL_46qN6KMRYaRQXBBSiEk5tXvyhuSHEpvF58Wkbcit9oY4bCOfc8flXBbJ9u3IFhm00itaalaCHWjplj8Tg2ZdNJori67bhAdb_egewaR5KuWjxC-Ml30Hmo3A5OrbEGVZkOjuWlqgs9cqW_VMKJw5chvOLFW_nAHyMZ80NifA9u5CsAdSwlEUPJVVpXPu4"/></div>
+<div class="photo-card overflow-hidden" style="border: 1px solid #cccccc;"><img class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB6T8l30oeKGdLaGUiFkafu4Jmhi67WpbWX-1emI-k3O5v39z2D_4Gm-F7KGWlr_xqhRN4LriyF3R6oAyShGBtXh5jtkDMKBlh3FCHPe3dhoUJHzhFv23gKsOeQAXQUrc7S1zNlpL0o5Ser0OIjitfy6Os8koJAx1Iyy10mOzS6fq18ebcATnhOGwSvUHGBZSyJXhiLbtDw0p2JzCigHCKZvWJOtFmYEh-LyKJJ4qMVGbyq66OVhb_h-ioZrDMUJwjiaYYykLn_SQ4o"/></div>
+<div class="photo-card overflow-hidden" style="border: 1px solid #cccccc;"><img class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB9b81i3IGbKNaPCIt5qCXRjQy2TNrG2-FunPbz860oH2p79ufou4tQKBX-N0ZPgQR5Op4qMGQLjXf6eWdR8e_mFv278QsPGEiVO08K_2G_VGqvRXYXb94wtF_pL7nq9MYEj7ZCw1nUdNmnT2KyUPTBjkMenbOuN7nTEyKQJz8UlGHTcVUgNnPlKmchsVkwhYId1Qs6adnuhTykB2fR_XVT1tphDxIQ07la1XPaUo8uYUTQNhmJ9TH0_qv94eqjnkqJEX1COyreZt_D"/></div>
+</div>
+</main>
+</div>
+</div>
+
+<!-- 06人员统计 -->
+<div id="page06" class="page-wrapper">
+<div class="page-frame flex flex-col shadow-2xl" style="width: 1280px; height: 720px; margin: 0 auto; position: relative; overflow: hidden; background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDU7TNGR4ZJY5NZVDW3aB8gF9SHDwPneMmddwrOjAxHBWqpUPiPdY89DYLUyK_54gXXl48u-hZjJOlbG-ns0TlIAye7h28-NiasmCXz-woi3snea7cnVd43oJ7zelocgplpYDU2mbV_vNZEGXRhTgmiyDEF740qKNVH593gybowebimS4ghYOaH8nbqhDYy6NfZOxIQRXBfSi6stcNqvTmfkt92ue4ytdj6ifulMPUBcXoRFqe3YPQ2VJZfthXxI7a7EVBA3xzNe7xh'); background-size: cover; background-position: center;">
+<div class="header-trapezoid" style="position: absolute; top: 23px; left: 0; width: 58px; height: 52px; background-color: #37a3eb; clip-path: polygon(0 0, 60% 0, 100% 100%, 0 100%); z-index: 20;"></div>
+<div class="header-line" style="position: absolute; top: 75px; left: 72px; width: calc(100% - 72px); height: 3px; background-color: #37a3eb; z-index: 10;"></div>
+<div class="sub-title-bg" style="position: absolute; top: 78.5px; left: 72px; width: 285px; height: 38px; background: linear-gradient(to right, #facc15, #f43f5e); z-index: 5;"></div>
+<div class="sub-title-text" style="position: absolute; top: 82px; left: 83px; font-size: 22px; font-weight: 700; color: white; letter-spacing: 1px; z-index: 15;">2.12 现场工作：人员统计</div>
+<header class="relative w-full pt-6 px-12">
+<div class="absolute top-[21px] left-[72px] text-[36px] font-bold text-[#37a3eb]">二、上周工作</div>
+</header>
+<main class="flex-grow flex flex-col px-12 pt-28 pb-8 relative">
+<div class="flex flex-grow gap-6 h-full overflow-hidden">
+<div class="w-1/2 flex flex-col gap-4">
+<div class="bg-white p-2 border border-outline-variant rounded-sm relative overflow-hidden group">
+<img alt="Construction Site Overview" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC5hPeGi9yCv4HmXwvWtxhUc9zkVkvwPJLPEcJVOJGmxgZS6TIzAyA0cBqGfqRQBPrstzdEoLuT118wOpHNWGd_wixV3D6buJp_lIp-j4WTJxyTtEXzfgIBrhFToLSTJm8LWfn54ELU2ZgSEYM4cxrxVH-oZYi2nZ4exXlVjnsAuLwVXYDwPGOcTZ3b-XTXriijkozSqnJF9A8u9_hlrjj8sWpkFhOkSKj_tXPtlz7Ml9kUaYk5DIOvYn_dcobqqSIPUIEZTlXHj5kM"/>
+</div>
+<div class="text-white py-2 px-6 text-center text-base font-bold" style="background-color: #48a0f8; width: fit-content; margin: 0 auto;">防高坠专项安全会</div>
+</div>
+<div class="w-1/2 flex flex-col">
+<div class="bg-white border border-[#005e00] shadow-sm overflow-hidden">
+<table class="data-table" style="width: 100%; border-collapse: collapse; table-layout: fixed;">
+<thead>
+<tr>
+<th style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle; background-color: #00a2ff; color: white; font-weight: 700; border-bottom: 2px solid #005e00;">序号</th>
+<th style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle; background-color: #00a2ff; color: white; font-weight: 700; border-bottom: 2px solid #005e00;">工种</th>
+<th style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle; background-color: #00a2ff; color: white; font-weight: 700; border-bottom: 2px solid #005e00;">本周人数</th>
+<th style="padding: 4px 2px; text-align: center; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle; background-color: #00a2ff; color: white; font-weight: 700; border-bottom: 2px solid #005e00;">下周人数</th>
+</tr>
+</thead>
+<tbody>
+<tr style="background-color: #cbe0ff;"><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">1</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">5S小队</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">15</td><td style="padding: 4px 2px; text-align: center; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">16</td></tr>
+<tr style="background-color: #e7f0ff;"><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">2</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">电工</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">5</td><td style="padding: 4px 2px; text-align: center; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">5</td></tr>
+<tr style="background-color: #cbe0ff;"><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">3</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">电焊工</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">13</td><td style="padding: 4px 2px; text-align: center; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">13</td></tr>
+<tr style="background-color: #e7f0ff;"><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">4</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">工长</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">8</td><td style="padding: 4px 2px; text-align: center; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">8</td></tr>
+<tr style="background-color: #cbe0ff;"><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">5</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">库管</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">1</td><td style="padding: 4px 2px; text-align: center; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">1</td></tr>
+<tr style="background-color: #e7f0ff;"><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">6</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">临电专员</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">1</td><td style="padding: 4px 2px; text-align: center; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">1</td></tr>
+<tr style="background-color: #cbe0ff;"><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">7</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">木工</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">87</td><td style="padding: 4px 2px; text-align: center; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">90</td></tr>
+<tr style="background-color: #e7f0ff;"><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">8</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">水工</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">35</td><td style="padding: 4px 2px; text-align: center; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">35</td></tr>
+<tr style="background-color: #cbe0ff;"><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">9</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">瓦工</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">14</td><td style="padding: 4px 2px; text-align: center; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">14</td></tr>
+<tr style="background-color: #e7f0ff;"><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">10</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">普工</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">22</td><td style="padding: 4px 2px; text-align: center; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">22</td></tr>
+<tr style="background-color: #cbe0ff;"><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">11</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">油工</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">10</td><td style="padding: 4px 2px; text-align: center; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">14</td></tr>
+<tr style="background-color: #e7f0ff;"><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">12</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">防水工</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">2</td><td style="padding: 4px 2px; text-align: center; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">2</td></tr>
+<tr style="background-color: #cbe0ff;"><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">13</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">管理人员</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">23</td><td style="padding: 4px 2px; text-align: center; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">23</td></tr>
+<tr style="background-color: #e7f0ff;"><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">14</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">室内电梯司机</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">2</td><td style="padding: 4px 2px; text-align: center; border-bottom: 1px solid #005e00; font-size: 12px; vertical-align: middle;">2</td></tr>
+</tbody>
+<tfoot>
+<tr><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; font-size: 12px; vertical-align: middle; background-color: rgba(0, 162, 255, 0.1); font-weight: 700; color: #000000; border-top: 2px solid #005e00;">15</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; font-size: 12px; vertical-align: middle; background-color: rgba(0, 162, 255, 0.1); font-weight: 700; color: #000000; border-top: 2px solid #005e00;">合计</td><td style="padding: 4px 2px; text-align: center; border-right: 1px solid #005e00; font-size: 12px; vertical-align: middle; background-color: rgba(0, 162, 255, 0.1); font-weight: 700; color: #000000; border-top: 2px solid #005e00;">238</td><td style="padding: 4px 2px; text-align: center; font-size: 12px; vertical-align: middle; background-color: rgba(0, 162, 255, 0.1); font-weight: 700; color: #000000; border-top: 2px solid #005e00;">246</td></tr>
+</tfoot>
+</table>
+</div>
+<div class="text-white py-2 px-6 text-center text-base font-bold mt-4" style="background-color: #48a0f8; width: fit-content; margin-left: auto; margin-right: auto;">全部人员在场情况</div>
+</div>
+</div>
+</main>
+</div>
+</div>
+
+<!-- 07 ECC销项 -->
+<div id="page07" class="page-wrapper">
+<div class="page-frame flex flex-col shadow-2xl" style="width: 1280px; height: 720px; margin: 0 auto; position: relative; overflow: hidden; background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDU7TNGR4ZJY5NZVDW3aB8gF9SHDwPneMmddwrOjAxHBWqpUPiPdY89DYLUyK_54gXXl48u-hZjJOlbG-ns0TlIAye7h28-NiasmCXz-woi3snea7cnVd43oJ7zelocgplpYDU2mbV_vNZEGXRhTgmiyDEF740qKNVH593gybowebimS4ghYOaH8nbqhDYy6NfZOxIQRXBfSi6stcNqvTmfkt92ue4ytdj6ifulMPUBcXoRFqe3YPQ2VJZfthXxI7a7EVBA3xzNe7xh'); background-size: cover; background-position: center;">
+<div class="header-trapezoid" style="position: absolute; top: 23px; left: 0; width: 58px; height: 52px; background-color: #37a3eb; clip-path: polygon(0 0, 60% 0, 100% 100%, 0 100%); z-index: 20;"></div>
+<div class="header-line" style="position: absolute; top: 75px; left: 72px; width: calc(100% - 72px); height: 3px; background-color: #37a3eb; z-index: 10;"></div>
+<div class="sub-title-bg" style="position: absolute; top: 78.5px; left: 72px; width: 285px; height: 38px; background: linear-gradient(to right, #facc15, #f43f5e); z-index: 5;"></div>
+<div class="sub-title-text" style="position: absolute; top: 82px; left: 83px; font-size: 22px; font-weight: 700; color: white; letter-spacing: 1px; z-index: 15;">2.13 ECC销项情况</div>
+<header class="relative w-full pt-6 px-12">
+<div class="absolute top-[21px] left-[72px] text-[36px] font-bold text-[#37a3eb]">二、上周工作</div>
+</header>
+<main class="absolute top-[130px] left-12 right-12 bottom-8 flex flex-col">
+<div class="text-center mb-2">
+<div class="text-xl font-bold" style="color: #000000;">北京青尚ECC质量整改统计表</div>
+</div>
+<div class="bg-white border border-[#005e00] shadow-sm overflow-hidden">
+<table class="data-table" style="width: 100%; border-collapse: collapse; table-layout: fixed;">
+<thead>
+<tr>
+<th style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 14px; vertical-align: middle; color: #000000; background-color: #ffffff; font-weight: 700; border-bottom: 2px solid #005e00; border-top: 2px solid #005e00;">序号</th>
+<th style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 14px; vertical-align: middle; color: #000000; background-color: #ffffff; font-weight: 700; border-bottom: 2px solid #005e00; border-top: 2px solid #005e00;">问题总数</th>
+<th style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 14px; vertical-align: middle; color: #000000; background-color: #ffffff; font-weight: 700; border-bottom: 2px solid #005e00; border-top: 2px solid #005e00;">已关闭</th>
+<th style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 14px; vertical-align: middle; color: #000000; background-color: #ffffff; font-weight: 700; border-bottom: 2px solid #005e00; border-top: 2px solid #005e00;">流程关闭中</th>
+<th style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 14px; vertical-align: middle; color: #000000; background-color: #ffffff; font-weight: 700; border-bottom: 2px solid #005e00; border-top: 2px solid #005e00;">未关闭</th>
+<th style="padding: 8px 4px; text-align: center; border-bottom: 1px solid #005e00; font-size: 14px; vertical-align: middle; color: #000000; background-color: #ffffff; font-weight: 700; border-bottom: 2px solid #005e00; border-top: 2px solid #005e00;">关闭率</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 14px; vertical-align: middle; color: #000000; background-color: #ffffff; line-height: 1.5;">1</td>
+<td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 14px; vertical-align: middle; color: #000000; background-color: #ffffff; line-height: 1.5;">110</td>
+<td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 14px; vertical-align: middle; color: #000000; background-color: #ffffff; line-height: 1.5;">101</td>
+<td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 14px; vertical-align: middle; color: #000000; background-color: #ffffff; line-height: 1.5;">1</td>
+<td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 14px; vertical-align: middle; color: #000000; background-color: #ffffff; line-height: 1.5;">9</td>
+<td style="padding: 8px 4px; text-align: center; border-bottom: 1px solid #005e00; font-size: 14px; vertical-align: middle; color: #000000; background-color: #ffffff; line-height: 1.5; font-weight: 700;">91.82%</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="mt-3 bg-white border border-[#005e00] overflow-hidden" style="height: 380px;">
+<img alt="ECC质量整改情况截图" class="w-full h-full object-contain" src="07上周工作ECC.png"/>
+</div>
+</main>
+</div>
+</div>
+
+<!-- 08 图纸深化 -->
+<div id="page08" class="page-wrapper">
+<div class="page-frame flex flex-col shadow-2xl" style="width: 1280px; height: 720px; margin: 0 auto; position: relative; overflow: hidden; background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDU7TNGR4ZJY5NZVDW3aB8gF9SHDwPneMmddwrOjAxHBWqpUPiPdY89DYLUyK_54gXXl48u-hZjJOlbG-ns0TlIAye7h28-NiasmCXz-woi3snea7cnVd43oJ7zelocgplpYDU2mbV_vNZEGXRhTgmiyDEF740qKNVH593gybowebimS4ghYOaH8nbqhDYy6NfZOxIQRXBfSi6stcNqvTmfkt92ue4ytdj6ifulMPUBcXoRFqe3YPQ2VJZfthXxI7a7EVBA3xzNe7xh'); background-size: cover; background-position: center;">
+<div class="header-trapezoid" style="position: absolute; top: 23px; left: 0; width: 58px; height: 52px; background-color: #37a3eb; clip-path: polygon(0 0, 60% 0, 100% 100%, 0 100%); z-index: 20;"></div>
+<div class="header-line" style="position: absolute; top: 75px; left: 72px; width: calc(100% - 72px); height: 3px; background-color: #37a3eb; z-index: 10;"></div>
+<div class="sub-title-bg" style="position: absolute; top: 78.5px; left: 72px; width: 285px; height: 38px; background: linear-gradient(to right, #facc15, #f43f5e); z-index: 5;"></div>
+<div class="sub-title-text" style="position: absolute; top: 82px; left: 83px; font-size: 22px; font-weight: 700; color: white; letter-spacing: 1px; z-index: 15;">2.14 图纸深化情况</div>
+<header class="relative w-full pt-6 px-12">
+<div class="absolute top-[21px] left-[72px] text-[36px] font-bold text-[#37a3eb]">二、上周工作</div>
+</header>
+<main class="absolute top-[130px] left-12 right-12 bottom-8 flex flex-col">
+<div class="bg-white border border-[#005e00] shadow-sm overflow-hidden">
+<table class="data-table" style="width: 100%; border-collapse: collapse; table-layout: fixed;">
+<thead>
+<tr>
+<th style="width: 10%; padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4; background-color: #00a2ff !important; color: white; font-weight: 700; border-bottom: 2px solid #005e00; font-size: 14px;">序号</th>
+<th style="width: 60%; padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4; background-color: #00a2ff !important; color: white; font-weight: 700; border-bottom: 2px solid #005e00; font-size: 14px;">计划事项</th>
+<th style="width: 15%; padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4; background-color: #00a2ff !important; color: white; font-weight: 700; border-bottom: 2px solid #005e00; font-size: 14px;">责任人</th>
+<th style="width: 15%; padding: 8px 4px; text-align: center; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4; background-color: #00a2ff !important; color: white; font-weight: 700; border-bottom: 2px solid #005e00; font-size: 14px;">完成情况</th>
+</tr>
+</thead>
+<tbody>
+<tr style="background-color: #cbe0ff !important;"><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">1</td><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">1-2号咖啡厅样板段策划整理</td><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">李 欢</td><td style="padding: 8px 4px; text-align: center; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">已完成</td></tr>
+<tr style="background-color: #e7f0ff !important;"><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">2</td><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">与设计碰1~2号咖啡厅图纸问题。</td><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">李 欢</td><td style="padding: 8px 4px; text-align: center; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">进行中</td></tr>
+<tr style="background-color: #cbe0ff !important;"><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">3</td><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">1、负一层二层档口修改方案调整图纸<br>2、二层立面修改方案调整图纸</td><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">乔志广</td><td style="padding: 8px 4px; text-align: center; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">已完成</td></tr>
+<tr style="background-color: #e7f0ff !important;"><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">4</td><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">1、负一层~二层节点图和负一层、二层立面图修改方案调整图纸<br>2、负一层二层幕墙处理带盒节点调整<br>3、食堂设计变更事项整理</td><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">乔志广</td><td style="padding: 8px 4px; text-align: center; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">进行中</td></tr>
+<tr style="background-color: #cbe0ff !important;"><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">5</td><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">1、对接旋转楼梯图纸<br>2、岩板弧角及线条打样<br>3、对接木饰面清单清单</td><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">徐诗怡</td><td style="padding: 8px 4px; text-align: center; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">已完成</td></tr>
+<tr style="background-color: #e7f0ff !important;"><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">6</td><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">打样</td><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">徐诗怡</td><td style="padding: 8px 4px; text-align: center; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">进行中</td></tr>
+<tr style="background-color: #cbe0ff !important;"><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">7</td><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">3号咖啡厅图纸深化完成已和业主确认签字</td><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">李永旺</td><td style="padding: 8px 4px; text-align: center; border-bottom: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">已完成</td></tr>
+<tr style="background-color: #e7f0ff !important;"><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">8</td><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">4号咖啡厅图纸根据设计意见和样板评审意见进行调整。</td><td style="padding: 8px 4px; text-align: center; border-right: 1px solid #005e00; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">李永旺</td><td style="padding: 8px 4px; text-align: center; font-size: 13px; vertical-align: middle; color: #000000; line-height: 1.4;">进行中</td></tr>
+</tbody>
+</table>
+</div>
+</main>
+</div>
+</div>
+
+<!-- 09 周工作计划 -->
+<div id="page09" class="page-wrapper">
+<div class="page-frame flex flex-col shadow-2xl" style="width: 1280px; height: 720px; margin: 0 auto; position: relative; overflow: hidden; background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDU7TNGR4ZJY5NZVDW3aB8gF9SHDwPneMmddwrOjAxHBWqpUPiPdY89DYLUyK_54gXXl48u-hZjJOlbG-ns0TlIAye7h28-NiasmCXz-woi3snea7cnVd43oJ7zelocgplpYDU2mbV_vNZEGXRhTgmiyDEF740qKNVH593gybowebimS4ghYOaH8nbqhDYy6NfZOxIQRXBfSi6stcNqvTmfkt92ue4ytdj6ifulMPUBcXoRFqe3YPQ2VJZfthXxI7a7EVBA3xzNe7xh'); background-size: cover; background-position: center;">
+<div class="header-trapezoid" style="position: absolute; top: 23px; left: 0; width: 58px; height: 52px; background-color: #37a3eb; clip-path: polygon(0 0, 60% 0, 100% 100%, 0 100%); z-index: 20;"></div>
+<div class="header-line" style="position: absolute; top: 75px; left: 72px; width: calc(100% - 72px); height: 3px; background-color: #37a3eb; z-index: 10;"></div>
+<div class="sub-title-bg" style="position: absolute; top: 78.5px; left: 72px; width: 285px; height: 38px; background: linear-gradient(to right, #facc15, #f43f5e); z-index: 5;"></div>
+<div class="sub-title-text" style="position: absolute; top: 82px; left: 83px; font-size: 22px; font-weight: 700; color: white; letter-spacing: 1px; z-index: 15;">3.1 周工作计划</div>
+<header class="relative w-full pt-6 px-12">
+<div class="absolute top-[21px] left-[72px] text-[36px] font-bold text-[#37a3eb]">三、下周计划</div>
+</header>
+<main class="absolute top-[125px] left-3 right-3 bottom-12 flex flex-col">
+<section style="width: calc(100% - 24px); margin: 12px; background: white;">
+<table class="schedule-table" style="width: 100%; border-collapse: collapse; text-align: center; background-color: #ffffff; font-size: 11px; border: 1px solid #005e00;">
+<thead>
+<tr>
+<th class="py-1" colspan="13" style="font-size: 13px; background-color: #ffffff !important; color: #000000; border: 1px solid #005e00; font-weight: 700;">北京清尚—食堂/南北塔健身房/北塔高管层/南北塔咖啡厅精装周工作计划</th>
+</tr>
+<tr>
+<th class="col-no" rowspan="2" style="width: 30px; border: 1px solid #005e00; background-color: #ffffff !important; color: #000000; font-weight: 700;">序号</th>
+<th class="col-area" rowspan="2" style="width: 50px; border: 1px solid #005e00; background-color: #ffffff !important; color: #000000; font-weight: 700;">区域</th>
+<th class="col-content" rowspan="2" style="width: 180px; border: 1px solid #005e00; background-color: #ffffff !important; color: #000000; font-weight: 700;">工作内容</th>
+<th class="col-days" rowspan="2" style="writing-mode: vertical-rl; text-orientation: upright; letter-spacing: 2px; font-size: 10px; border: 1px solid #005e00; background-color: #ffffff !important; color: #000000; font-weight: 700;">工作天数</th>
+<th class="col-date py-0" style="font-size: 11px; border: 1px solid #005e00; background-color: #ffffff !important; color: #000000; font-weight: 700;">周一</th>
+<th class="col-date py-0" style="font-size: 11px; border: 1px solid #005e00; background-color: #ffffff !important; color: #000000; font-weight: 700;">周二</th>
+<th class="col-date py-0" style="font-size: 11px; border: 1px solid #005e00; background-color: #ffffff !important; color: #000000; font-weight: 700;">周三</th>
+<th class="col-date py-0" style="font-size: 11px; border: 1px solid #005e00; background-color: #ffffff !important; color: #000000; font-weight: 700;">周四</th>
+<th class="col-date py-0" style="font-size: 11px; border: 1px solid #005e00; background-color: #ffffff !important; color: #000000; font-weight: 700;">周五</th>
+<th class="col-date py-0" style="font-size: 11px; border: 1px solid #005e00; background-color: #ffffff !important; color: #000000; font-weight: 700;">周六</th>
+<th class="col-date py-0" style="font-size: 11px; border: 1px solid #005e00; background-color: #ffffff !important; color: #000000; font-weight: 700;">周日</th>
+<th class="col-labor" rowspan="2" style="font-size: 11px; border: 1px solid #005e00; background-color: #ffffff !important; color: #000000; font-weight: 700;">劳动力<br/>需求</th>
+<th class="col-material" rowspan="2" style="writing-mode: vertical-rl; text-orientation: upright; letter-spacing: 2px; font-size: 10px; border: 1px solid #005e00; background-color: #ffffff !important; color: #000000; font-weight: 700;">材料准备</th>
+</tr>
+<tr>
+<th class="py-0" style="font-size: 10px; border: 1px solid #005e00; background-color: #ffffff !important; color: #000000; font-weight: 700;">5月18日</th>
+<th class="py-0" style="font-size: 10px; border: 1px solid #005e00; background-color: #ffffff !important; color: #000000; font-weight: 700;">5月19日</th>
+<th class="py-0" style="font-size: 10px; border: 1px solid #005e00; background-color: #ffffff !important; color: #000000; font-weight: 700;">5月20日</th>
+<th class="py-0" style="font-size: 10px; border: 1px solid #005e00; background-color: #ffffff !important; color: #000000; font-weight: 700;">5月21日</th>
+<th class="py-0" style="font-size: 10px; border: 1px solid #005e00; background-color: #ffffff !important; color: #000000; font-weight: 700;">5月22日</th>
+<th class="py-0" style="font-size: 10px; border: 1px solid #005e00; background-color: #ffffff !important; color: #000000; font-weight: 700;">5月23日</th>
+<th class="py-0" style="font-size: 10px; border: 1px solid #005e00; background-color: #ffffff !important; color: #000000; font-weight: 700;">5月24日</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="border: 1px solid #005e00; padding: 2px;">1</td>
+<td class="col-area" rowspan="7" style="width: 50px; border: 1px solid #005e00; padding: 2px; background-color: #00a2ff; color: white; font-weight: 700;">高管<br/>层</td>
+<td style="border: 1px solid #005e00; padding: 2px;">高管二层西走廊景观池施工</td>
+<td style="border: 1px solid #005e00; padding: 2px;">7</td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 2px;">焊工2人</td>
+<td style="border: 1px solid #005e00; padding: 2px;">已到场</td>
+</tr>
+<tr>
+<td style="border: 1px solid #005e00; padding: 2px;">2</td>
+<td style="border: 1px solid #005e00; padding: 2px;">高管一二层公区天花造型吊顶</td>
+<td style="border: 1px solid #005e00; padding: 2px;">7</td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 2px;">木工4人</td>
+<td style="border: 1px solid #005e00; padding: 2px;">已到场</td>
+</tr>
+<tr>
+<td style="border: 1px solid #005e00; padding: 2px;">3</td>
+<td style="border: 1px solid #005e00; padding: 2px;">高管二层公区造型封板</td>
+<td style="border: 1px solid #005e00; padding: 2px;">7</td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 2px;">木工6人</td>
+<td style="border: 1px solid #005e00; padding: 2px;">已到场</td>
+</tr>
+<tr>
+<td style="border: 1px solid #005e00; padding: 2px;">4</td>
+<td style="border: 1px solid #005e00; padding: 2px;">高管一层房间内地暖施工</td>
+<td style="border: 1px solid #005e00; padding: 2px;">7</td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 2px;">瓦工3人</td>
+<td style="border: 1px solid #005e00; padding: 2px;">已到场</td>
+</tr>
+<tr>
+<td style="border: 1px solid #005e00; padding: 2px;">5</td>
+<td style="border: 1px solid #005e00; padding: 2px;">高管一层房间内天花封板</td>
+<td style="border: 1px solid #005e00; padding: 2px;">5</td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #ffffff; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #ffffff; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 2px;">木工4人</td>
+<td style="border: 1px solid #005e00; padding: 2px;">已到场</td>
+</tr>
+<tr>
+<td style="border: 1px solid #005e00; padding: 2px;">6</td>
+<td style="border: 1px solid #005e00; padding: 2px;">高管备餐间及后勤区域铝扣板吊顶</td>
+<td style="border: 1px solid #005e00; padding: 2px;">4</td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #ffffff; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #ffffff; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #ffffff; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 2px;">木工2人</td>
+<td style="border: 1px solid #005e00; padding: 2px;">已到场</td>
+</tr>
+<tr>
+<td style="border: 1px solid #005e00; padding: 2px;">7</td>
+<td style="border: 1px solid #005e00; padding: 2px;">高管二层公区地暖区域防水</td>
+<td style="border: 1px solid #005e00; padding: 2px;">7</td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 2px;">瓦工2人</td>
+<td style="border: 1px solid #005e00; padding: 2px;">已到场</td>
+</tr>
+<tr>
+<td style="border: 1px solid #005e00; padding: 2px;">8</td>
+<td rowspan="5" style="width: 50px; border: 1px solid #005e00; padding: 2px; background-color: #00a2ff; color: white; font-weight: 700;">食堂<br/>区</td>
+<td style="border: 1px solid #005e00; padding: 2px;">二层天花吊顶及封板</td>
+<td style="border: 1px solid #005e00; padding: 2px;">7</td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 2px;">木工8人</td>
+<td style="border: 1px solid #005e00; padding: 2px;">已到场</td>
+</tr>
+<tr>
+<td style="border: 1px solid #005e00; padding: 2px;">9</td>
+<td style="border: 1px solid #005e00; padding: 2px;">二层天花照明穿线</td>
+<td style="border: 1px solid #005e00; padding: 2px;">7</td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 2px;">电工4人</td>
+<td style="border: 1px solid #005e00; padding: 2px;">已到场</td>
+</tr>
+<tr>
+<td style="border: 1px solid #005e00; padding: 2px;">10</td>
+<td style="border: 1px solid #005e00; padding: 2px;">一层天花腻子</td>
+<td style="border: 1px solid #005e00; padding: 2px;">7</td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 2px;">油工6人</td>
+<td style="border: 1px solid #005e00; padding: 2px;">已到场</td>
+</tr>
+<tr>
+<td style="border: 1px solid #005e00; padding: 2px;">11</td>
+<td style="border: 1px solid #005e00; padding: 2px;">地下室天花吊顶</td>
+<td style="border: 1px solid #005e00; padding: 2px;">7</td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 2px;">木工30人</td>
+<td style="border: 1px solid #005e00; padding: 2px;">已到场</td>
+</tr>
+<tr>
+<td style="border: 1px solid #005e00; padding: 2px;">12</td>
+<td style="border: 1px solid #005e00; padding: 2px;">地下室天花照明配管</td>
+<td style="border: 1px solid #005e00; padding: 2px;">7</td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 2px;">电工14人</td>
+<td style="border: 1px solid #005e00; padding: 2px;">已到场</td>
+</tr>
+<tr>
+<td style="border: 1px solid #005e00; padding: 2px;">13</td>
+<td rowspan="2" style="width: 50px; border: 1px solid #005e00; padding: 2px; background-color: #00a2ff; color: white; font-weight: 700;">南塔<br/>健身<br/>房</td>
+<td style="border: 1px solid #005e00; padding: 2px;">南健身房天花吊顶</td>
+<td style="border: 1px solid #005e00; padding: 2px;">7</td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 2px;">木工2人</td>
+<td style="border: 1px solid #005e00; padding: 2px;">已到场</td>
+</tr>
+<tr>
+<td style="border: 1px solid #005e00; padding: 2px;">14</td>
+<td style="border: 1px solid #005e00; padding: 2px;">墙地面岩板铺贴</td>
+<td style="border: 1px solid #005e00; padding: 2px;">7</td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 2px;">瓦工8人</td>
+<td style="border: 1px solid #005e00; padding: 2px;">已到场</td>
+</tr>
+<tr>
+<td style="border: 1px solid #005e00; padding: 2px;">15</td>
+<td rowspan="4" style="width: 50px; border: 1px solid #005e00; padding: 2px; background-color: #00a2ff; color: white; font-weight: 700;">南塔<br/>咖啡<br/>厅</td>
+<td style="border: 1px solid #005e00; padding: 2px;">墙面封板</td>
+<td style="border: 1px solid #005e00; padding: 2px;">7</td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 2px;">木工2人</td>
+<td style="border: 1px solid #005e00; padding: 2px;">已到场</td>
+</tr>
+<tr>
+<td style="border: 1px solid #005e00; padding: 2px;">16</td>
+<td style="border: 1px solid #005e00; padding: 2px;">天花机电布管</td>
+<td style="border: 1px solid #005e00; padding: 2px;">7</td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 2px;">电工4人</td>
+<td style="border: 1px solid #005e00; padding: 2px;">已到场</td>
+</tr>
+<tr>
+<td style="border: 1px solid #005e00; padding: 2px;">17</td>
+<td style="border: 1px solid #005e00; padding: 2px;">天花吊顶龙骨排布</td>
+<td style="border: 1px solid #005e00; padding: 2px;">7</td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 2px;">木工8人</td>
+<td style="border: 1px solid #005e00; padding: 2px;">已到场</td>
+</tr>
+<tr>
+<td style="border: 1px solid #005e00; padding: 2px;">18</td>
+<td style="border: 1px solid #005e00; padding: 2px;">墙面钢架焊接</td>
+<td style="border: 1px solid #005e00; padding: 2px;">7</td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 2px;">焊工2人</td>
+<td style="border: 1px solid #005e00; padding: 2px;">已到场</td>
+</tr>
+<tr>
+<td style="border: 1px solid #005e00; padding: 2px;">19</td>
+<td rowspan="3" style="width: 50px; border: 1px solid #005e00; padding: 2px; background-color: #00a2ff; color: white; font-weight: 700;">北咖<br/>啡厅</td>
+<td style="border: 1px solid #005e00; padding: 2px;">操作间地面回填</td>
+<td style="border: 1px solid #005e00; padding: 2px;">3</td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #ffffff; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #ffffff; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #ffffff; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #ffffff; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 2px;">瓦工2人</td>
+<td style="border: 1px solid #005e00; padding: 2px;">已到场</td>
+</tr>
+<tr>
+<td style="border: 1px solid #005e00; padding: 2px;">20</td>
+<td style="border: 1px solid #005e00; padding: 2px;">操作间地面JS防水施工</td>
+<td style="border: 1px solid #005e00; padding: 2px;">4</td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #ffffff; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #ffffff; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #ffffff; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 2px;">防水2人</td>
+<td style="border: 1px solid #005e00; padding: 2px;">已到场</td>
+</tr>
+<tr>
+<td style="border: 1px solid #005e00; padding: 2px;">21</td>
+<td style="border: 1px solid #005e00; padding: 2px;">样板区隔墙龙骨施工</td>
+<td style="border: 1px solid #005e00; padding: 2px;">7</td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 0 !important; position: relative; height: 22px;"><div style="background-color: #00b0f0; height: 100%; width: 100%; position: absolute; top: 0; left: 0; box-sizing: border-box;"></div></td>
+<td style="border: 1px solid #005e00; padding: 2px;">木工4人</td>
+<td style="border: 1px solid #005e00; padding: 2px;">已到场</td>
+</tr>
+</tbody>
+</table>
+</section>
+</main>
+</div>
+</div>
+
+<!-- 10 施工段划分 -->
+<div id="page10" class="page-wrapper">
+<div class="page-frame flex flex-col shadow-2xl" style="width: 1280px; height: 720px; margin: 0 auto; position: relative; overflow: hidden; background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDU7TNGR4ZJY5NZVDW3aB8gF9SHDwPneMmddwrOjAxHBWqpUPiPdY89DYLUyK_54gXXl48u-hZjJOlbG-ns0TlIAye7h28-NiasmCXz-woi3snea7cnVd43oJ7zelocgplpYDU2mbV_vNZEGXRhTgmiyDEF740qKNVH593gybowebimS4ghYOaH8nbqhDYy6NfZOxIQRXBfSi6stcNqvTmfkt92ue4ytdj6ifulMPUBcXoRFqe3YPQ2VJZfthXxI7a7EVBA3xzNe7xh'); background-size: cover; background-position: center;">
+<div class="header-trapezoid" style="position: absolute; top: 23px; left: 0; width: 58px; height: 52px; background-color: #37a3eb; clip-path: polygon(0 0, 60% 0, 100% 100%, 0 100%); z-index: 20;"></div>
+<div class="header-line" style="position: absolute; top: 75px; left: 72px; width: calc(100% - 72px); height: 3px; background-color: #37a3eb; z-index: 10;"></div>
+<div class="sub-title-bg" style="position: absolute; top: 78.5px; left: 72px; width: 285px; height: 38px; background: linear-gradient(to right, #facc15, #f43f5e); z-index: 5;"></div>
+<div class="sub-title-text" style="position: absolute; top: 82px; left: 83px; font-size: 22px; font-weight: 700; color: white; letter-spacing: 1px; z-index: 15;">4.1 食堂区施工段划分图</div>
+<header class="relative w-full pt-6 px-12">
+<div class="absolute top-[21px] left-[72px] text-[36px] font-bold text-[#37a3eb]">四、工作计划</div>
+</header>
+<main class="absolute top-[130px] left-12 right-12 bottom-12 flex flex-col">
+<div class="grid grid-cols-3 gap-6 flex-grow">
+<div class="flex flex-col">
+<div class="flex-grow bg-white border border-gray-300 p-2 flex items-center justify-center">
+<img alt="食堂一层施工段划分图" style="width: 100%; height: 100%; object-fit: contain;" src="10下周计划施工段划分-食堂一层.png"/>
+</div>
+<div style="text-align: center; font-size: 18px; font-weight: 700; color: #000000; margin-top: 12px;">食堂一层</div>
+</div>
+<div class="flex flex-col">
+<div class="flex-grow bg-white border border-gray-300 p-2 flex items-center justify-center">
+<img alt="食堂二层施工段划分图" style="width: 100%; height: 100%; object-fit: contain;" src="10下周计划施工段划分-食堂二层.png"/>
+</div>
+<div style="text-align: center; font-size: 18px; font-weight: 700; color: #000000; margin-top: 12px;">食堂二层</div>
+</div>
+<div class="flex flex-col">
+<div class="flex-grow bg-white border border-gray-300 p-2 flex items-center justify-center">
+<img alt="食堂B1层施工段划分图" style="width: 100%; height: 100%; object-fit: contain;" src="10下周计划施工段划分-食堂B1层.png"/>
+</div>
+<div style="text-align: center; font-size: 18px; font-weight: 700; color: #000000; margin-top: 12px;">食堂B1层</div>
+</div>
+</div>
+</main>
+</div>
+</div>
+
+<!-- 11 施工段计划 -->
+<div id="page11" class="page-wrapper">
+<div class="page-frame flex flex-col shadow-2xl" style="width: 1280px; height: 720px; margin: 0 auto; position: relative; overflow: hidden; background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBcCP3Q1-tdgKvIA3i01ahvXtYBF3c2paZPWQPDOKRjtsxkFErN2MXkYBK3kZ2JzAVxmavpaDL0hh524RsI7vaO0hkGWLjcO4utPx0h6VhM6mk5NtezpAKLOELiW3GPwzg4us3wyrLDeuLJTVFIeXCG_1Ogoesbzx4DKSUWub6n-JL5yVwrvHCQHgW1ibN9ZHUlz4nwkSN52SVujg1tXpwkThOnWOOA9jatdZhkT6keCA1mn6msWXVhJfFU9wjmN4wirpPH9mc71zVp'); background-size: cover; background-position: center;">
+<div class="header-trapezoid" style="position: absolute; top: 23px; left: 0; width: 58px; height: 52px; background-color: #37a3eb; clip-path: polygon(0 0, 60% 0, 100% 100%, 0 100%); z-index: 20;"></div>
+<div class="header-line" style="position: absolute; top: 75px; left: 72px; width: calc(100% - 72px); height: 3px; background-color: #37a3eb; z-index: 10;"></div>
+<div class="sub-title-bg" style="position: absolute; top: 78.5px; left: 72px; width: 340px; height: 38px; background: linear-gradient(to right, #facc15, #f43f5e); z-index: 5;"></div>
+<div class="sub-title-text" style="position: absolute; top: 82px; left: 83px; font-size: 22px; font-weight: 700; color: white; letter-spacing: 1px; z-index: 15;">4.1 食堂区5月份施工计划：</div>
+<header class="relative w-full pt-6 px-12">
+<div class="absolute top-[21px] left-[72px] text-[36px] font-bold text-[#37a3eb]">四、工作计划</div>
+</header>
+<main class="absolute top-[130px] left-12 right-12 bottom-12 overflow-auto">
+<table style="width: 100%; border-collapse: collapse; text-align: center; background-color: #f7f7f7; font-size: 12px; color: #333;">
+<thead>
+<tr>
+<th colspan="16" style="font-size: 14px; background-color: #f2f2f2; height: 36px; border: 1px solid #999; padding: 4px 2px;">26年5月施工进度计划跟踪表</th>
+</tr>
+<tr>
+<th rowspan="2" style="width: 40px; border: 1px solid #999; padding: 4px 2px; height: 28px;">序号</th>
+<th rowspan="2" style="width: 50px; border: 1px solid #999; padding: 4px 2px; height: 28px;">楼栋</th>
+<th rowspan="2" style="width: 50px; border: 1px solid #999; padding: 4px 2px; height: 28px;">部位</th>
+<th rowspan="2" style="width: 220px; border: 1px solid #999; padding: 4px 2px; height: 28px;">工序</th>
+<th colspan="3" style="background-color: #f4b084; border: 1px solid #999; padding: 4px 2px; height: 28px;">一层</th>
+<th colspan="3" style="background-color: #a9d08e; border: 1px solid #999; padding: 4px 2px; height: 28px;">二层</th>
+<th colspan="3" style="background-color: #9dc3e6; border: 1px solid #999; padding: 4px 2px; height: 28px;">B1层（1）</th>
+<th colspan="3" style="background-color: #9dc3e6; border: 1px solid #999; padding: 4px 2px; height: 28px;">B1层（2）</th>
+</tr>
+<tr>
+<th style="width: 60px; border: 1px solid #999; padding: 4px 2px; height: 28px;">开始时间</th>
+<th style="width: 60px; border: 1px solid #999; padding: 4px 2px; height: 28px;">完成时间</th>
+<th style="width: 40px; border: 1px solid #999; padding: 4px 2px; height: 28px;">日历天</th>
+<th style="width: 60px; border: 1px solid #999; padding: 4px 2px; height: 28px;">开始时间</th>
+<th style="width: 60px; border: 1px solid #999; padding: 4px 2px; height: 28px;">完成时间</th>
+<th style="width: 40px; border: 1px solid #999; padding: 4px 2px; height: 28px;">日历天</th>
+<th style="width: 60px; border: 1px solid #999; padding: 4px 2px; height: 28px;">开始时间</th>
+<th style="width: 60px; border: 1px solid #999; padding: 4px 2px; height: 28px;">完成时间</th>
+<th style="width: 40px; border: 1px solid #999; padding: 4px 2px; height: 28px;">日历天</th>
+<th style="width: 60px; border: 1px solid #999; padding: 4px 2px; height: 28px;">开始时间</th>
+<th style="width: 60px; border: 1px solid #999; padding: 4px 2px; height: 28px;">完成时间</th>
+<th style="width: 40px; border: 1px solid #999; padding: 4px 2px; height: 28px;">日历天</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">1</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">食堂</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">墙面</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">基层钢架（含墙面配管）</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/5</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/15</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">10</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/16</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/31</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">15</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">4/30</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/15</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">15</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/31</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">6/20</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">20</td>
+</tr>
+<tr>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">2</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">食堂</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">墙面</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">墙柱面基层封板</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/16</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/23</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">7</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/16</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/23</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">7</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+</tr>
+<tr>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">3</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">食堂</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">墙面</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">墙柱饰面材料深化下单</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/15</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">6/4</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">20</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/25</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">6/14</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">20</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/15</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">6/4</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">20</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/25</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">6/14</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">20</td>
+</tr>
+<tr>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">4</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">食堂</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">墙面</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+</tr>
+<tr>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">食堂</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">天花</td>
+<td style="background-color: #ffff00; font-weight: bold; border: 1px solid #999; padding: 4px 2px; height: 28px;">1专业管线移交</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">3/20</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">3/20</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">已移交</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">4/20</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">4/20</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">未移交</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">4/30</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">4/30</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">未移交</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">4/30</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">4/30</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">未移交</td>
+</tr>
+<tr>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">6</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">食堂</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">天花</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">2转换钢架造型龙骨及风管定位</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">3/21</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">4/15</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">25</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">4/21</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/11</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">20</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/1</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/21</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">20</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/11</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/31</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">20</td>
+</tr>
+<tr>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">7</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">食堂</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">天花</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">3龙骨安装、风管追位、其它机电末端定位</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">4/8</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">4/28</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">20</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/1</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/26</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">25</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/11</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">6/5</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">25</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/21</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">6/15</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">25</td>
+</tr>
+<tr>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">8</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">食堂</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">天花</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">4天花末端追位</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">4/18</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/8</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">20</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/11</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/31</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">20</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/26</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">6/15</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">20</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+</tr>
+<tr>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">9</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">食堂</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">天花</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5联合隐蔽验收</td>
+<td style="background-color: #ffff00; font-weight: bold; border: 1px solid #999; padding: 4px 2px; height: 28px;">5/8</td>
+<td style="background-color: #ffff00; font-weight: bold; border: 1px solid #999; padding: 4px 2px; height: 28px;">5/15</td>
+<td style="background-color: #ffff00; font-weight: bold; border: 1px solid #999; padding: 4px 2px; height: 28px;">7</td>
+<td style="background-color: #ffff00; font-weight: bold; border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="background-color: #ffff00; font-weight: bold; border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="background-color: #ffff00; font-weight: bold; border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="background-color: #ffff00; font-weight: bold; border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="background-color: #ffff00; font-weight: bold; border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="background-color: #ffff00; font-weight: bold; border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="background-color: #ffff00; font-weight: bold; border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="background-color: #ffff00; font-weight: bold; border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="background-color: #ffff00; font-weight: bold; border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+</tr>
+<tr>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">10</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">食堂</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">天花</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">6天花封板</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/16</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/31</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">15</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+</tr>
+<tr>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">11</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">食堂</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">天花</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">7天花腻子基层及底漆施工（断灰尘）</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">5/23</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">6/22</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;">30</td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+<td style="border: 1px solid #999; padding: 4px 2px; height: 28px;"></td>
+</tr>
+</tbody>
+</table>
+</main>
+</div>
+</div>
+
+<!-- 12 协调事宜 -->
+<div id="page12" class="page-wrapper">
+<div class="slide-container" style="width: 1280px; height: 720px; background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDU7TNGR4ZJY5NZVDW3aB8gF9SHDwPneMmddwrOjAxHBWqpUPiPdY89DYLUyK_54gXXl48u-hZjJOlbG-ns0TlIAye7h28-NiasmCXz-woi3snea7cnVd43oJ7zelocgplpYDU2mbV_vNZEGXRhTgmiyDEF740qKNVH593gybowebimS4ghYOaH8nbqhDYy6NfZOxIQRXBfSi6stcNqvTmfkt92ue4ytdj6ifulMPUBcXoRFqe3YPQ2VJZfthXxI7a7EVBA3xzNe7xh'); background-size: cover; background-position: center; position: relative; overflow: hidden; margin: 0 auto;">
+<div class="header-trapezoid" style="width: 58px; height: 52px; background-color: #37a3eb; clip-path: polygon(0 0, 60% 0, 100% 100%, 0 100%); position: absolute; top: 23px; left: 0;"></div>
+<div class="header-line" style="position: absolute; top: 75px; left: 72px; width: calc(100% - 72px); height: 3px; background-color: #37a3eb;"></div>
+<div class="main-title" style="position: absolute; top: 21px; left: 72px; font-size: 36px; font-weight: 700; color: #37a3eb; letter-spacing: 2px;">五、 协调事宜</div>
+<div class="sub-title-bg" style="position: absolute; top: 78.5px; left: 72px; width: 285px; height: 38px; background: linear-gradient(to right, #facc15, #f43f5e);"></div>
+<div class="sub-title-text" style="position: absolute; top: 82px; left: 83px; font-size: 22px; font-weight: 700; color: white; letter-spacing: 1px;">5.1 协调事宜</div>
+<table class="data-table" style="position: absolute; top: 122px; left: 73px; width: 1135px; border-collapse: collapse; border: 1px solid #166534;">
+<thead>
+<tr>
+<th class="col-seq" style="width: 78px; border: 1px solid #166534; background-color: #0ea5e9; color: white; font-size: 18px; font-weight: 700; height: 85px; text-align: center; letter-spacing: 1px;">序号</th>
+<th class="col-issue" style="width: 754px; border: 1px solid #166534; background-color: #0ea5e9; color: white; font-size: 18px; font-weight: 700; height: 85px; text-align: center; letter-spacing: 1px;">需协调事宜</th>
+<th class="col-propose" style="width: 151px; border: 1px solid #166534; background-color: #0ea5e9; color: white; font-size: 18px; font-weight: 700; height: 85px; text-align: center; letter-spacing: 1px;">提出部门</th>
+<th class="col-cooperate" style="width: 152px; border: 1px solid #166534; background-color: #0ea5e9; color: white; font-size: 18px; font-weight: 700; height: 85px; text-align: center; letter-spacing: 1px;">配合部门</th>
+</tr>
+</thead>
+<tbody>
+<tr><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td></tr>
+<tr><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td></tr>
+<tr><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td></tr>
+<tr><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td></tr>
+<tr><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td></tr>
+<tr><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td></tr>
+<tr><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td></tr>
+<tr><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td><td style="border: 1px solid #166534; background-color: #dbeafe; height: 40px;"></td></tr>
+</tbody>
+</table>
+</div>
+</div>
+
+</div>
+<script>
+    function showPage(id) {
+        document.querySelectorAll('.page-wrapper').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.nav-button').forEach(b => b.classList.remove('active'));
+        document.getElementById(id).classList.add('active');
+        const btns = document.querySelectorAll('.nav-button');
+        const idx = Array.from(document.querySelectorAll('.page-wrapper')).findIndex(p => p.id === id);
+        if (idx >= 0 && btns[idx]) btns[idx].classList.add('active');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+</script>
+</body>
+</html>
