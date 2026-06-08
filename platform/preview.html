@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>百草园周报 - 预览</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
@@ -25,6 +28,9 @@
   <iframe id="page-frame" src="preview_pages/01.html"></iframe>
 </div>
 
+<script src="js/nav_tree.js?v=v1"></script>
+<script src="js/store.js?v=v1"></script>
+<script src="js/preview_data.js?v=v1"></script>
 <script>
   const PAGES = [
     { id: "01",    title: "封面" },
@@ -47,6 +53,10 @@
     document.querySelectorAll('.page-nav button[data-id]').forEach(b => {
       b.classList.toggle('active', b.dataset.id === id);
     });
+    // 同步数据绑定 (单页)
+    if (window.PreviewData && typeof PreviewData.bindPage === 'function') {
+      PreviewData.bindPage(document.getElementById('page-frame'), id, PreviewData.resolvePeriod());
+    }
   }
 
   function buildNav() {
@@ -69,6 +79,20 @@
   function exportPPT() { alert("📊 导出 PPT: v2 阶段实现, v1 留接口"); }
 
   buildNav();
+  // v5.29: 顶部加周期选择器 + 启动数据绑定
+  // 把 <select> 插入到 nav 末尾, export-bar 之前
+  (function () {
+    var navEl = document.getElementById('nav');
+    if (!navEl) return;
+    var sel = document.createElement('select');
+    sel.id = 'period-sel';
+    sel.className = 'ml-auto bg-white/20 text-white text-xs px-2 py-1 rounded border border-white/30 cursor-pointer';
+    sel.title = '切换周报周期';
+    navEl.appendChild(sel);
+    if (window.PreviewData && typeof PreviewData.init === 'function') {
+      PreviewData.init();
+    }
+  })();
 </script>
 </body>
 </html>

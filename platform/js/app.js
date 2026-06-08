@@ -1,1286 +1,1772 @@
 // platform/js/app.js
-// 主应用入口
+// v5.2 主入口
 (function (global) {
-  let currentSection = "01";
+  let currentSection = (function() {
+    return localStorage.getItem('bcy_current_section') || '01';
+  })();
   let report = null;
-  let _periods = [];
-  let _currentPeriod = "2026-W20";
-  let _periodInterval = 7;
-  let _periodCount = 4;
+  let currentRole = 'submitter';  // submitter | reviewer
+  let _currentPeriod = localStorage.getItem('bcy_current_period') || (function() {
+  try {
+    const all = Store.getPeriods();
+    return all[all.length - 1] || '2026-W21';
+  } catch (e) { return '2026-W21'; }
+})();
+  // 暴露内部变量到 window, 供 report_list.js 等跨文件引用
+  window._currentPeriod_get = () => _currentPeriod;
+  window._currentPeriod_set = (p) => { _currentPeriod = p; };
 
-  // ====== 工具 ======
-  function $(sel, root) { return (root || document).querySelector(sel); }
-  function $$(sel, root) { return Array.from((root || document).querySelectorAll(sel)); }
-  function toLocalDateString(date) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  }
-  function setField(path, val) {
-    const parts = path.split(".");
-    let o = report;
-    for (let i = 0; i < parts.length - 1; i++) {
-      if (!o[parts[i]]) o[parts[i]] = {};
-      o = o[parts[i]];
-    }
-    o[parts[parts.length - 1]] = val;
-    Store.save(report, _currentPeriod);
-  }
-  function getField(path) {
-    return path.split(".").reduce((o, k) => o && o[k], report);
-  }
-  function updateField(field, value) {
-    setField(field, value);
-    
-    const parts = field.split('.');
-    if (parts[0] === 'period' && (parts[1] === 'start' || parts[1] === 'end')) {
-      const customPeriods = Store.getCustomPeriods();
-      if (!customPeriods[_currentPeriod]) {
-        customPeriods[_currentPeriod] = {};
-      }
-      customPeriods[_currentPeriod][parts[1]] = value;
-      localStorage.setItem('bcy_report_custom_periods', JSON.stringify(customPeriods));
-    }
-    
-    rerender();
-  }
+  function $(s, r) { return (r || document).querySelector(s); }
+  function $$(s, r) { return Array.from((r || document).querySelectorAll(s)); }
   function toast(msg, type) {
-    const el = document.createElement("div");
-    el.className = "toast " + (type || "");
+    const el = document.createElement('div');
+    el.className = 'toast ' + (type || '');
     el.textContent = msg;
-    $("#toast-container").appendChild(el);
+    $('#toast-container').appendChild(el);
     setTimeout(() => el.remove(), 2500);
   }
   function rerender() {
     renderPeriodSelector();
     renderNav();
     renderAnomalies();
+    renderRole();
     renderSection();
+    window.__report = report;
   }
-  function changePeriod(period) {
-    _currentPeriod = period;
-    Store.setCurrentPeriod(period);
-    report = Store.load(period);
+  function changePeriod(p) {
+    if (typeof localStorage !== 'undefined') localStorage.setItem('bcy_current_period', p);
+    _currentPeriod = p;
+    Store.setCurrentPeriod(p);
+    report = Store.load(p);
     rerender();
-    toast(`已切换到 ${period}`, "success");
+    const lf = localStorage.getItem('bcy_label_format') || 'custom';
+    const info = Store.getPeriodInfo(p, lf);
+    const displayName = info?.label || p;
+    toast('已切换到 ' + displayName, 'success');
   }
-  function renderPeriodSelector() {
-    const periods = Store.getPeriods();
-    const reportList = Store.getReportList();
-    const currentIndex = periods.indexOf(_currentPeriod);
-    
-    let selectorHtml = `
-      <div class="flex items-center gap-3">
-        <select id="period-select" onchange="App.changePeriod(this.value)" class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-1.5 focus:ring-blue-500">
-    `;
-    periods.forEach(p => {
-      const info = Store.getPeriodInfo(p);
-      const isCurrent = p === _currentPeriod;
-      const reportInfo = reportList.find(r => r.period === p);
-      const filledBadge = reportInfo?.is_filled ? ' ✓' : '';
-      selectorHtml += `<option value="${p}" ${isCurrent ? 'selected' : ''}>${info?.label || p}${filledBadge}</option>`;
-    });
-    selectorHtml += `
-        </select>
-        <div class="text-xs text-gray-500">
-          ${currentIndex + 1} / ${periods.length} 期
+  // 找节点的父数组 (找不到返回 null)
+  function findParentOfNode(tree, id, parent) {
+    if (!parent) parent = null;
+    for (const arr of [tree, ...getAllArrays(tree)]) {
+      const idx = arr.findIndex(n => n.id === id);
+      if (idx >= 0) return arr;
+    }
+    return null;
+  }
+  function getAllArrays(node) {
+    const out = [];
+    function walk(n) {
+      if (n.children) {
+        for (const c of n.children) {
+          out.push(n.children);
+          walk(c);
+        }
+      }
+    }
+    if (Array.isArray(node)) node.forEach(walk);
+    else walk(node);
+    return out;
+  }
+  
+  // 自定义 prompt modal
+  function promptModal(title, defaultValue, onConfirm, onCancel) {
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
+    overlay.id = 'prompt-modal-overlay';
+    overlay.onclick = () => { overlay.remove(); if (onCancel) onCancel(); };
+    overlay.innerHTML = `
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4" onclick="event.stopPropagation()">
+        <div class="px-6 py-4 border-b"><h3 class="font-semibold text-gray-800">${title}</h3></div>
+        <div class="p-6">
+          <input type="text" id="prompt-modal-input" value="${(defaultValue || '').replace(/"/g, '&quot;')}"
+                 class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                 onkeydown="if(event.key==='Enter') document.getElementById('prompt-modal-ok').click();">
         </div>
-        <button onclick="App.showReportList()" class="text-xs px-2 py-1 bg-blue-100 text-blue-600 rounded-md hover:bg-blue-200 transition-colors">
-          📋 周报列表
-        </button>
+        <div class="flex gap-3 px-6 pb-6">
+          <button id="prompt-modal-cancel" class="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200">取消</button>
+          <button id="prompt-modal-ok" class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">确定</button>
+        </div>
       </div>
     `;
-    $("#period-selector").innerHTML = selectorHtml;
+    document.body.appendChild(overlay);
+    const input = document.getElementById('prompt-modal-input');
+    input.focus(); input.select();
+    document.getElementById('prompt-modal-ok').onclick = () => {
+      const v = input.value;
+      overlay.remove();
+      if (onConfirm) onConfirm(v);
+    };
+    document.getElementById('prompt-modal-cancel').onclick = () => {
+      overlay.remove();
+      if (onCancel) onCancel();
+    };
+  }
+  
+  // 自定义 confirm modal
+  function confirmModal(title, message, onConfirm, onCancel) {
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
+    overlay.id = 'confirm-modal-overlay';
+    overlay.onclick = () => { overlay.remove(); if (onCancel) onCancel(); };
+    overlay.innerHTML = `
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4" onclick="event.stopPropagation()">
+        <div class="px-6 py-4 border-b"><h3 class="font-semibold text-gray-800">${title}</h3></div>
+        <div class="p-6 text-sm text-gray-700">${message}</div>
+        <div class="flex gap-3 px-6 pb-6">
+          <button id="confirm-modal-cancel" class="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200">取消</button>
+          <button id="confirm-modal-ok" class="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">确定</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    document.getElementById('confirm-modal-ok').onclick = () => {
+      overlay.remove();
+      if (onConfirm) onConfirm();
+    };
+    document.getElementById('confirm-modal-cancel').onclick = () => {
+      overlay.remove();
+      if (onCancel) onCancel();
+    };
+  }
+
+  // 图片灯箱: 全屏显示单张大图, 点击背景/×/按 Esc 关闭
+  function imageModal(src, caption) {
+    if (!src) return;
+    // 防止重复打开
+    if (document.getElementById('image-modal-overlay')) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'image-modal-overlay';
+    overlay.className = 'fixed inset-0 bg-black/85 flex items-center justify-center z-50 p-4';
+    // caption 转义 (防 attribute 注入)
+    const safeCaption = String(caption || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    overlay.innerHTML = `
+      <button type="button" id="image-modal-close" class="absolute top-3 right-4 text-white/80 hover:text-white text-3xl leading-none" title="关闭 (Esc)">×</button>
+      <img src="${src.replace(/"/g, '&quot;')}" class="max-w-[92vw] max-h-[88vh] object-contain shadow-2xl rounded" onclick="event.stopPropagation()">
+      ${safeCaption ? '<div class="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 text-white text-sm px-3 py-1.5 rounded max-w-[80vw] text-center">' + safeCaption + '</div>' : ''}
+    `;
+    // 点 overlay 背景关闭 (点图片不关, 因为 stopPropagation)
+    overlay.onclick = () => overlay.remove();
+    document.body.appendChild(overlay);
+    document.getElementById('image-modal-close').onclick = (e) => { e.stopPropagation(); overlay.remove(); };
+    // Esc 键关闭
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        overlay.remove();
+        document.removeEventListener('keydown', onKey);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+  }
+  
+    function changeRole(role) {
+    currentRole = role;
+    rerender();
+    toast('已切到 ' + (role === 'submitter' ? '填报人' : '复核人') + ' 视角', 'info');
+  }
+  function init() {
+    if (global.ReportList) bindReportList();
+    report = Store.load(_currentPeriod);
+    setupPersistentFileInput();
+    initSidebar();
+    // 历史数据迁移: report 体积大时, 一次性把已有大照片重新压缩以释放配额
+    // 同步先 rerender 让 UI 立等可用, 迁移在后台跑完 toast 通知
+    rerender();
+    try {
+      const reportSize = new Blob([JSON.stringify(report)]).size;
+      if (reportSize > 3 * 1024 * 1024) {
+        toast('检测到本地存储较满, 正在后台压缩已有大照片...', 'info');
+        migrateLargePhotos(report).then(n => {
+          if (n > 0) {
+            safeSave(report, _currentPeriod);
+            const newSize = new Blob([JSON.stringify(report)]).size;
+            toast('已压缩 ' + n + ' 张旧照片 · 存储 ' + (reportSize / 1024 / 1024).toFixed(2) + 'MB → ' + (newSize / 1024 / 1024).toFixed(2) + 'MB', 'success');
+          }
+        });
+      }
+    } catch (e) { /* 测量失败不影响主流程 */ }
+    $('#btn-preview').addEventListener('click', openPreview);
+    $('#btn-rebuild-ai').addEventListener('click', rebuildAI);
+    $('#btn-capture').addEventListener('click', () => Capture.openCaptureModal());
+    toast('平台已加载 · ' + _currentPeriod + ' 就绪', 'success');
+  }
+
+  // 把图片压成 dataURL: 缩到 maxDim, JPEG 重编码
+  //   1MB PNG @3000x2000 → ~150-300KB JPEG @1600x1067 (压缩到 1/5~1/8)
+  //   base64 写 localStorage 必须小, 不然 6+ 张就 QuotaExceededError
+  //   接受 File / Blob (新上传) 或 dataURL 字符串 (迁移旧图)
+  function compressImage(source, maxDim, quality) {
+    maxDim = maxDim || 1600;
+    quality = quality || 0.85;
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      let objUrl = null;
+      if (typeof source === 'string') {
+        // 已是 dataURL, 直接用, 不需要 revoke
+        img.src = source;
+      } else {
+        objUrl = URL.createObjectURL(source);
+        img.src = objUrl;
+      }
+      img.onload = () => {
+        if (objUrl) URL.revokeObjectURL(objUrl);
+        let w = img.naturalWidth, h = img.naturalHeight;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
+          else       { w = Math.round(w * maxDim / h); h = maxDim; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        canvas.toBlob((blob) => {
+          if (!blob) { reject(new Error('canvas.toBlob 返回空')); return; }
+          const r = new FileReader();
+          r.onload = () => resolve({ dataUrl: r.result, width: w, height: h, size: blob.size });
+          r.onerror = () => reject(r.error);
+          r.readAsDataURL(blob);
+        }, 'image/jpeg', quality);
+      };
+      img.onerror = () => { if (objUrl) URL.revokeObjectURL(objUrl); reject(new Error('图片解码失败')); };
+    });
+  }
+
+  // 一次性迁移: report 里所有 >200KB 的 dataURL 照片重新压一遍
+  //   解决历史数据: 用户在我加 compressImage 之前上传的图都是裸 base64
+  //   检测到 report 体积 > 3MB 时调用, 压完覆盖写回 + 存盘
+  async function migrateLargePhotos(report) {
+    const refs = [];
+    (report.site_photos || []).forEach(p => { if (p && p.url) refs.push({ target: p, key: 'url' }); });
+    if (report.ui_config && report.ui_config.s06_photo) {
+      refs.push({ target: report.ui_config, key: 's06_photo' });
+    }
+    // 估算每个 ref 当前的 dataURL 长度
+    const big = refs.filter(r => r.target[r.key] && r.target[r.key].length > 200 * 1024);
+    if (big.length === 0) return 0;
+    let n = 0;
+    for (const r of big) {
+      try {
+        const { dataUrl } = await compressImage(r.target[r.key]);
+        r.target[r.key] = dataUrl;
+        n++;
+      } catch (e) { /* 单张失败跳过, 不阻塞整体 */ }
+    }
+    return n;
+  }
+
+  // 兜底: Store.save 抛 QuotaExceededError 时给个明确提示, 不让流程静默崩
+  function safeSave(r, period) {
+    try {
+      Store.save(r, period);
+    } catch (e) {
+      if (e && e.name === 'QuotaExceededError') {
+        toast('本地存储已满, 请删除部分旧照片或控制台执行 Store.reset() 重置', 'error');
+      } else {
+        throw e;
+      }
+    }
+  }
+
+  // 常驻 hidden file input + 一次性 onchange
+  //   之前 s05UploadSlot 每次 click 都新建一个 detached <input type=file> 再 .click(),
+  // 侧边栏: 拖拽改宽度 + 折叠/展开, 状态存 localStorage
+  //   - 展开态: 200-500px 自由拖, 默认 256px
+  //   - 折叠态: 32px, 只剩 « / » 切换按钮, 拖右边手柄可直接展开
+  //   - 状态键 bcy_sidebar: { w: number, c: boolean }
+  const SIDEBAR_KEY = 'bcy_sidebar';
+  let sidebarW = 256;
+  let sidebarCollapsed = false;
+  function initSidebar() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(SIDEBAR_KEY) || '{}');
+      if (typeof saved.w === 'number' && saved.w >= 200 && saved.w <= 500) sidebarW = saved.w;
+      sidebarCollapsed = !!saved.c;
+    } catch (e) { /* ignore */ }
+    applySidebar();
+    bindSidebarToggle();
+    bindSidebarResize();
+  }
+  function applySidebar() {
+    const aside = document.getElementById('sidebar');
+    if (!aside) return;
+    const w = sidebarCollapsed ? 32 : sidebarW;
+    aside.style.width = w + 'px';
+    aside.classList.toggle('sidebar-collapsed', sidebarCollapsed);
+    const toggle = document.getElementById('sidebar-toggle');
+    if (toggle) toggle.textContent = sidebarCollapsed ? '»' : '«';
+    try { localStorage.setItem(SIDEBAR_KEY, JSON.stringify({ w: sidebarW, c: sidebarCollapsed })); } catch (e) { /* ignore */ }
+  }
+  function bindSidebarToggle() {
+    const btn = document.getElementById('sidebar-toggle');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      sidebarCollapsed = !sidebarCollapsed;
+      applySidebar();
+    });
+  }
+  function bindSidebarResize() {
+    const handle = document.getElementById('sidebar-resize-handle');
+    const aside = document.getElementById('sidebar');
+    if (!handle || !aside) return;
+    let startX = 0, startW = 0;
+    const onMove = (e) => {
+      let w = startW + (e.clientX - startX);
+      if (w < 200) w = 200;
+      if (w > 500) w = 500;
+      sidebarW = w;
+      sidebarCollapsed = false;  // 拖出宽度 = 展开
+      aside.style.width = w + 'px';
+      aside.classList.remove('sidebar-collapsed');
+      const toggle = document.getElementById('sidebar-toggle');
+      if (toggle) toggle.textContent = '«';
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      handle.classList.remove('dragging');
+      document.body.style.cursor = '';
+      applySidebar();  // 落盘
+    };
+    handle.addEventListener('mousedown', (e) => {
+      startX = e.clientX;
+      startW = sidebarCollapsed ? 32 : sidebarW;
+      handle.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+      e.preventDefault();
+    });
+  }
+
+  //   部分浏览器 (尤其桌面 WebKit / 严格 Chromium 配置) 不响应 detached input 的文件对话框.
+  //   改成初始化时挂一个到 body, onchange 走 dataset 里的 idx/slot.
+  function setupPersistentFileInput() {
+    const fi = document.createElement('input');
+    fi.type = 'file';
+    fi.accept = 'image/*';
+    fi.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0;';
+    document.body.appendChild(fi);
+    global._s05FileInput = fi;
+
+    fi.addEventListener('change', (e) => {
+      const idx = parseInt(fi.dataset.idx, 10);
+      const slot = parseInt(fi.dataset.slot, 10);
+      const file = e.target.files && e.target.files[0];
+      if (!Number.isFinite(idx) || !Number.isFinite(slot)) return;
+      if (!file) return;
+      if (file.size > 5 * 1024 * 1024) {
+        toast('原图超过 5MB, 请先在系统图片工具里压一下再上传', 'error');
+        return;
+      }
+      compressImage(file).then(({ dataUrl, width, height, size }) => {
+        const insts = Sections['05'].materialize(report);
+        const inst = insts[idx];
+        if (!inst) { toast('目标区域不存在, 请刷新重试', 'error'); return; }
+        const target = inst.data[slot] || { area: inst.keyValue, url: '', caption: '' };
+        target.url = dataUrl;
+        target.width = width;
+        target.height = height;
+        if (!inst.data[slot]) {
+          report.site_photos = report.site_photos || [];
+          report.site_photos.push(target);
+        } else {
+          const wd = report.site_photos || [];
+          const wdIdx = wd.indexOf(inst.data[slot]);
+          if (wdIdx >= 0) wd[wdIdx] = target;
+        }
+        safeSave(report, _currentPeriod); rerender();
+        toast('已上传到 ' + inst.keyValue + ' · ' + width + 'x' + height + ' · ' + (size / 1024).toFixed(0) + 'KB', 'success');
+      }).catch((err) => {
+        toast('压缩失败: ' + (err && err.message ? err.message : err), 'error');
+      });
+    });
+  }
+
+  // ===== 桥接 ReportList =====
+  // 不再自动覆盖 App 上的方法 (会覆盖掉我们手动加的 toggleLabelFormat 增强版)
+  // 所有 ReportList 桥接都显式写在 App 对象里
+  function bindReportList() {
+    // 留空 - 桥接在 App 对象定义时显式完成
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  // ===== 渲染 =====
+  function renderPeriodSelector() {
+    const periods = Store.getPeriods();
+    const sel = $('#period-select');
+    if (!sel) return;
+    // 用 getPeriodInfo 算 label (尊重用户当前的 standard/custom 模式)
+    const labelFormat = localStorage.getItem('bcy_label_format') || 'custom';
+    sel.innerHTML = periods.map(p => {
+      const info = Store.getPeriodInfo(p, labelFormat);
+      const displayLabel = info?.label || p;
+      return `<option value="${p}" ${p === _currentPeriod ? 'selected' : ''}>${displayLabel}</option>`;
+    }).join('');
+    sel.onchange = () => changePeriod(sel.value);
   }
   function renderNav() {
-    const nav = $("#section-nav");
-    nav.innerHTML = Store.GROUPS.map(g => {
-      const pages = Store.getPagesByGroup(g.id);
-      const single = pages.length === 1;
-      if (single) {
-        const p = pages[0];
-        const filled = countFilled(p.id);
-        const total = countTotal(p.id);
-        const need = total ? filled < total : false;
-        const aiBadge = p.ai ? '<span class="text-[10px] bg-blue-100 text-blue-600 px-1 rounded ml-1">AI</span>' : '';
-        return `
-          <div class="section-nav-item ${currentSection === p.id ? 'active' : ''}" data-id="${p.id}" onclick="App.goto('${p.id}')">
-            <span class="truncate flex-1">${g.title}</span>
-            ${aiBadge}
-            ${need ? '<span class="badge bg-amber-100 text-amber-700">●</span>' : '<span class="badge bg-emerald-100 text-emerald-700">✓</span>'}
-          </div>`;
-      }
-      const expanded = _expandedGroups.has(g.id);
-      const completed = pages.filter(p => countFilled(p.id) >= countTotal(p.id)).length;
-      const need = completed < pages.length;
-      const aiBadge = pages.some(p => p.ai) ? '<span class="text-[10px] bg-blue-100 text-blue-600 px-1 rounded ml-1">AI</span>' : '';
-      return `
-        <div class="section-nav-group">
-          <div class="section-nav-group-header" onclick="App.toggleGroup('${g.id}')">
-            <span class="toggle-icon ${expanded ? 'expanded' : 'collapsed'}">▾</span>
-            <span class="truncate flex-1">${g.title}</span>
-            ${aiBadge}
-            ${need ? '<span class="badge bg-amber-100 text-amber-700">●</span>' : '<span class="badge bg-emerald-100 text-emerald-700">✓</span>'}
-          </div>
-          <div class="section-nav-children ${expanded ? 'expanded' : ''}">
-            ${pages.map(p => {
-              const pf = countFilled(p.id);
-              const pt = countTotal(p.id);
-              const pneed = pt ? pf < pt : false;
-              return `
-                <div class="section-nav-item sub ${currentSection === p.id ? 'active' : ''}" data-id="${p.id}" onclick="App.goto('${p.id}')">
-                  <span class="text-xs text-gray-400 mr-1">${p.id}</span>
-                  <span class="truncate">${p.title}</span>
-                  ${pneed ? '<span class="badge bg-amber-100 text-amber-700">●</span>' : '<span class="badge bg-emerald-100 text-emerald-700">✓</span>'}
-                </div>`;
-            }).join("")}
-          </div>
-        </div>`;
-    }).join("");
-    setTimeout(() => {
-      document.querySelectorAll('.section-nav-children.expanded').forEach(el => {
-        el.style.maxHeight = el.scrollHeight + 'px';
-      });
-    }, 50);
-  }
-  function toggleGroup(gid) {
-    const el = document.querySelector(`.section-nav-group:has(.section-nav-group-header[onclick*="${gid}"]) .section-nav-children`);
-    const icon = document.querySelector(`.section-nav-group:has(.section-nav-group-header[onclick*="${gid}"]) .toggle-icon`);
-    if (!el) return;
-    if (_expandedGroups.has(gid)) {
-      _expandedGroups.delete(gid);
-      el.style.maxHeight = '0';
-      icon.classList.remove('expanded');
-      icon.classList.add('collapsed');
-    } else {
-      _expandedGroups.add(gid);
-      el.style.maxHeight = el.scrollHeight + 'px';
-      icon.classList.remove('collapsed');
-      icon.classList.add('expanded');
-    }
-  }
-  function countFilled(pageId) {
-    const page = Store.PAGES.find(p => p.id === pageId);
-    if (!page) return 0;
-    switch(pageId) {
-      case "03": return report.roster?.filter(r => r.name).length || 0;
-      case "04": return report.work_done?.filter(w => w.task).length || 0;
-      case "05": return report.executive_work?.filter(w => w.task).length || 0;
-      case "06": return report.labor_stats?.length > 0 ? 1 : 0;
-      case "07": return report.ecc_items?.filter(e => e.seq).length || 0;
-      case "08": return report.design_items?.filter(d => d.item).length || 0;
-      case "09": return report.plan_items?.filter(p => p.task).length || 0;
-      case "10": return report.schedule_items?.filter(s => s.seq).length || 0;
-      case "12": return report.coordination?.filter(c => c.content).length || 0;
-      default: return 1;
-    }
-  }
-  function countTotal(pageId) {
-    const page = Store.PAGES.find(p => p.id === pageId);
-    if (!page) return 0;
-    switch(pageId) {
-      case "03": return 23;
-      case "04": return 10;
-      case "05": return 4;
-      case "06": return 1;
-      case "07": return report.ecc_items?.length || 11;
-      case "08": return 8;
-      case "09": return 21;
-      case "10": return report.schedule_items?.length || 11;
-      case "12": return 8;
-      default: return 1;
-    }
+    const nav = $('#section-nav');
+    if (!nav || !report.nav_tree) return;
+    // currentSection 是 page_id, 转成 node.id 给 renderHTML
+    const activeNode = findNodeByPageId(report.nav_tree, currentSection);
+    const activeId = activeNode ? activeNode.id : currentSection;
+    const filter = (function() {
+      try {
+        return JSON.parse(localStorage.getItem('bcy_nav_filter') || 'null') || { chapter: true, page: true, closing: false };
+      } catch(e) { return { chapter: true, page: true, closing: false }; }
+    })();
+    nav.innerHTML = NavTree.renderHTML(report.nav_tree, { activeId: activeId, filter: filter });
+    // 绑定点击
+    $$('.nav-node').forEach(el => {
+      el.onclick = (e) => {
+        if (e.target.closest('button')) return;
+        const id = el.dataset.nodeId;
+        const node = NavTree.findNode(report.nav_tree, id);
+        if (node) {
+          if (node.type === 'page' && node.page_id) {
+            currentSection = node.page_id;
+            if (typeof localStorage !== 'undefined') localStorage.setItem('bcy_current_section', currentSection);
+            rerender();
+          } else if (node.type === 'chapter' && node.children && node.children.length > 0) {
+            // chapter 节点点击 -> 只展开/折叠 (不切 currentSection)
+            if (typeof window._toggleCollapse === 'function') window._toggleCollapse(node.id);
+            rerender();
+          }
+        }
+      };
+      // 拖拽
+      el.ondragstart = (e) => {
+        e.dataTransfer.setData('text/node-id', el.dataset.nodeId);
+      };
+      el.ondragover = (e) => e.preventDefault();
+      el.ondrop = (e) => {
+        e.preventDefault();
+        const draggedId = e.dataTransfer.getData('text/node-id');
+        const targetId = el.dataset.nodeId;
+        if (draggedId === targetId) return;
+        const rect = el.getBoundingClientRect();
+        const pos = e.clientY < rect.top + rect.height / 3 ? 'before' :
+                    e.clientY > rect.bottom - rect.height / 3 ? 'after' : 'inside';
+        NavTree.moveNode(report.nav_tree, draggedId, targetId, pos);
+        Store.save(report, _currentPeriod);
+        rerender();
+        toast('已移动节点, prefix 自动重排', 'success');
+      };
+    });
   }
   function renderAnomalies() {
     const anomalies = Rules.detectAll(report);
     report.ai_review = report.ai_review || {};
     report.ai_review.anomalies = anomalies;
     report.ai_review.generated_at = new Date().toISOString();
-    const banner = $("#anomaly-banner");
+    const banner = $('#anomaly-banner');
+    if (!banner) return;
     if (!anomalies.length) {
-      banner.innerHTML = `
-        <div class="mb-4 p-3 rounded-md border border-emerald-200 bg-emerald-50 flex items-center gap-2">
-          <span class="text-emerald-600 text-lg">✓</span>
-          <span class="text-sm text-emerald-800">AI 已全量出报告，${report.ai_review.evidence?.continued_from_last_week?.length || 0} 项上周未完已续排。无异常，可直接导出。</span>
-        </div>`;
+      banner.innerHTML = `<div class="mb-3 p-2 rounded border border-emerald-200 bg-emerald-50 text-sm text-emerald-800">✓ AI 已全量出报告, 无异常, 可直接导出</div>`;
       return;
     }
     const grouped = { red: [], yellow: [], blue: [] };
     anomalies.forEach(a => grouped[a.level].push(a));
-    const levelLabel = { red: "🔴 阻塞", yellow: "🟡 建议", blue: "🔵 提示" };
-    banner.innerHTML = `
-      <div class="mb-4 space-y-2">
-        ${Object.entries(grouped).filter(([_, arr]) => arr.length).map(([lvl, arr]) => `
-          <div>
-            <div class="text-xs font-medium text-slate-600 mb-1">${levelLabel[lvl]} (${arr.length})</div>
-            ${arr.map(a => `
-              <div class="anomaly-card ${lvl} mb-1">
-                <span class="level">${lvl.toUpperCase()}</span>
-                <div class="flex-1 text-sm text-slate-800">${escapeHtml(a.msg)}</div>
-                <button class="text-xs text-blue-600 hover:underline" onclick="App.goto('${a.section}')">→ 查看</button>
-              </div>`).join("")}
-          </div>`).join("")}
-      </div>`;
+    const label = { red: '🔴 阻塞', yellow: '🟡 警告', blue: '🔵 提示' };
+    let html = '';
+    ['red', 'yellow', 'blue'].forEach(lv => {
+      if (grouped[lv].length) {
+        html += `<div class="mb-2 p-2 rounded border border-${lv === 'red' ? 'red' : lv === 'yellow' ? 'amber' : 'sky'}-200 bg-${lv === 'red' ? 'red' : lv === 'yellow' ? 'amber' : 'sky'}-50 text-xs">
+          <div class="font-medium mb-1">${label[lv]} (${grouped[lv].length})</div>
+          ${grouped[lv].map(a => `<div>• ${a.msg} <button onclick="App.gotoSection('${a.section}')" class="text-blue-600 hover:underline">→ 跳转</button></div>`).join('')}
+        </div>`;
+      }
+    });
+    banner.innerHTML = html;
   }
-  function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+  function renderRole() {
+    const tog = $('#role-toggle');
+    if (tog) {
+      tog.innerHTML = `<button class="px-3 py-1 rounded ${currentRole === 'submitter' ? 'bg-blue-600 text-white' : 'bg-slate-200'}" onclick="App.changeRole('submitter')">填报人</button>
+                       <button class="px-3 py-1 rounded ${currentRole === 'reviewer' ? 'bg-blue-600 text-white' : 'bg-slate-200'}" onclick="App.changeRole('reviewer')">复核人</button>`;
+    }
+  }
   function renderSection() {
-    const sec = Sections[currentSection];
-    if (!sec) return;
-    $("#section-content").innerHTML = sec.render(report);
-  }
-  function goto(id) {
-    currentSection = id;
-    const page = Store.PAGES.find(p => p.id === id);
-    if (page && page.group) {
-      _expandedGroups.add(page.group);
+    const content = $('#section-content');
+    if (!content) return;
+    const sec = window.Sections && window.Sections[currentSection];
+    if (!sec) {
+      content.innerHTML = `<div class="p-4 text-slate-500">章节 ${currentSection} 暂未实现</div>`;
+      return;
     }
-    rerender();
-    document.getElementById("section-content").scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-
-  // ====== 初始化 ======
-  let _expandedGroups = new Set(['g_ch2', 'g_ch4']);
-  function init() {
-    report = Store.load(_currentPeriod);
-    initPeriods();
-    renderNav();
-    renderAnomalies();
-    renderSection();
-    $("#btn-preview").addEventListener("click", openPreview);
-    $("#btn-rebuild-ai").addEventListener("click", rebuildAI);
-    toast("平台已加载 · W20 周报就绪", "success");
-  }
-  document.addEventListener("DOMContentLoaded", init);
-
-  // ====== 周期管理 ======
-  function initPeriods() {
-    _periods = Store.getPeriods();
-    renderPeriodSelector();
-  }
-  function showReportList() {
-    const reportList = Store.getReportList();
-    let html = `
-      <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" id="report-list-overlay" onclick="this.remove()">
-        <div class="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4" onclick="event.stopPropagation()">
-          <div class="flex items-center justify-between px-6 py-4 border-b">
-            <h3 class="font-semibold text-gray-800">📋 周报列表</h3>
-            <div class="flex items-center gap-3">
-              <span id="batch-select-info" class="text-xs text-gray-500 hidden">已选择 <span id="selected-count">0</span> 项</span>
-              <button id="batch-delete-btn" onclick="App.batchDeleteReports()" class="text-xs px-3 py-1 bg-red-100 text-red-600 rounded-md hover:bg-red-200 transition-colors hidden">
-                🗑 批量删除
-              </button>
-              <button onclick="document.getElementById('report-list-overlay').remove()" class="text-gray-400 hover:text-gray-600">✕</button>
-            </div>
-          </div>
-          <div class="max-h-80 overflow-y-auto">
-            <div class="px-6 py-2 border-b border-gray-100">
-              <label class="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" id="select-all" onchange="App.toggleSelectAll(this.checked)" class="rounded border-gray-300 text-blue-600">
-                <span class="text-xs text-gray-500">全选</span>
-              </label>
-            </div>
-            ${reportList.map((r, i) => {
-              const info = Store.getPeriodInfo(r.period);
-              const isCurrent = r.period === _currentPeriod;
-              const isBasePeriod = r.period === (localStorage.getItem('bcy_base_period') || '2026-W20');
-              return `
-                <div class="flex items-center gap-3 px-6 py-3 hover:bg-gray-50 cursor-pointer transition-colors ${isCurrent ? 'bg-blue-50' : ''}">
-                  <input type="checkbox" class="period-checkbox rounded border-gray-300 text-blue-600" 
-                         value="${r.period}" ${isCurrent ? 'disabled' : ''} onchange="App.updateBatchSelectInfo()">
-                  <div onclick="App.changePeriod('${r.period}'); document.getElementById('report-list-overlay').remove()" class="flex-1">
-                    <div class="font-medium text-gray-800">${info?.label || r.period}</div>
-                    <div class="text-xs text-gray-500">${info?.start || ''} ~ ${info?.end || ''}</div>
-                  </div>
-                  <div class="flex items-center gap-1">
-                    ${r.is_filled ? '<span class="text-green-500">✓</span>' : '<span class="text-gray-300">○</span>'}
-                    ${isCurrent ? '<span class="text-xs px-2 py-0.5 bg-blue-100 text-blue-600 rounded">当前</span>' : ''}
-                    <span class="text-xs px-2 py-0.5 ${isBasePeriod ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-500'} rounded">${isBasePeriod ? '基准' : ''}</span>
-                    <button onclick="event.stopPropagation(); App.renameReport('${r.period}')" class="text-xs px-2 py-1 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded">编辑名称</button>
-                    <button onclick="event.stopPropagation(); App.editPeriodDates('${r.period}')" class="text-xs px-2 py-1 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded">编辑日期</button>
-                    <button onclick="event.stopPropagation(); App.setAsBasePeriod('${r.period}')" class="text-xs px-2 py-1 text-gray-500 hover:text-yellow-600 hover:bg-yellow-50 rounded">设为基准</button>
-                    ${!isCurrent ? `<button onclick="event.stopPropagation(); App.deleteReport('${r.period}')" class="text-xs px-2 py-1 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded">删除</button>` : ''}
-                  </div>
-                </div>
-              `;
-            }).join("")}
-          </div>
-          <div class="px-6 py-3 border-t flex justify-end gap-2">
-            <button onclick="App.showGeneratePeriodsDialog();" class="text-sm px-4 py-2 bg-purple-100 text-purple-600 rounded-lg hover:bg-purple-200 transition-colors">
-              ⚡ 生成周期
-            </button>
-            <button onclick="document.getElementById('report-list-overlay').remove()" class="text-sm px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
-              取消
-            </button>
-            <button onclick="App.addNewPeriod(); document.getElementById('report-list-overlay').remove()" class="text-sm px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
-              + 新建周报
-            </button>
-          </div>
-        </div>
-      </div>
-    `;
-    document.body.insertAdjacentHTML('beforeend', html);
-  }
-  function toggleSelectAll(checked) {
-    const checkboxes = document.querySelectorAll('.period-checkbox:not(:disabled)');
-    checkboxes.forEach(cb => cb.checked = checked);
-    updateBatchSelectInfo();
-  }
-  function updateBatchSelectInfo() {
-    const checkedBoxes = document.querySelectorAll('.period-checkbox:checked');
-    const count = checkedBoxes.length;
-    const infoEl = document.getElementById('batch-select-info');
-    const btnEl = document.getElementById('batch-delete-btn');
-    const countEl = document.getElementById('selected-count');
-    
-    if (count > 0) {
-      infoEl.classList.remove('hidden');
-      btnEl.classList.remove('hidden');
-      countEl.textContent = count;
+    const html = sec.render(report);
+    // 渲染后调 init (让 Choices.js 接管 select)
+    if (sec && typeof sec.initFilter === 'function') {
+      setTimeout(() => { try { sec.initFilter(); } catch(e) { console.error('initFilter error', e); } }, 0);
+    }
+    if (currentRole === 'reviewer') {
+      content.innerHTML = `<div class="bg-amber-50 border border-amber-200 p-2 rounded mb-2 text-xs">📋 复核人视角 (只读, 不允许编辑)</div>` + html;
+      // 禁用所有 input/select/button, 同时冻住 contenteditable (s11 数据 cell / s11-section-name 等)
+      setTimeout(() => {
+        $$('#section-content input, #section-content select, #section-content button').forEach(el => {
+          if (!el.dataset.reviewerAllowed) el.disabled = true;
+        });
+        $$('#section-content [contenteditable]').forEach(el => {
+          if (!el.dataset.reviewerAllowed) el.setAttribute('contenteditable', 'false');
+        });
+      }, 0);
     } else {
-      infoEl.classList.add('hidden');
-      btnEl.classList.add('hidden');
+      content.innerHTML = html;
     }
   }
-  function batchDeleteReports() {
-    const checkedBoxes = document.querySelectorAll('.period-checkbox:checked');
-    const periods = Array.from(checkedBoxes).map(cb => cb.value);
-    
-    if (periods.length === 0) {
-      toast("请先选择要删除的周报", "error");
-      return;
-    }
-    
-    const confirmHtml = `
-      <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" id="batch-delete-confirm">
-        <div class="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4" onclick="event.stopPropagation()">
-          <div class="flex flex-col items-center p-6">
-            <div class="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mb-4">
-              <span class="text-3xl">🗑️</span>
-            </div>
-            <h3 class="text-lg font-semibold text-gray-800 mb-2">批量删除确认</h3>
-            <p class="text-sm text-gray-600 text-center mb-6">
-              确定要删除选中的 <span class="font-medium">${periods.length}</span> 个周报吗？<br/>
-              此操作不可恢复，所有数据将被永久删除。
-            </p>
-            <div class="flex gap-3 w-full">
-              <button onclick="document.getElementById('batch-delete-confirm').remove()" class="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
-                取消
-              </button>
-              <button onclick="App.confirmBatchDelete()" class="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">
-                确认删除
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-    document.body.insertAdjacentHTML('beforeend', confirmHtml);
-  }
-  function confirmBatchDelete() {
-    const checkedBoxes = document.querySelectorAll('.period-checkbox:checked');
-    const periods = Array.from(checkedBoxes).map(cb => cb.value);
-    
-    let deletedCount = 0;
-    const allPeriods = Store.getPeriods();
-    const newPeriods = allPeriods.filter(p => {
-      if (periods.includes(p)) {
-        localStorage.removeItem("bcy_report_" + p);
-        deletedCount++;
-        return false;
-      }
-      return true;
-    });
-    localStorage.setItem("bcy_report_periods", JSON.stringify(newPeriods));
-    
-    document.getElementById('batch-delete-confirm').remove();
-    if (document.getElementById('report-list-overlay')) {
-      document.getElementById('report-list-overlay').remove();
-    }
-    toast(`已成功删除 ${deletedCount} 个周报`, "success");
-    rerender();
-  }
-  function deleteReport(period) {
-    if (period === _currentPeriod) {
-      toast("不能删除当前正在编辑的周报", "error");
-      return;
-    }
-    const info = Store.getPeriodInfo(period);
-    const confirmHtml = `
-      <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" id="delete-confirm-overlay">
-        <div class="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4" onclick="event.stopPropagation()">
-          <div class="flex flex-col items-center p-6">
-            <div class="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mb-4">
-              <span class="text-3xl">⚠️</span>
-            </div>
-            <h3 class="text-lg font-semibold text-gray-800 mb-2">确认删除</h3>
-            <p class="text-sm text-gray-600 text-center mb-6">
-              确定要删除周报 <span class="font-medium">${info?.label || period}</span> 吗？<br/>
-              此操作不可恢复，所有数据将被永久删除。
-            </p>
-            <div class="flex gap-3 w-full">
-              <button onclick="document.getElementById('delete-confirm-overlay').remove()" class="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
-                取消
-              </button>
-              <button onclick="App.confirmDeleteReport('${period}')" class="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">
-                确认删除
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-    document.body.insertAdjacentHTML('beforeend', confirmHtml);
-  }
-  function confirmDeleteReport(period) {
-    const periods = Store.getPeriods();
-    const newPeriods = periods.filter(p => p !== period);
-    localStorage.setItem("bcy_report_periods", JSON.stringify(newPeriods));
-    localStorage.removeItem("bcy_report_" + period);
-    document.getElementById('delete-confirm-overlay').remove();
-    if (document.getElementById('report-list-overlay')) {
-      document.getElementById('report-list-overlay').remove();
-    }
-    toast(`周报 ${period} 已删除`, "success");
-    rerender();
-  }
-  function renameReport(period) {
-    const info = Store.getPeriodInfo(period);
-    const renameHtml = `
-      <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" id="rename-overlay">
-        <div class="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4" onclick="event.stopPropagation()">
-          <div class="p-6">
-            <div class="flex items-center justify-between mb-4">
-              <h3 class="text-lg font-semibold text-gray-800">重命名周报</h3>
-              <button onclick="document.getElementById('rename-overlay').remove()" class="text-gray-400 hover:text-gray-600">✕</button>
-            </div>
-            <div class="space-y-3">
-              <label class="block text-sm font-medium text-gray-600">周报名称</label>
-              <input type="text" id="rename-input" value="${info?.label || period}" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="请输入周报名称">
-            </div>
-            <div class="flex gap-3 mt-6">
-              <button onclick="document.getElementById('rename-overlay').remove()" class="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
-                取消
-              </button>
-              <button onclick="App.confirmRenameReport('${period}')" class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
-                保存
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-    document.body.insertAdjacentHTML('beforeend', renameHtml);
-    setTimeout(() => {
-      document.getElementById('rename-input').focus();
-    }, 100);
-  }
-  function confirmRenameReport(period) {
-    const newName = document.getElementById('rename-input').value.trim();
-    if (!newName) {
-      toast("请输入周报名称", "error");
-      return;
-    }
-    const customPeriods = Store.getCustomPeriods();
-    if (customPeriods[period]) {
-      customPeriods[period].label = newName;
-      localStorage.setItem('bcy_report_custom_periods', JSON.stringify(customPeriods));
-    }
-    document.getElementById('rename-overlay').remove();
-    toast(`周报已重命名为：${newName}`, "success");
-    rerender();
-  }
-  function editPeriodDates(period) {
-    const info = Store.getPeriodInfo(period);
-    const editHtml = `
-      <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" id="edit-dates-overlay">
-        <div class="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4" onclick="event.stopPropagation()">
-          <div class="p-6">
-            <div class="flex items-center justify-between mb-4">
-              <h3 class="text-lg font-semibold text-gray-800">编辑周期日期</h3>
-              <button onclick="document.getElementById('edit-dates-overlay').remove()" class="text-gray-400 hover:text-gray-600">✕</button>
-            </div>
-            <div class="space-y-4">
-              <div>
-                <label class="block text-sm font-medium text-gray-600 mb-1">开始日期</label>
-                <input type="date" id="edit-start-date" value="${info?.start || ''}" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-              </div>
-              <div>
-                <label class="block text-sm font-medium text-gray-600 mb-1">结束日期</label>
-                <input type="date" id="edit-end-date" value="${info?.end || ''}" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-              </div>
-            </div>
-            <div class="flex gap-3 mt-6">
-              <button onclick="document.getElementById('edit-dates-overlay').remove()" class="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
-                取消
-              </button>
-              <button onclick="App.confirmEditDates('${period}')" class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
-                保存
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-    document.body.insertAdjacentHTML('beforeend', editHtml);
-  }
-  function confirmEditDates(period) {
-    const startDate = document.getElementById('edit-start-date').value;
-    const endDate = document.getElementById('edit-end-date').value;
-    
-    if (!startDate || !endDate) {
-      toast("请填写完整的日期", "error");
-      return;
-    }
-    
-    if (startDate > endDate) {
-      toast("开始日期不能大于结束日期", "error");
-      return;
-    }
-    
-    const customPeriods = Store.getCustomPeriods();
-    if (!customPeriods[period]) {
-      customPeriods[period] = {};
-    }
-    customPeriods[period].start = startDate;
-    customPeriods[period].end = endDate;
-    localStorage.setItem('bcy_report_custom_periods', JSON.stringify(customPeriods));
-    
-    document.getElementById('edit-dates-overlay').remove();
-    toast("周期日期已更新", "success");
-    rerender();
-  }
-  function setAsBasePeriod(period) {
-    localStorage.setItem('bcy_base_period', period);
-    toast(`已将 ${period} 设为基准周期`, "success");
-    rerender();
-  }
-  function showGeneratePeriodsDialog() {
-    const basePeriod = localStorage.getItem('bcy_base_period') || '2026-W20';
-    const baseInfo = Store.getPeriodInfo(basePeriod);
-    
-    const dialogHtml = `
-      <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" id="generate-periods-overlay">
-        <div class="bg-white rounded-xl shadow-xl w-full max-w-md mx-4" onclick="event.stopPropagation()">
-          <div class="p-6">
-            <div class="flex items-center justify-between mb-4">
-              <h3 class="text-lg font-semibold text-gray-800">⚡ 生成周期</h3>
-              <button onclick="document.getElementById('generate-periods-overlay').remove()" class="text-gray-400 hover:text-gray-600">✕</button>
-            </div>
-            <div class="space-y-4">
-              <div class="bg-purple-50 rounded-md p-3">
-                <div class="text-xs font-medium text-purple-700 mb-2">📅 基准周期</div>
-                <div class="text-sm text-gray-700">${baseInfo?.label || basePeriod} (${baseInfo?.start || ''} ~ ${baseInfo?.end || ''})</div>
-              </div>
-              
-              <div>
-                <label class="block text-sm font-medium text-gray-600 mb-1">第1周开始日期</label>
-                <input type="date" id="gen-week1-start" value="${baseInfo?.start || '2026-05-12'}" 
-                       class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
-              </div>
-              <div>
-                <label class="block text-sm font-medium text-gray-600 mb-1">第1周结束日期</label>
-                <input type="date" id="gen-week1-end" value="${baseInfo?.end || '2026-05-18'}" 
-                       class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
-              </div>
-              
-              <div class="grid grid-cols-2 gap-4">
-                <div>
-                  <label class="block text-sm font-medium text-gray-600 mb-1">🔄 周期间隔</label>
-                  <select id="gen-period-interval" class="w-full px-3 py-2 border border-gray-200 rounded-lg">
-                    <option value="7">7天（每周）</option>
-                    <option value="14">14天（双周）</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="block text-sm font-medium text-gray-600 mb-1">📋 生成期数</label>
-                  <select id="gen-period-count" class="w-full px-3 py-2 border border-gray-200 rounded-lg">
-                    <option value="4">4期（1个月）</option>
-                    <option value="8">8期（2个月）</option>
-                    <option value="12">12期（3个月）</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-            <div class="flex gap-3 mt-6">
-              <button onclick="document.getElementById('generate-periods-overlay').remove()" class="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
-                取消
-              </button>
-              <button onclick="App.executeGenerateFromDialog()" class="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
-                开始生成
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-    document.body.insertAdjacentHTML('beforeend', dialogHtml);
-  }
-  function executeGenerateFromDialog() {
-    const week1Start = document.getElementById('gen-week1-start')?.value;
-    const week1End = document.getElementById('gen-week1-end')?.value;
-    const interval = parseInt(document.getElementById('gen-period-interval')?.value || '7');
-    const count = parseInt(document.getElementById('gen-period-count')?.value || '4');
-    
-    if (!week1Start || !week1End) {
-      toast("请设置第1周的开始和结束日期", "error");
-      return;
-    }
-    
-    localStorage.setItem('bcy_week1_config', JSON.stringify({
-      start: week1Start,
-      end: week1End
-    }));
-    
-    const startDate = new Date(week1Start);
-    startDate.setHours(0, 0, 0, 0);
-    const endDate = new Date(week1End);
-    endDate.setHours(0, 0, 0, 0);
-    const periodDuration = (endDate - startDate) / (1000 * 60 * 60 * 24);
-    
-    const newPeriods = [];
-    for (let i = 0; i < count; i++) {
-      const periodStart = new Date(startDate);
-      periodStart.setDate(startDate.getDate() + (i * interval));
-      const periodEnd = new Date(periodStart);
-      periodEnd.setDate(periodStart.getDate() + periodDuration);
-      
-      const year = periodStart.getFullYear();
-      const weekNum = getWeekNumber(periodStart);
-      const periodKey = `${year}-W${String(weekNum).padStart(2, '0')}`;
-      
-      newPeriods.push({
-        key: periodKey,
-        weekNum,
-        start: toLocalDateString(periodStart),
-        end: toLocalDateString(periodEnd),
-        label: `第${weekNum}周`
-      });
-    }
 
-    document.getElementById('generate-periods-overlay').remove();
-    document.getElementById('report-list-overlay').remove();
-    
-    const existingPeriods = Store.getPeriods();
-    const customPeriods = Store.getCustomPeriods();
-    const conflicts = [];
-    
-    newPeriods.forEach(newP => {
-      if (existingPeriods.includes(newP.key)) {
-        const existing = customPeriods[newP.key];
-        if (existing && (existing.start !== newP.start || existing.end !== newP.end)) {
-          conflicts.push({
-            newPeriod: newP,
-            existing: existing
-          });
-        }
-      }
-    });
-    
-    if (conflicts.length > 0) {
-      showConflictDialog(conflicts, newPeriods);
-    } else {
-      executeGeneratePeriods(newPeriods, existingPeriods, customPeriods);
-    }
-  }
-  function addNewPeriod() {
-    const periods = Store.getPeriods();
-    const lastPeriod = periods[periods.length - 1];
-    const match = lastPeriod.match(/(\d+)-W(\d+)/);
-    if (!match) {
-      toast("无法解析周期格式", "error");
-      return;
-    }
-    
-    const lastPeriodInfo = Store.getPeriodInfo(lastPeriod);
-    const interval = 7;
-    
-    const startDate = new Date(lastPeriodInfo.end);
-    startDate.setDate(startDate.getDate() + 1);
-    const endDate = new Date(startDate);
-    endDate.setDate(startDate.getDate() + interval - 1);
-    
-    let year = parseInt(match[1]);
-    let week = parseInt(match[2]) + 1;
-    if (week > 52) {
-      year++;
-      week = 1;
-    }
-    const newPeriod = `${year}-W${String(week).padStart(2, '0')}`;
-    
-    Store.addPeriod(newPeriod, {
-      start: toLocalDateString(startDate),
-      end: toLocalDateString(endDate),
-      label: `第${week}周`
-    });
-    
-    changePeriod(newPeriod);
-    toast(`已创建新周报 ${newPeriod}`, "success");
-  }
-  function toggleAutoFillPeriod(enabled) {
-    Sections["01"]._autoFillEnabled = enabled;
-    rerender();
-    if (enabled) {
-      toast("已开启自动填充周期", "success");
-    }
-  }
-  function updatePeriodInterval(value) {
-    _periodInterval = parseInt(value);
-    toast(`周期间隔已设置为 ${_periodInterval} 天`, "success");
-  }
-  function updatePeriodCount(value) {
-    _periodCount = parseInt(value);
-    toast(`预填充期数已设置为 ${_periodCount} 期`, "success");
-  }
-  function generatePeriods() {
-    const week1Start = document.getElementById('week1-start')?.value;
-    const week1End = document.getElementById('week1-end')?.value;
-    const interval = parseInt(document.getElementById('period-interval')?.value || '7');
-    const count = parseInt(document.getElementById('period-count')?.value || '4');
-    
-    if (!week1Start || !week1End) {
-      toast("请设置第1周的开始和结束日期", "error");
-      return;
-    }
-    
-    localStorage.setItem('bcy_week1_config', JSON.stringify({
-      start: week1Start,
-      end: week1End
-    }));
-    
-    const startDate = new Date(week1Start);
-    startDate.setHours(0, 0, 0, 0);
-    const endDate = new Date(week1End);
-    endDate.setHours(0, 0, 0, 0);
-    const periodDuration = (endDate - startDate) / (1000 * 60 * 60 * 24);
-    
-    const newPeriods = [];
-    for (let i = 0; i < count; i++) {
-      const periodStart = new Date(startDate);
-      periodStart.setDate(startDate.getDate() + (i * interval));
-      const periodEnd = new Date(periodStart);
-      periodEnd.setDate(periodStart.getDate() + periodDuration);
-      
-      const year = periodStart.getFullYear();
-      const weekNum = getWeekNumber(periodStart);
-      const periodKey = `${year}-W${String(weekNum).padStart(2, '0')}`;
-      
-      newPeriods.push({
-        key: periodKey,
-        weekNum,
-        start: toLocalDateString(periodStart),
-        end: toLocalDateString(periodEnd),
-        label: `第${weekNum}周`
-      });
-    }
-
-    const existingPeriods = Store.getPeriods();
-    const customPeriods = Store.getCustomPeriods();
-    const conflicts = [];
-    
-    newPeriods.forEach(newP => {
-      if (existingPeriods.includes(newP.key)) {
-        const existing = customPeriods[newP.key];
-        if (existing && (existing.start !== newP.start || existing.end !== newP.end)) {
-          conflicts.push({
-            newPeriod: newP,
-            existing: existing
-          });
-        }
-      }
-    });
-    
-    if (conflicts.length > 0) {
-      showConflictDialog(conflicts, newPeriods);
-      return;
-    }
-    
-    executeGeneratePeriods(newPeriods, existingPeriods, customPeriods);
-  }
-  
-  function executeGeneratePeriods(newPeriods, existingPeriods, customPeriods) {
-    let generatedCount = 0;
-    let updatedCount = 0;
-    
-    newPeriods.forEach(p => {
-      const exists = existingPeriods.includes(p.key);
-      
-      if (!exists) {
-        Store.addPeriod(p.key, { start: p.start, end: p.end, label: p.label });
-        generatedCount++;
-      } else {
-        customPeriods[p.key] = { start: p.start, end: p.end, label: p.label };
-        updatedCount++;
-      }
-    });
-    
-    if (updatedCount > 0) {
-      localStorage.setItem('bcy_report_custom_periods', JSON.stringify(customPeriods));
-    }
-    
-    rerender();
-    
-    if (generatedCount > 0 && updatedCount > 0) {
-      toast(`已生成 ${generatedCount} 个新周期，更新 ${updatedCount} 个现有周期`, "success");
-    } else if (generatedCount > 0) {
-      toast(`已生成 ${generatedCount} 个新周期`, "success");
-    } else if (updatedCount > 0) {
-      toast(`已更新 ${updatedCount} 个现有周期的日期配置`, "success");
-    } else {
-      toast("没有需要生成或更新的周期", "info");
-    }
-  }
-  
-  function showConflictDialog(conflicts, newPeriods) {
-    let conflictHtml = '';
-    conflicts.forEach((c, i) => {
-      conflictHtml += `
-        <div class="border-b border-gray-100 py-3 last:border-0">
-          <div class="text-sm font-medium text-gray-800 mb-1">${c.newPeriod.label}</div>
-          <div class="flex items-center gap-4 text-xs">
-            <span class="text-gray-500">
-              <span class="text-red-500">新设置:</span> ${c.newPeriod.start} ~ ${c.newPeriod.end}
-            </span>
-            <span class="text-gray-400">→</span>
-            <span class="text-gray-500">
-              <span class="text-green-500">已存在:</span> ${c.existing.start} ~ ${c.existing.end}
-            </span>
-          </div>
-        </div>
-      `;
-    });
-    
-    const html = `
-      <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" id="conflict-dialog">
-        <div class="bg-white rounded-xl shadow-xl w-full max-w-md mx-4" onclick="event.stopPropagation()">
-          <div class="flex items-center justify-between px-6 py-4 border-b">
-            <h3 class="font-semibold text-gray-800">⚠️ 周期冲突</h3>
-            <button onclick="document.getElementById('conflict-dialog').remove()" class="text-gray-400 hover:text-gray-600">✕</button>
-          </div>
-          <div class="p-6">
-            <p class="text-sm text-gray-600 mb-4">
-              检测到 <span class="font-medium">${conflicts.length}</span> 个周期与现有配置冲突，请问如何处理？
-            </p>
-            <div class="mb-6">
-              ${conflictHtml}
-            </div>
-            <div class="space-y-2">
-              <button onclick="App.handleConflict('overwrite')" class="w-full px-4 py-2.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors">
-                🔄 以新设置为准（覆盖现有）
-              </button>
-              <button onclick="App.handleConflict('keep')" class="w-full px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
-                ✋ 保留现有配置
-              </button>
-              <button onclick="App.handleConflict('both')" class="w-full px-4 py-2.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
-                📊 两者均保留（创建新版本）
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-    document.body.insertAdjacentHTML('beforeend', html);
-    window._pendingPeriods = newPeriods;
-  }
-  
-  function handleConflict(action) {
-    const newPeriods = window._pendingPeriods || [];
-    const existingPeriods = Store.getPeriods();
-    const customPeriods = Store.getCustomPeriods();
-    
-    document.getElementById('conflict-dialog').remove();
-    delete window._pendingPeriods;
-    
-    let generatedCount = 0;
-    let updatedCount = 0;
-    
-    newPeriods.forEach(p => {
-      const exists = existingPeriods.includes(p.key);
-      
-      if (action === 'overwrite') {
-        if (!exists) {
-          Store.addPeriod(p.key, { start: p.start, end: p.end, label: p.label });
-          generatedCount++;
-        } else {
-          customPeriods[p.key] = { start: p.start, end: p.end, label: p.label };
-          updatedCount++;
-        }
-      } else if (action === 'keep') {
-        if (!exists) {
-          Store.addPeriod(p.key, { start: p.start, end: p.end, label: p.label });
-          generatedCount++;
-        }
-      } else if (action === 'both') {
-        let version = 1;
-        let newKey = p.key;
-        while (existingPeriods.includes(newKey)) {
-          newKey = `${p.key}-v${version}`;
-          version++;
-        }
-        Store.addPeriod(newKey, { start: p.start, end: p.end, label: `${p.label} (v${version})` });
-        generatedCount++;
-      }
-    });
-    
-    if (action !== 'both' && updatedCount > 0) {
-      localStorage.setItem('bcy_report_custom_periods', JSON.stringify(customPeriods));
-    }
-    
-    rerender();
-    
-    if (action === 'overwrite') {
-      toast(`已生成 ${generatedCount} 个新周期，覆盖 ${updatedCount} 个现有周期`, "success");
-    } else if (action === 'keep') {
-      toast(`已生成 ${generatedCount} 个新周期，跳过 ${newPeriods.length - generatedCount} 个已存在的周期`, "success");
-    } else if (action === 'both') {
-      toast(`已创建 ${generatedCount} 个新周期版本`, "success");
-    }
-  }
-  
-  function getWeekNumber(date) {
-    const startOfYear = new Date(date.getFullYear(), 0, 1);
-    const days = Math.floor((date - startOfYear) / (1000 * 60 * 60 * 24));
-    return Math.ceil((days + startOfYear.getDay() + 1) / 7);
-  }
-  function autoFillPeriod() {
-    const reportDate = new Date(report.period.report_date);
-    if (isNaN(reportDate.getTime())) {
-      toast("请先选择周报日期", "error");
-      return;
-    }
-    const dayOfWeek = reportDate.getDay();
-    const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-    const monday = new Date(reportDate);
-    monday.setDate(reportDate.getDate() - daysToMonday);
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
-    report.period.start = toLocalDateString(monday);
-    report.period.end = toLocalDateString(sunday);
-    Store.save(report, _currentPeriod);
-    rerender();
-    toast(`✅ 周期已自动填充: ${report.period.start} ~ ${report.period.end}`, "success");
-  }
+  // ===== 操作 =====
   function openPreview() {
-    window.open("preview.html", "_blank");
+    window.open('preview.html?period=' + _currentPeriod, '_blank');
   }
   function rebuildAI() {
-    toast("🤖 AI 正在重新分析数据...", "success");
-    renderAnomalies();
-    toast("🤖 AI 草稿已重新生成", "success");
-  }
-
-  // ====== 花名册管理 ======
-  function updateRoster(index, field, value) {
-    report.roster[index][field] = value;
-    Store.save(report, _currentPeriod);
-  }
-  function markLeave(index) {
-    report.roster[index].delta = 'leave';
-    report.roster[index].present = false;
-    Store.save(report, _currentPeriod);
-    rerender();
-    toast("已标记离职", "success");
-  }
-  function addRoster() {
-    const newItem = {
-      seq: report.roster.length + 1,
-      name: '',
-      role: '',
-      phone: '',
-      present: true,
-      delta: 'new'
-    };
-    report.roster.push(newItem);
-    Store.save(report, _currentPeriod);
+    toast('AI 草稿重新生成 (mock)', 'info');
     rerender();
   }
-  function importRoster() {
-    toast("从花名册导入功能开发中", "info");
-  }
-  function aiRosterDiff() {
-    toast("AI 比对上周花名册功能开发中", "info");
-  }
-
-  // ====== 工作完成管理 ======
-  function updateWorkDone(index, field, value) {
-    report.work_done[index][field] = value;
-    Store.save(report, _currentPeriod);
-  }
-  function removeWorkDone(index) {
-    report.work_done.splice(index, 1);
-    report.work_done.forEach((t, i) => t.seq = i + 1);
-    Store.save(report, _currentPeriod);
-    rerender();
-  }
-  function addWorkDone() {
-    const newItem = {
-      seq: report.work_done.length + 1,
-      area: '',
-      task: '',
-      progress: '0%',
-      owner: '',
-      deadline: '',
-      source: 'form'
-    };
-    report.work_done.push(newItem);
-    Store.save(report, _currentPeriod);
-    rerender();
-  }
-  function s04ImportFromLastWeek() {
-    toast("续排上周未完功能开发中", "info");
-  }
-  function activateS04Tab(tab) {
-    Sections["04"]._activeTab = tab;
-    rerender();
-  }
-  function s04StartVoice() {
-    toast("语音录入功能开发中", "info");
-  }
-  function s04ExtractPaste() {
-    toast("AI 抽取功能开发中", "info");
-  }
-  function s04AcceptDraft(index) {
-    const draft = Sections["04"]._drafts[index];
-    if (draft) {
-      report.work_done.push({ ...draft, seq: report.work_done.length + 1 });
-      Sections["04"]._drafts.splice(index, 1);
-      Store.save(report, _currentPeriod);
+  function gotoSection(pageId) {
+    const node = findNodeByPageId(report.nav_tree, pageId);
+    if (node) {
+      currentSection = pageId;
+      if (typeof localStorage !== 'undefined') localStorage.setItem('bcy_current_section', currentSection);
       rerender();
     }
   }
-  function s04AcceptAllDrafts() {
-    Sections["04"]._drafts.forEach(draft => {
-      report.work_done.push({ ...draft, seq: report.work_done.length + 1 });
-    });
-    Sections["04"]._drafts = [];
-    Store.save(report, _currentPeriod);
-    rerender();
-    toast("已接受所有草稿", "success");
-  }
-  function s04ClearDrafts() {
-    Sections["04"]._drafts = [];
-    rerender();
-    toast("已清空草稿", "info");
-  }
-  function s04AddFormRow() {
-    const area = document.getElementById('s04-form-area')?.value || '';
-    const task = document.getElementById('s04-form-task')?.value || '';
-    const progress = document.getElementById('s04-form-progress')?.value || '0%';
-    const owner = document.getElementById('s04-form-owner')?.value || '';
-    const deadline = document.getElementById('s04-form-deadline')?.value || '';
-    if (!task) {
-      toast("请填写事项", "error");
-      return;
+  function findNodeByPageId(tree, pageId) {
+    function walk(arr) {
+      for (let i = 0; i < arr.length; i++) {
+        if (arr[i].page_id === pageId) return arr[i];
+        if (arr[i].children) {
+          const r = walk(arr[i].children);
+          if (r) return r;
+        }
+      }
+      return null;
     }
-    report.work_done.push({
-      seq: report.work_done.length + 1,
-      area,
-      task,
-      progress,
-      owner,
-      deadline,
-      source: 'form'
-    });
-    Store.save(report, _currentPeriod);
-    document.getElementById('s04-form-task').value = '';
-    rerender();
+    return walk(tree);
   }
-  function s04PickFile() {
-    document.getElementById('s04-file-input')?.click();
-  }
-  function s04HandleFile(file) {
-    if (file) {
-      document.getElementById('s04-file-name').textContent = `已选择: ${file.name}`;
-      toast("文件上传功能开发中", "info");
-    }
+  function exportPDF() {
+    ExportPDF.exportPDF(report);
   }
 
-  // ====== 照片管理 ======
-  function uploadPhotos() {
-    toast("照片上传功能开发中", "info");
-  }
-  function aiGroupPhotos() {
-    toast("AI 照片分组功能开发中", "info");
-  }
-
-  // ====== 劳动力管理 ======
-  function updateLabor(index, field, value) {
-    report.labor_stats[index][field] = value;
-    Store.save(report, _currentPeriod);
-  }
-  function aiRecomputeLabor() {
-    toast("AI 重新计算劳动力功能开发中", "info");
-  }
-
-  // ====== ECC管理 ======
-  function updateEcc(index, field, value) {
-    report.ecc_items[index][field] = value;
-    Store.save(report, _currentPeriod);
-  }
-  function aiParseEccScreenshot() {
-    toast("AI 解析 ECC 截图功能开发中", "info");
-  }
-  function uploadEccScreenshot() {
-    toast("上传 ECC 截图功能开发中", "info");
-  }
-
-  // ====== 图纸深化管理 ======
-  function updateDesign(index, field, value) {
-    report.design_items[index][field] = value;
-    Store.save(report, _currentPeriod);
-  }
-  function removeDesign(index) {
-    report.design_items.splice(index, 1);
-    Store.save(report, _currentPeriod);
-    rerender();
-  }
-
-  // ====== 图纸深化 AI ======
-  function activateS08Tab(tab) {
-    Sections["08"]._activeTab = tab;
-    rerender();
-  }
-  function s08StartVoice() {
-    toast("语音录入功能开发中", "info");
-  }
-  function s08ExtractPaste() {
-    toast("AI 抽取功能开发中", "info");
-  }
-  function s08AcceptDraft(index) {
-    const draft = Sections["08"]._drafts[index];
-    if (draft) {
-      report.design_items.push({ ...draft });
-      Sections["08"]._drafts.splice(index, 1);
+  // ===== App 回调（章节编辑） =====
+  const App = {
+    // 04 (v5.3: 主行 + 内嵌 items)
+    s04AddEmpty: () => {
+      report.work_done = report.work_done || [];
+      report.work_done.push({
+        area: '新区域',
+        owner: '',
+        deadline: '',
+        items: [{ task: '', progress: '0%' }]
+      });
+      Store.save(report, _currentPeriod); rerender();
+    },
+    // idx = area instance 序号, mi = 主行序号
+    s04UpdateMainRow: (idx, mi, field, val) => {
+      const insts = Sections['04'].materialize(report);
+      const inst = insts[idx];
+      if (!inst) return;
+      const mainRow = inst.data[mi];
+      if (!mainRow) return;
+      mainRow[field] = val;
+      const wd = report.work_done || [];
+      const wdIdx = wd.indexOf(mainRow);
+      if (wdIdx >= 0) wd[wdIdx][field] = val;
       Store.save(report, _currentPeriod);
-      rerender();
-    }
-  }
-  function s08AcceptAll() {
-    Sections["08"]._drafts.forEach(draft => {
-      report.design_items.push({ ...draft });
-    });
-    Sections["08"]._drafts = [];
-    Store.save(report, _currentPeriod);
-    rerender();
-  }
-  function s08ClearDrafts() {
-    Sections["08"]._drafts = [];
-    rerender();
-  }
-  function s08AddForm() {
-    toast("添加图纸功能开发中", "info");
-  }
-
-  // ====== 下周计划管理 ======
-  function activateS09Tab(tab) {
-    Sections["09"]._activeTab = tab;
-    rerender();
-  }
-  function s09AIDraft() {
-    toast("AI 生成计划草稿功能开发中", "info");
-  }
-  function s09StartVoice() {
-    toast("语音录入功能开发中", "info");
-  }
-  function s09ExtractPaste() {
-    toast("AI 抽取功能开发中", "info");
-  }
-  function s09AcceptDraft(index) {
-    const draft = Sections["09"]._drafts[index];
-    if (draft) {
-      report.plan_items.push({ ...draft });
-      Sections["09"]._drafts.splice(index, 1);
+    },
+    s04RemoveMainRow: (idx, mi) => {
+      const insts = Sections['04'].materialize(report);
+      const inst = insts[idx];
+      if (!inst) return;
+      const mainRow = inst.data[mi];
+      if (!mainRow) return;
+      const wd = report.work_done || [];
+      const wdIdx = wd.indexOf(mainRow);
+      if (wdIdx >= 0) wd.splice(wdIdx, 1);
+      Store.save(report, _currentPeriod); rerender();
+    },
+    // idx = area instance 序号, mi = 主行序号, ii = item 序号
+    s04UpdateItem: (idx, mi, ii, field, val) => {
+      const insts = Sections['04'].materialize(report);
+      const inst = insts[idx];
+      if (!inst) return;
+      const mainRow = inst.data[mi];
+      if (!mainRow || !Array.isArray(mainRow.items)) return;
+      const item = mainRow.items[ii];
+      if (!item) return;
+      item[field] = val;
       Store.save(report, _currentPeriod);
-      rerender();
+    },
+    s04AddItem: (idx, mi) => {
+      const insts = Sections['04'].materialize(report);
+      const inst = insts[idx];
+      if (!inst) return;
+      const mainRow = inst.data[mi];
+      if (!mainRow) return;
+      mainRow.items = Array.isArray(mainRow.items) ? mainRow.items : [];
+      mainRow.items.push({ task: '', progress: '0%' });
+      Store.save(report, _currentPeriod); rerender();
+    },
+    s04RemoveItem: (idx, mi, ii) => {
+      const insts = Sections['04'].materialize(report);
+      const inst = insts[idx];
+      if (!inst) return;
+      const mainRow = inst.data[mi];
+      if (!mainRow || !Array.isArray(mainRow.items)) return;
+      if (mainRow.items.length <= 1) {
+        // 至少留 1 个 item (不删主行), 重置为空
+        mainRow.items[0] = { task: '', progress: '0%' };
+      } else {
+        mainRow.items.splice(ii, 1);
+      }
+      Store.save(report, _currentPeriod); rerender();
+    },
+    s04AddRow: (idx) => {
+      const insts = Sections['04'].materialize(report);
+      const inst = insts[idx];
+      if (!inst) return;
+      report.work_done = report.work_done || [];
+      report.work_done.push({
+        area: inst.keyValue,
+        owner: '',
+        deadline: '',
+        items: [{ task: '', progress: '0%' }]
+      });
+      Store.save(report, _currentPeriod); rerender();
+    },
+    s04AddInstance: (defaultArea) => {
+      promptModal('新增区域', defaultArea || '食堂区', (name) => {
+        if (!name || !name.trim()) return;
+        name = name.trim();
+        const wd = report.work_done || (report.work_done = []);
+        if (wd.some(r => r.area === name)) {
+          toast('该区域已存在', 'error');
+          return;
+        }
+        wd.push({
+          area: name,
+          owner: '',
+          deadline: '',
+          items: [{ task: '', progress: '0%' }]
+        });
+        Store.save(report, _currentPeriod); rerender();
+        toast('已新增区域 ' + name, 'success');
+      });
+    },
+    // 05 工作现场
+    // 仅触发常驻 file input, 真正的 onchange 在 setupPersistentFileInput() 里绑了一次
+    s05UploadSlot: (idx, slot) => {
+      const fi = global._s05FileInput;
+      if (!fi) { toast('上传组件未就绪, 请刷新页面', 'error'); return; }
+      fi.dataset.idx = idx;
+      fi.dataset.slot = slot;
+      fi.value = '';   // 重置, 允许连续选同一张图也能再次触发 change
+      fi.click();
+    },
+    s05UpdateCaption: (idx, i, val) => {
+      const insts = Sections['05'].materialize(report);
+      const inst = insts[idx];
+      if (!inst || !inst.data[i]) return;
+      inst.data[i].caption = val;
+      const wd = report.site_photos || [];
+      const wdIdx = wd.indexOf(inst.data[i]);
+      if (wdIdx >= 0) wd[wdIdx].caption = val;
+      Store.save(report, _currentPeriod);
+    },
+    s05RemovePhoto: (idx, i) => {
+      const insts = Sections['05'].materialize(report);
+      const inst = insts[idx];
+      if (!inst || !inst.data[i]) return;
+      const wd = report.site_photos || [];
+      const wdIdx = wd.indexOf(inst.data[i]);
+      if (wdIdx >= 0) wd.splice(wdIdx, 1);
+      Store.save(report, _currentPeriod); rerender();
+    },
+    s05AddInstance: (defaultArea) => {
+      promptModal('新增区域', defaultArea || '', (name) => {
+        if (!name || !name.trim()) return;
+        report.site_photos = report.site_photos || [];
+        if (report.site_photos.some(p => p.area === name.trim())) {
+          toast('该区域已存在', 'error');
+          return;
+        }
+        report.site_photos.push({ area: name.trim(), url: '', caption: '' });
+        Store.save(report, _currentPeriod); rerender();
+      });
+    },
+    s05DelInstance: (idx) => {
+      const insts = Sections['05'].materialize(report);
+      const inst = insts[idx];
+      if (!inst) return;
+      confirmModal('删除区域', '确定删除 "' + inst.keyValue + '" 下所有照片?', () => {
+        report.site_photos = (report.site_photos || []).filter(p => p.area !== inst.keyValue);
+        Store.save(report, _currentPeriod); rerender();
+      });
+    },
+    s05FromCapture: async () => {
+      try {
+        const all = await Capture.getPhotosByArea('');
+        if (!all || !all.length) {
+          toast('随手拍池子暂无照片, 请先在底部"随手拍"添加', 'info');
+          return;
+        }
+        // 让用户选 area
+        const insts = Sections['05'].materialize(report);
+        const areas = insts.length ? insts.map(i => i.keyValue) : [];
+        const suggestion = areas[0] || '高管区';
+        const hint = areas.length ? '已有区域: ' + areas.join(', ') : '暂无区域, 请输入';
+        promptModal('分配随手拍照片到区域', suggestion, (area) => {
+          if (!area || !area.trim()) return;
+          const areaName = area.trim();
+          const photo = all[0];
+          report.site_photos = report.site_photos || [];
+          const blob = photo.blob;
+          if (!blob) { toast('照片数据缺失', 'error'); return; }
+          // 顺手拍原图也是大图, 同样走 compressImage
+          blob.size = blob.size || 1024;  // 兜底 (老 blob 可能没 size)
+          const fakeFile = new File([blob], 'capture.jpg', { type: blob.type || 'image/jpeg' });
+          compressImage(fakeFile).then(({ dataUrl, width, height, size }) => {
+            report.site_photos.push({ area: areaName, url: dataUrl, caption: photo.caption || '', width, height });
+            safeSave(report, _currentPeriod); rerender();
+            toast('已从随手拍选用到 ' + areaName + ' · ' + (size / 1024).toFixed(0) + 'KB', 'success');
+          }).catch((err) => {
+            toast('压缩随手拍失败: ' + (err && err.message ? err.message : err), 'error');
+          });
+        });
+        // 提示信息(可放标题)
+        console.log('s05FromCapture hint:', hint);
+      } catch (e) { toast('读取随手拍失败: ' + e.message, 'error'); }
+    },
+    // 06 人员统计
+    s06Update: (i, field, val) => {
+      const pd = report.pages_data && report.pages_data['06'];
+      if (!pd || !pd.rows) return;
+      const rows = pd.rows.filter(r => !r.is_total);
+      const r = rows[i];
+      if (!r) return;
+      r[field] = +val;
+      // 算合计
+      const total = pd.rows.find(x => x.is_total);
+      if (total) {
+        total.this_week = pd.rows.filter(x => !x.is_total).reduce((a, x) => a + (+x.this_week || 0), 0);
+        total.next_week = pd.rows.filter(x => !x.is_total).reduce((a, x) => a + (+x.next_week || 0), 0);
+      }
+      safeSave(report, _currentPeriod); rerender();
+    },
+    s06UpdateType: (i, val) => {
+      const pd = report.pages_data && report.pages_data['06'];
+      if (!pd || !pd.rows) return;
+      const dataRows = pd.rows.filter(r => !r.is_total);
+      const r = dataRows[i];
+      if (!r) return;
+      r.type = val;
+      safeSave(report, _currentPeriod);
+    },
+    s06Add: () => {
+      const pd = report.pages_data && report.pages_data['06'];
+      if (!pd) return;
+      pd.rows = pd.rows || [];
+      const dataRows = pd.rows.filter(r => !r.is_total);
+      const nextSeq = dataRows.length ? Math.max.apply(null, dataRows.map(r => r.seq || 0)) + 1 : 1;
+      pd.rows.splice(pd.rows.length - 1, 0, { seq: nextSeq, type: '', this_week: 0, next_week: 0 });
+      safeSave(report, _currentPeriod); rerender();
+    },
+    s06Remove: (i) => {
+      const pd = report.pages_data && report.pages_data['06'];
+      if (!pd || !pd.rows) return;
+      const dataRows = pd.rows.filter(r => !r.is_total);
+      const r = dataRows[i];
+      if (!r) return;
+      const idx = pd.rows.indexOf(r);
+      if (idx >= 0) pd.rows.splice(idx, 1);
+      // 重算合计
+      const total = pd.rows.find(x => x.is_total);
+      if (total) {
+        total.this_week = pd.rows.filter(x => !x.is_total).reduce((a, x) => a + (+x.this_week || 0), 0);
+        total.next_week = pd.rows.filter(x => !x.is_total).reduce((a, x) => a + (+x.next_week || 0), 0);
+      }
+      safeSave(report, _currentPeriod); rerender();
+    },
+    s06UploadPhoto: (input) => {
+      const file = input && input.files && input.files[0];
+      if (!file) return;
+      if (file.size > 5 * 1024 * 1024) { toast('原图超过 5MB, 请先压缩到 5MB 以内再上传', 'error'); input.value = ''; return; }
+      compressImage(file).then(({ dataUrl, width, height, size }) => {
+        report.ui_config = report.ui_config || {};
+        report.ui_config.s06_photo = dataUrl;
+        report.ui_config.s06_photo_w = width;
+        report.ui_config.s06_photo_h = height;
+        safeSave(report, _currentPeriod); rerender();
+        toast('已上传会议照片 · ' + width + 'x' + height + ' · ' + (size / 1024).toFixed(0) + 'KB', 'success');
+      }).catch((err) => {
+        toast('压缩失败: ' + (err && err.message ? err.message : err), 'error');
+      });
+      input.value = '';  // 重置, 允许重传同一张
+    },
+    s06ClearPhoto: () => {
+      if (!report.ui_config) return;
+      delete report.ui_config.s06_photo;
+      safeSave(report, _currentPeriod); rerender();
+    },
+    s06UpdateCaption: (val) => {
+      report.ui_config = report.ui_config || {};
+      report.ui_config.s06_photo_caption = val;
+      safeSave(report, _currentPeriod);
+    },
+    s06AiExtract: () => toast('AI 抽取工种数据 mock', 'info'),
+    // 07 ECC 销项
+    s07Update: (field, val) => {
+      const pd = report.pages_data && report.pages_data['07'];
+      if (!pd) return;
+      pd.data = pd.data || {};
+      pd.data[field] = +val;
+      Store.save(report, _currentPeriod); rerender();
+    },
+    s07UploadImage: (input) => {
+      const file = input && input.files && input.files[0];
+      if (!file) return;
+      if (file.size > 2 * 1024 * 1024) { toast('图片超过 2MB', 'error'); input.value = ''; return; }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const pd = report.pages_data && report.pages_data['07'];
+        if (!pd) return;
+        pd.data = pd.data || {};
+        pd.data.image = e.target.result;
+        Store.save(report, _currentPeriod); rerender();
+      };
+      reader.readAsDataURL(file);
+    },
+    s07ClearImage: () => {
+      const pd = report.pages_data && report.pages_data['07'];
+      if (!pd || !pd.data) return;
+      delete pd.data.image;
+      Store.save(report, _currentPeriod); rerender();
+    },
+    s07AiParse: () => toast('AI 解析截图 mock', 'info'),
+    // 08 图纸深化
+    s08Update: (i, field, val) => {
+      const pd = report.pages_data && report.pages_data['08'];
+      if (pd && pd.rows && pd.rows[i]) {
+        pd.rows[i][field] = val;
+        Store.save(report, _currentPeriod);
+      }
+    },
+    s08Add: () => {
+      const pd = report.pages_data && report.pages_data['08'];
+      if (!pd) return;
+      pd.rows = pd.rows || [];
+      pd.rows.push({ task: '', owner: '', status: '未开始' });
+      Store.save(report, _currentPeriod); rerender();
+    },
+    s08Remove: (i) => {
+      const pd = report.pages_data && report.pages_data['08'];
+      if (pd && pd.rows) {
+        pd.rows.splice(i, 1);
+        Store.save(report, _currentPeriod); rerender();
+      }
+    },
+    s08AiExtract: () => toast('AI 抽取 mock', 'info'),
+    // 09 周计划
+    s09AddRow: () => {
+      const pd = report.pages_data && report.pages_data['09'];
+      if (!pd) return;
+      pd.rows = pd.rows || [];
+      const lastArea = pd.rows.length ? pd.rows[pd.rows.length - 1].area : '';
+      pd.rows.push({ area: lastArea, task: '', progress: ['empty','empty','empty','empty','empty','empty','empty'], manual_mode: false, days: 0, labor: '', headcount: '', material: '' });
+      safeSave(report, _currentPeriod); rerender();
+    },
+    s09AddArea: () => {
+      // 新增一个 area 分组: 弹输入框取名, 在末尾插入一行 (新 area 的首行)
+      // 已存在的 area 名会提示用 "+ 新增一行" 续加 (否则会拆成两个不连续分组)
+      const pd = report.pages_data && report.pages_data['09'];
+      if (!pd) return;
+      const existing = Array.from(new Set((pd.rows || []).map(r => r.area).filter(a => a && a.trim())));
+      promptModal('新增区域', '', (name) => {
+        if (!name || !name.trim()) return;
+        const areaName = name.trim();
+        if (existing.indexOf(areaName) >= 0) {
+          toast('该区域已存在, 直接点"+ 新增一行"在 ' + areaName + ' 里加任务即可', 'info');
+          return;
+        }
+        pd.rows = pd.rows || [];
+        pd.rows.push({
+          area: areaName,
+          task: '',
+          progress: ['empty','empty','empty','empty','empty','empty','empty'],
+          manual_mode: false,
+          days: 0,
+          labor: '',
+          headcount: '',
+          material: ''
+        });
+        safeSave(report, _currentPeriod); rerender();
+        toast('已新增区域 ' + areaName, 'success');
+      });
+    },
+    s09AddRowInArea: (area) => {
+      // 在指定 area 组的最后一行后面插入新行 (保持分组连续, 不会拆成两个不连续分组)
+      // 找不到该 area 时, 兜底插到最前 (新分组)
+      const pd = report.pages_data && report.pages_data['09'];
+      if (!pd) return;
+      pd.rows = pd.rows || [];
+      let lastIdx = -1;
+      for (let i = pd.rows.length - 1; i >= 0; i--) {
+        if (pd.rows[i].area === area) { lastIdx = i; break; }
+      }
+      const insertAt = lastIdx + 1;  // -1 时变 0, 即插到最前
+      const newRow = {
+        area: area,
+        task: '',
+        progress: ['empty','empty','empty','empty','empty','empty','empty'],
+        manual_mode: false,
+        days: 0,
+        labor: '',
+        headcount: '',
+        material: ''
+      };
+      pd.rows.splice(insertAt, 0, newRow);
+      safeSave(report, _currentPeriod); rerender();
+    },
+    s09Update: (i, field, val) => {
+      const pd = report.pages_data && report.pages_data['09'];
+      if (pd && pd.rows && pd.rows[i]) {
+        pd.rows[i][field] = val;
+        safeSave(report, _currentPeriod);
+      }
+    },
+    s09UpdateDays: (i, val) => {
+      const pd = report.pages_data && report.pages_data['09'];
+      if (pd && pd.rows && pd.rows[i]) {
+        pd.rows[i].days = +val;
+        safeSave(report, _currentPeriod); rerender();
+      }
+    },
+    s09ToggleCell: (i, k) => {
+      const pd = report.pages_data && report.pages_data['09'];
+      if (!pd || !pd.rows || !pd.rows[i]) return;
+      const row = pd.rows[i];
+      if (row.manual_mode) return;
+      row.progress[k] = row.progress[k] === 'fill' ? 'empty' : 'fill';
+      safeSave(report, _currentPeriod); rerender();
+    },
+    s09ToggleManual: (i, checked) => {
+      const pd = report.pages_data && report.pages_data['09'];
+      if (!pd || !pd.rows || !pd.rows[i]) return;
+      const row = pd.rows[i];
+      if (checked) {
+        const hasFill = row.progress.some(s => s === 'fill');
+        if (hasFill) {
+          confirmModal('开启手动模式', '开启后之前选择的进度格会清空, 改为手动输入天数. 确认开启?', () => {
+            row.progress = ['empty','empty','empty','empty','empty','empty','empty'];
+            row.manual_mode = true;
+            safeSave(report, _currentPeriod); rerender();
+            toast('已开启手动模式', 'success');
+          }, () => {
+            rerender();  // 用户取消, 还原 toggle
+          });
+          return;
+        }
+        row.manual_mode = true;
+      } else {
+        row.manual_mode = false;
+      }
+      safeSave(report, _currentPeriod); rerender();
+    },
+    s09Remove: (i) => {
+      const pd = report.pages_data && report.pages_data['09'];
+      if (pd && pd.rows) {
+        pd.rows.splice(i, 1);
+        safeSave(report, _currentPeriod); rerender();
+      }
+    },
+    s09AiPlan: () => toast('AI 智能排 mock: 已生成草稿', 'info'),
+    s09UpdateDate: (idx, iso) => {
+      // 改一个日期 = 整周 shift: 用选中的日期反推 start = 选中日 - idx, 然后 7 天全部重算
+      //   例: 选中 idx=2 (周三位置) = 2026/6/7 (周日) → start = 6/5 (周一) → 整周 6/5~6/11
+      //   这样选完以后每列的"周X"都跟真实日期对得上
+      const pd = report.pages_data && report.pages_data['09'];
+      if (!pd) return;
+      const parts = iso.split('-');
+      const picked = new Date(+parts[0], +parts[1] - 1, +parts[2]);
+      if (isNaN(picked.getTime())) return;
+      const start = new Date(picked);
+      start.setDate(picked.getDate() - idx);
+      const isoOf = (d) => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+      const newDates = [];
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(start);
+        d.setDate(start.getDate() + i);
+        newDates.push(isoOf(d));
+      }
+      pd.dates = newDates;
+      safeSave(report, _currentPeriod); rerender();
+    },
+    s09ShowDatePicker: (idx) => {
+      // 点短日期 label (5-18) 触发原生 date picker;
+      // showPicker() 在 Chrome/Edge 支持, Firefox 退回 focus + click
+      const input = document.getElementById('s09-date-input-' + idx);
+      if (!input) return;
+      if (typeof input.showPicker === 'function') {
+        try { input.showPicker(); return; } catch (e) { /* fall through */ }
+      }
+      input.focus();
+      try { input.click(); } catch (e) { /* noop */ }
+    },
+    s09ResetDates: () => {
+      const pd = report.pages_data && report.pages_data['09'];
+      if (!pd) return;
+      pd.dates = null;  // 清掉 override, _calcDates 会自动从 period.start 重算
+      safeSave(report, _currentPeriod); rerender();
+      toast('已重置日期 (回到本周期起始日)', 'success');
+    },
+    s09UpdateArea: (input) => {
+      // 改区域名: 同步更新该 area 组所有 row.area
+      const pd = report.pages_data && report.pages_data['09'];
+      if (!pd || !pd.rows) return;
+      const oldName = input.dataset.original;
+      const newName = input.value.trim();
+      if (!newName) {
+        toast('区域名不能为空', 'error');
+        input.value = oldName;
+        return;
+      }
+      if (newName === oldName) return;
+      // 改名不能与其他 area 重名
+      const others = new Set(pd.rows.map(r => r.area).filter(a => a && a !== oldName));
+      if (others.has(newName)) {
+        toast('区域名 "' + newName + '" 已存在', 'error');
+        input.value = oldName;
+        return;
+      }
+      let n = 0;
+      pd.rows.forEach(r => { if (r.area === oldName) { r.area = newName; n++; } });
+      safeSave(report, _currentPeriod); rerender();
+      toast('已将 "' + oldName + '" 改名为 "' + newName + '" · ' + n + ' 行', 'success');
+    },
+    s09DeleteArea: (btn) => {
+      // 删整个 area 组 (含所有 row.area === area 的行)
+      const pd = report.pages_data && report.pages_data['09'];
+      if (!pd || !pd.rows) return;
+      const area = btn.dataset.area;
+      const count = pd.rows.filter(r => r.area === area).length;
+      if (count === 0) return;
+      confirmModal('删除区域', '确定要删除区域 "' + area + '" 吗? 该区域下 ' + count + ' 行将一并删除 (不可恢复).', () => {
+        pd.rows = pd.rows.filter(r => r.area !== area);
+        safeSave(report, _currentPeriod); rerender();
+        toast('已删除区域 ' + area + ' · ' + count + ' 行', 'success');
+      });
+    },
+    // v5.16: 11 区域内的楼层划分图 (合并 4.1 进来), 数据模型 area.photos: [{url,caption,name}]
+    //   原 s10Add / s10UpdateCaption / s10UploadSlot / s10RemovePhoto / s10HandleUpload 全部改 per-area (ai)
+    //   隐藏 file input id 改为 s11-slot-input (s11 render 输出 1 个全局 input, 复用)
+    s11AddPhoto: (ai) => {
+      const pd = report.pages_data && report.pages_data['11'];
+      const area = pd && pd.areas && pd.areas[ai];
+      if (!area) return;
+      area.photos = area.photos || [];
+      const next = area.photos.length + 1;
+      area.photos.push({ url: '', name: '', caption: '楼层' + next });
+      Store.save(report, _currentPeriod); rerender();
+    },
+    s11UpdatePhotoCaption: (ai, j, val) => {
+      const pd = report.pages_data && report.pages_data['11'];
+      const area = pd && pd.areas && pd.areas[ai];
+      if (area && area.photos && area.photos[j]) {
+        area.photos[j].caption = val;
+        Store.save(report, _currentPeriod);
+      }
+    },
+    s11RemovePhoto: (ai, j) => {
+      const pd = report.pages_data && report.pages_data['11'];
+      const area = pd && pd.areas && pd.areas[ai];
+      if (area && area.photos) {
+        area.photos.splice(j, 1);
+        Store.save(report, _currentPeriod); rerender();
+      }
+    },
+    s11UploadPhoto: (ai, j) => {
+      const input = document.getElementById('s11-slot-input');
+      if (!input) return;
+      input.dataset.targetArea = ai;
+      input.dataset.targetCol = j;
+      input.click();
+    },
+    s11HandlePhotoUpload: (input) => {
+      const file = input && input.files && input.files[0];
+      if (!file) return;
+      if (file.size > 2 * 1024 * 1024) { toast('图片超过 2MB', 'error'); input.value = ''; return; }
+      const ai = +input.dataset.targetArea;
+      const j = +input.dataset.targetCol;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const pd = report.pages_data && report.pages_data['11'];
+        const area = pd && pd.areas && pd.areas[ai];
+        if (area) {
+          area.photos = area.photos || [];
+          // v5.10: caption 默认 = 原文件名 (无后缀), name 字段保留完整原文件名供 tooltip
+          const nameNoExt = file.name.replace(/\.[^/.]+$/, '');
+          const newPhoto = { url: e.target.result, name: file.name, caption: nameNoExt };
+          if (j >= area.photos.length) {
+            area.photos.push(newPhoto);  // 末尾新增
+          } else {
+            area.photos[j] = newPhoto;   // 替换现有
+          }
+          Store.save(report, _currentPeriod); rerender();
+        }
+      };
+      reader.readAsDataURL(file);
+      input.value = '';
+    },
+    // v5.17: 点图片缩略图打开灯箱 (全屏查看大图)
+    s11ViewPhoto: (ai, j) => {
+      const pd = report.pages_data && report.pages_data['11'];
+      const area = pd && pd.areas && pd.areas[ai];
+      const p = area && area.photos && area.photos[j];
+      if (!p || !p.url) return;
+      const caption = (area.area ? area.area + ' · ' : '') + (p.caption || p.name || '图片');
+      imageModal(p.url, caption);
+    },
+    // 11 施工段计划 (v5.11: 每区域一张表, 数据 { areas: [{ area, steps: [{ seq, part, step, cells, highlight }] }] })
+    // v5.12: 日期 cell 改 App.s11UpdateDate (本函数已无引用, 保留以防他处误用)
+    s11UpdateField: (ai, ri, field, val) => {
+      const pd = report.pages_data && report.pages_data['11'];
+      const step = pd && pd.areas && pd.areas[ai] && pd.areas[ai].steps && pd.areas[ai].steps[ri];
+      if (step) {
+        step[field] = val;
+        Store.save(report, _currentPeriod);
+      }
+    },
+    s11UpdateTitle: (val) => {
+      const pd = report.pages_data && report.pages_data['11'];
+      if (!pd) return;
+      pd.title = val;
+      Store.save(report, _currentPeriod);
+    },
+    // v5.11: 改 area 名 (instance-card header 里的可编辑徽章)
+    s11UpdateArea: (input) => {
+      const ai = parseInt(input.dataset.area, 10);
+      const pd = report.pages_data && report.pages_data['11'];
+      if (pd && pd.areas && pd.areas[ai]) {
+        pd.areas[ai].area = input.value;
+        Store.save(report, _currentPeriod);
+      }
+    },
+    // v5.11: 顶部 [+ 新增区域] = push 一个空 area (sections=[], steps=[]), 用户点表头 [+] 加层, 再点表底 [+ 新增工序] 加行
+    // v5.14: 新 area 默认空 sections, 不复制其他 area 的层 (各区域独立)
+    // v5.15: 新 area 默认带 3 个基础列 (楼栋/施工段、部位、工序), 各区域独立可改可删
+    // v5.19: 新 area 默认带 1 层 "一层" (开始/完成/日历天), 新增后立刻能填, 不用再手动 [+]
+    s11AddArea: () => {
+      const pd = report.pages_data && report.pages_data['11'];
+      if (!pd) return;
+      pd.areas = pd.areas || [];
+      const next = pd.areas.length + 1;
+      pd.areas.push({
+        area: '区域' + next,
+        // v5.16: 每 area 持有自己的楼层划分图 (合并 4.1 进来)
+        photos: [],
+        baseColumns: [
+          { name: '楼栋/施工段', key: 'building' },
+          { name: '部位',       key: 'part' },
+          { name: '工序',       key: 'step' }
+        ],
+        sections: [{ name: '一层' }],
+        steps: []
+      });
+      Store.save(report, _currentPeriod); rerender();
+    },
+    // v5.11: 删整个 area (弹确认, 避免误删多行工序)
+    s11RemoveArea: (ai) => {
+      const pd = report.pages_data && report.pages_data['11'];
+      if (!pd || !pd.areas || !pd.areas[ai]) return;
+      const a = pd.areas[ai];
+      const stepCount = (a.steps || []).length;
+      const areaName = a.area || ('区域' + (ai + 1));
+      const msg = '确定删除区域 "' + areaName + '" 吗? 该区域下 ' + stepCount + ' 行工序将一并删除 (不可恢复).';
+      confirmModal('删除区域', msg, () => {
+        pd.areas.splice(ai, 1);
+        Store.save(report, _currentPeriod); rerender();
+        toast('已删除区域 ' + areaName + ' · ' + stepCount + ' 行', 'success');
+      });
+    },
+    // v5.11: 表内 [+ 新增工序] = 在该 area 的 steps 末尾追加新行 (序号按区域独立计算, 楼栋默认=区域名)
+    s11AddRowInArea: (ai) => {
+      const pd = report.pages_data && report.pages_data['11'];
+      if (!pd || !pd.areas || !pd.areas[ai]) return;
+      const a = pd.areas[ai];
+      a.steps = a.steps || [];
+      const sections = a.sections || [];  // v5.14: sections 是 per-area
+      const cellCount = sections.length * 3;
+      a.steps.push({ building: a.area || '', part: '', step: '', cells: new Array(cellCount).fill('') });
+      Store.save(report, _currentPeriod); rerender();
+    },
+    // v5.12: 日期选择器 onchange
+    //   1) 把 ISO 字符串写回 step.cells[k]
+    //   2) 同步更新 .s11-date-wrap 的 data-display (让 M/D 文本立刻反映新值)
+    //   3) 重算同施工段的 days, 改 s11-days-cell.textContent (不重渲整张表, 避免输入失焦)
+    //   4) save
+    s11UpdateDate: (input, ai, ri, k) => {
+      const pd = report.pages_data && report.pages_data['11'];
+      const step = pd && pd.areas && pd.areas[ai] && pd.areas[ai].steps && pd.areas[ai].steps[ri];
+      if (!step) return;
+      step.cells = step.cells || [];
+      step.cells[k] = input.value;
+      // 更新 data-display
+      const wrap = input.closest('.s11-date-wrap');
+      if (wrap) wrap.setAttribute('data-display', s11FormatDate(input.value));
+      // 重算 days (同施工段内的 start + end)
+      const sectionIdx = Math.floor(k / 3);
+      const startIdx = sectionIdx * 3;
+      const endIdx = startIdx + 1;
+      const daysIdx = startIdx + 2;
+      const startIso = step.cells[startIdx] || '';
+      const endIso = step.cells[endIdx] || '';
+      const days = s11ComputeDays(startIso, endIso);
+      // 找同行的 days cell
+      const tr = input.closest('tr');
+      if (tr) {
+        const daysCell = tr.querySelector('td[data-cell-idx="' + daysIdx + '"]');
+        if (daysCell) daysCell.textContent = days;
+      }
+      Store.save(report, _currentPeriod);
+    },
+    // v5.14: 改层名 (thead 里的可编辑 contenteditable, 按 area 索引, 文字超长可换行)
+    s11UpdateSectionName: (el, ai, si) => {
+      const pd = report.pages_data && report.pages_data['11'];
+      const area = pd && pd.areas && pd.areas[ai];
+      if (area && area.sections && area.sections[si]) {
+        const name = (el.innerText || el.textContent || '').trim();
+        area.sections[si].name = name;
+        Store.save(report, _currentPeriod);
+      }
+    },
+    // v5.14: 删层 (弹确认, 只影响本 area 内所有工序在此层的 3 列)
+    s11RemoveSection: (ai, si) => {
+      const pd = report.pages_data && report.pages_data['11'];
+      if (!pd || !pd.areas || !pd.areas[ai]) return;
+      const area = pd.areas[ai];
+      if (!area.sections || !area.sections[si]) return;
+      const sec = area.sections[si];
+      const secName = sec.name || ('层' + (si + 1));
+      const totalRows = (area.steps || []).length;
+      const startCellIdx = si * 3;
+      confirmModal('删除层', '确定删除层 "' + secName + '" 吗? 本区域 ' + totalRows + ' 行工序在此层的 开始/完成/日历天 3 列将一并清空 (不可恢复).', () => {
+        area.sections.splice(si, 1);
+        (area.steps || []).forEach(step => {
+          if (Array.isArray(step.cells)) {
+            step.cells.splice(startCellIdx, 3);
+          }
+          // highlight 索引 >= startCellIdx 的要减 3 (跟着 cell 一起左移)
+          if (Array.isArray(step.highlight)) {
+            step.highlight = step.highlight.map(h => {
+              const n = parseInt(h, 10);
+              return (!isNaN(n) && n >= startCellIdx) ? String(n - 3) : h;
+              });
+          }
+        });
+        Store.save(report, _currentPeriod); rerender();
+        toast('已删除层 ' + secName, 'success');
+      });
+    },
+    // v5.14: thead 末尾 [+] = 给本 area 加一个新层, 本 area 每行追加 3 个空 cell
+    s11AddSection: (ai) => {
+      const pd = report.pages_data && report.pages_data['11'];
+      if (!pd || !pd.areas || !pd.areas[ai]) return;
+      const area = pd.areas[ai];
+      area.sections = area.sections || [];
+      const next = area.sections.length + 1;
+      area.sections.push({ name: '层' + next });
+      (area.steps || []).forEach(step => {
+        step.cells = step.cells || [];
+        step.cells.push('', '', '');
+      });
+      Store.save(report, _currentPeriod); rerender();
+    },
+    // v5.15: 改基础列名 (thead 里的可编辑 contenteditable, 按 area 索引, 文字超长可换行)
+    s11UpdateBaseColName: (el, ai, ci) => {
+      const pd = report.pages_data && report.pages_data['11'];
+      const area = pd && pd.areas && pd.areas[ai];
+      if (area && area.baseColumns && area.baseColumns[ci]) {
+        const name = (el.innerText || el.textContent || '').trim();
+        area.baseColumns[ci].name = name;
+        Store.save(report, _currentPeriod);
+      }
+    },
+    // v5.15: 删基础列 (弹确认, 只影响本 area 内所有工序在该列的数据)
+    s11RemoveBaseCol: (ai, ci) => {
+      const pd = report.pages_data && report.pages_data['11'];
+      if (!pd || !pd.areas || !pd.areas[ai]) return;
+      const area = pd.areas[ai];
+      if (!area.baseColumns || !area.baseColumns[ci]) return;
+      const col = area.baseColumns[ci];
+      const colName = col.name || ('列' + (ci + 1));
+      const colKey = col.key;
+      const totalRows = (area.steps || []).length;
+      confirmModal('删除列', '确定删除列 "' + colName + '" 吗? 本区域 ' + totalRows + ' 行工序在该列的数据将一并删除 (不可恢复).', () => {
+        area.baseColumns.splice(ci, 1);
+        (area.steps || []).forEach(step => {
+          if (step && colKey in step) {
+            delete step[colKey];
+          }
+        });
+        Store.save(report, _currentPeriod); rerender();
+        toast('已删除列 ' + colName, 'success');
+      });
+    },
+    s11AiExtend: () => toast('AI 续排 mock', 'info'),
+    // 12 协调事宜
+    s12Update: (i, field, val) => {
+      const pd = report.pages_data && report.pages_data['12'];
+      if (pd && pd.rows && pd.rows[i]) {
+        pd.rows[i][field] = val;
+        Store.save(report, _currentPeriod);
+      }
+    },
+    s12Add: () => {
+      const pd = report.pages_data && report.pages_data['12'];
+      if (!pd) return;
+      pd.rows = pd.rows || [];
+      pd.rows.push({ issue: '', proposer: '', cooperator: '' });
+      Store.save(report, _currentPeriod); rerender();
+    },
+    s12Remove: (i) => {
+      const pd = report.pages_data && report.pages_data['12'];
+      if (pd && pd.rows) {
+        pd.rows.splice(i, 1);
+        Store.save(report, _currentPeriod); rerender();
+      }
+    },
+    // 14 封尾
+    s14Update: (val) => {
+      const pd = report.pages_data && report.pages_data['14'];
+      if (!pd) return;
+      pd.content = val;
+      Store.save(report, _currentPeriod);
+    },
+    // 03
+    s03Update: (i, field, val) => {
+      const rows = report.pages_data && report.pages_data['03'] && report.pages_data['03'].rows;
+      if (rows && rows[i]) {
+        rows[i][field] = val;
+        Store.save(report, _currentPeriod); rerender();
+      }
+    },
+    s03SetDelta: (i, val) => {
+      const rows = report.pages_data && report.pages_data['03'] && report.pages_data['03'].rows;
+      if (rows && rows[i]) {
+        rows[i].delta = val;
+        Store.save(report, _currentPeriod); rerender();
+      }
+    },
+    s03AddRow: () => {
+      const pd = report.pages_data && report.pages_data['03'];
+      if (!pd) return;
+      const rows = pd.rows || (pd.rows = []);
+      const nextSeq = rows.length ? Math.max.apply(null, rows.map(r => r.seq || 0)) + 1 : 1;
+      rows.push({ seq: nextSeq, role: '', name: '', phone: '', present: true, delta: 'new' });
+      Store.save(report, _currentPeriod); rerender();
+    },
+    s03UploadPhoto: (input) => {
+      const file = input && input.files && input.files[0];
+      if (!file) return;
+      if (file.size > 2 * 1024 * 1024) {
+        toast('图片超过 2MB, 请压缩后再上传', 'error');
+        input.value = '';
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        report.ui_config = report.ui_config || {};
+        report.ui_config.s03_photo = e.target.result;
+        Store.save(report, _currentPeriod); rerender();
+      };
+      reader.readAsDataURL(file);
+    },
+    s03ClearPhoto: () => {
+      if (!report.ui_config) return;
+      delete report.ui_config.s03_photo;
+      Store.save(report, _currentPeriod); rerender();
+    },
+    s03UpdateCaption: (val) => {
+      report.ui_config = report.ui_config || {};
+      report.ui_config.s03_photo_caption = val;
+      Store.save(report, _currentPeriod);
+    },
+    // 0301 重要节点
+    s0301UpdateCell: (major, rowType, month, text) => {
+      const pd = report.pages_data && report.pages_data['0301'];
+      if (!pd) return;
+      const rows = pd.rows || (pd.rows = []);
+      let r = rows.find(x => x.major === major && x.row === rowType);
+      if (!r) {
+        r = { major: major, row: rowType };
+        rows.push(r);
+      }
+      r[month] = text;
+      Store.save(report, _currentPeriod);
+    },
+    s0301AddMajor: () => {
+      const pd = report.pages_data && report.pages_data['0301'];
+      if (!pd) return;
+      const rows = pd.rows || (pd.rows = []);
+      const existingMajors = rows.map(r => r.major);
+      let suggestion = '精装(清尚)';
+      let n = 1;
+      while (existingMajors.includes(suggestion)) {
+        n++;
+        suggestion = '精装(清尚) ' + n;
+      }
+      promptModal('新增专业', suggestion, (name) => {
+        if (!name || !name.trim()) return;
+        name = name.trim();
+        if (rows.some(r => r.major === name)) {
+          toast('专业已存在', 'error');
+          return;
+        }
+        const months = (window.Sections['0301'] && window.Sections['0301']._getMonths) ? window.Sections['0301']._getMonths(report) : [];
+        const baseRow = { major: name, row: '关键节点' };
+        const subRow  = { major: name, row: '次要节点' };
+        months.forEach(m => { baseRow[m] = ''; subRow[m] = ''; });
+        rows.push(baseRow);
+        rows.push(subRow);
+        Store.save(report, _currentPeriod); rerender();
+        toast('已新增专业 ' + name, 'success');
+      });
+    },
+    s0301AddMonth: () => {
+      const pd = report.pages_data && report.pages_data['0301'];
+      if (!pd) return;
+      const months = pd.months && pd.months.length ? pd.months : (window.Sections['0301'] ? window.Sections['0301']._getMonths(report) : []);
+      if (!Array.isArray(pd.months)) pd.months = months.slice();
+      const last = pd.months[pd.months.length - 1];
+      const next = (window.Sections['0301'] ? window.Sections['0301']._nextMonthLabel(last) : '');
+      promptModal('新增月份', next, (val) => {
+        if (!val || !val.trim()) return;
+        const m = val.trim();
+        if (pd.months.includes(m)) {
+          toast('该月份已存在', 'error');
+          return;
+        }
+        pd.months.push(m);
+        // 给所有行加这个 key
+        (pd.rows || []).forEach(r => { if (!(m in r)) r[m] = ''; });
+        Store.save(report, _currentPeriod); rerender();
+        toast('已新增月份列 ' + m, 'success');
+      });
+    },
+    s0301DelMonth: (idx) => {
+      const pd = report.pages_data && report.pages_data['0301'];
+      if (!pd) return;
+      if (!Array.isArray(pd.months)) {
+        pd.months = (window.Sections['0301'] ? window.Sections['0301']._getMonths(report) : []);
+      }
+      const m = pd.months[idx];
+      if (!m) return;
+      // 检查是否有内容
+      const hasContent = (pd.rows || []).some(r => (r[m] || '').trim() !== '');
+      const msg = hasContent
+        ? '月份 "' + m + '" 列里有内容, 确认删除整列?'
+        : '确认删除月份列 "' + m + '"?';
+      confirmModal('删除月份列', msg, () => {
+        pd.months.splice(idx, 1);
+        (pd.rows || []).forEach(r => { delete r[m]; });
+        Store.save(report, _currentPeriod); rerender();
+        toast('已删除月份 ' + m, 'success');
+      });
+    },
+    s0301EditMonth: (idx) => {
+      const pd = report.pages_data && report.pages_data['0301'];
+      if (!pd) return;
+      if (!Array.isArray(pd.months)) {
+        pd.months = (window.Sections['0301'] ? window.Sections['0301']._getMonths(report) : []);
+      }
+      const oldKey = pd.months[idx];
+      if (!oldKey) return;
+      promptModal('修改月份标签', oldKey, (val) => {
+        if (!val || !val.trim()) return;
+        const newKey = val.trim();
+        if (newKey === oldKey) return;
+        if (pd.months.includes(newKey)) {
+          toast('该月份已存在', 'error');
+          return;
+        }
+        pd.months[idx] = newKey;
+        // 把所有行的 key 重命名
+        (pd.rows || []).forEach(r => {
+          if (oldKey in r) {
+            r[newKey] = r[oldKey];
+            delete r[oldKey];
+          }
+        });
+        Store.save(report, _currentPeriod); rerender();
+        toast('已修改月份 ' + oldKey + ' → ' + newKey, 'success');
+      });
+    },
+    s0301AddRow: (major) => {
+      const pd = report.pages_data && report.pages_data['0301'];
+      if (!pd) return;
+      pd.rows = pd.rows || [];
+      // 找该 major 下最大自定义行序号, 提示用户填名字
+      const existingLabels = pd.rows.filter(r => r.major === major).map(r => r.row || '');
+      let suggestion = '其他节点';
+      let n = 1;
+      while (existingLabels.includes(suggestion)) {
+        n++;
+        suggestion = '其他节点 ' + n;
+      }
+      promptModal('为专业 "' + major + '" 新增一行', suggestion, (val) => {
+        if (!val || !val.trim()) return;
+        const label = val.trim();
+        if (existingLabels.includes(label)) {
+          toast('该行名已存在', 'error');
+          return;
+        }
+        const months = pd.months && pd.months.length ? pd.months : (window.Sections['0301'] ? window.Sections['0301']._getMonths(report) : []);
+        const newRow = { major: major, row: label };
+        months.forEach(m => { newRow[m] = ''; });
+        pd.rows.push(newRow);
+        Store.save(report, _currentPeriod); rerender();
+        toast('已新增行 "' + label + '"', 'success');
+      });
+    },
+    s0301DelRow: (major, rowLabel) => {
+      const pd = report.pages_data && report.pages_data['0301'];
+      if (!pd || !pd.rows) return;
+      const idx = pd.rows.findIndex(r => r.major === major && r.row === rowLabel);
+      if (idx < 0) return;
+      // 检查行是否有内容
+      const months = pd.months && pd.months.length ? pd.months : (window.Sections['0301'] ? window.Sections['0301']._getMonths(report) : []);
+      const hasContent = months.some(m => (pd.rows[idx][m] || '').trim() !== '');
+      const isFixed = rowLabel === '关键节点' || rowLabel === '次要节点';
+      const msg = (isFixed && hasContent)
+        ? '"' + rowLabel + '" 行内有内容, 确认删除?'
+        : '确认删除专业 "' + major + '" 的 "' + rowLabel + '" 行?';
+      confirmModal(isFixed ? '删除固定行' : '删除行', msg, () => {
+        pd.rows.splice(idx, 1);
+        Store.save(report, _currentPeriod); rerender();
+        toast('已删除行 "' + rowLabel + '"', 'success');
+      });
+    },
+    s0301EditRow: (major, oldLabel) => {
+      const pd = report.pages_data && report.pages_data['0301'];
+      if (!pd || !pd.rows) return;
+      const row = pd.rows.find(r => r.major === major && r.row === oldLabel);
+      if (!row) return;
+      promptModal('修改行名', oldLabel, (val) => {
+        if (!val || !val.trim()) return;
+        const newLabel = val.trim();
+        if (newLabel === oldLabel) return;
+        if (pd.rows.some(r => r.major === major && r.row === newLabel)) {
+          toast('该行名已存在', 'error');
+          return;
+        }
+        row.row = newLabel;
+        Store.save(report, _currentPeriod); rerender();
+        toast('已修改行名 "' + oldLabel + '" → "' + newLabel + '"', 'success');
+      });
+    },
+    s0301DelMajor: (major) => {
+      const pd = report.pages_data && report.pages_data['0301'];
+      if (!pd || !pd.rows) return;
+      const cnt = pd.rows.filter(r => r.major === major).length;
+      const hasContent = pd.rows.some(r => r.major === major && Object.keys(r).some(k => k !== 'major' && k !== 'row' && (r[k] || '').trim() !== ''));
+      const msg = hasContent
+        ? '专业 "' + major + '" 下 ' + cnt + ' 行有内容, 确认全部删除?'
+        : '确认删除专业 "' + major + '" 及其 ' + cnt + ' 行?';
+      confirmModal('删除专业', msg, () => {
+        pd.rows = pd.rows.filter(r => r.major !== major);
+        Store.save(report, _currentPeriod); rerender();
+        toast('已删除专业 ' + major, 'success');
+      });
+    },
+    // 公共
+    changePeriod, changeRole, gotoSection, exportPDF,
+    openPreview, rebuildAI,
+    // nav_tree
+    addChapter: () => {
+      promptModal('新一级标题', '', (name) => {
+        if (name && name.trim()) {
+          NavTree.addChapter(report.nav_tree, name.trim());
+          Store.save(report, _currentPeriod); rerender();
+          toast('已新增一级标题', 'success');
+        }
+      });
+    },
+    addSubPage: (parentId) => {
+      const parent = NavTree.findNode(report.nav_tree, parentId);
+      if (!parent) return;
+      promptModal('新子页名称', '', (name) => {
+        if (name && name.trim()) {
+          const pageId = String(Date.now()).slice(-4);
+          NavTree.addPage(report.nav_tree, parentId, name.trim(), pageId);
+          Store.save(report, _currentPeriod); rerender();
+          toast('已新增子页 ' + name.trim(), 'success');
+        }
+      });
+    },
+    addSiblingChapter: (siblingId) => {
+      // 在 sibling 节点后加同级 chapter
+      const node = NavTree.findNode(report.nav_tree, siblingId);
+      if (!node) return;
+      // 找 sibling 的 parent (或根)
+      const parent = findParentOfNode(report.nav_tree, siblingId) || report.nav_tree;
+      promptModal('新增同级章', '', (name) => {
+        if (name && name.trim()) {
+          const id = 'n' + Date.now() + Math.floor(Math.random()*1000);
+          const newNode = { id, type: 'chapter', name: name.trim(), prefix: null, manual_prefix: false, children: [] };
+          // 插入到 sibling 之后
+          const idx = parent.findIndex(n => n.id === siblingId);
+          if (idx < 0) parent.push(newNode);
+          else parent.splice(idx + 1, 0, newNode);
+          NavTree.renumber(report.nav_tree);
+          Store.save(report, _currentPeriod); rerender();
+          toast('已新增同级章 ' + name.trim(), 'success');
+        }
+      });
+    },
+    addSiblingPage: (siblingId) => {
+      // 在 sibling page 节点后加同级 page (同一 chapter 下)
+      const node = NavTree.findNode(report.nav_tree, siblingId);
+      if (!node) return;
+      const parent = findParentOfNode(report.nav_tree, siblingId);
+      if (!parent) {
+        toast('根级 page 不能加同级', 'error');
+        return;
+      }
+      promptModal('新增同级页', '', (name) => {
+        if (name && name.trim()) {
+          const id = 'n' + Date.now() + Math.floor(Math.random()*1000);
+          const pageId = String(Date.now()).slice(-4);
+          const newNode = { id, type: 'page', name: name.trim(), page_id: pageId, prefix: null, manual_prefix: false, parent_prefix: null, children: [] };
+          const idx = parent.findIndex(n => n.id === siblingId);
+          if (idx < 0) parent.push(newNode);
+          else parent.splice(idx + 1, 0, newNode);
+          NavTree.renumber(report.nav_tree);
+          Store.save(report, _currentPeriod); rerender();
+          toast('已新增同级页 ' + name.trim(), 'success');
+        }
+      });
+    },
+    startRename: (id) => {
+      const n = NavTree.findNode(report.nav_tree, id);
+      if (!n) return;
+      promptModal('重命名', n.name, (newName) => {
+        if (newName && newName.trim()) {
+          n.name = newName.trim();
+          Store.save(report, _currentPeriod); rerender();
+        }
+      });
+    },
+    startEditPrefix: (id) => {
+      const n = NavTree.findNode(report.nav_tree, id);
+      if (!n) return;
+      promptModal('改前缀 (留空 = 自动)', n.prefix || '', (p) => {
+        if (p === '') NavTree.clearManualPrefix(report.nav_tree, id);
+        else NavTree.setManualPrefix(report.nav_tree, id, p);
+        Store.save(report, _currentPeriod); rerender();
+      });
+    },
+    updateField: (path, value) => {
+      // 改嵌套字段, e.g. 'project.name' -> report.project.name
+      const keys = path.split('.');
+      let obj = report;
+      for (let i = 0; i < keys.length - 1; i++) {
+        if (obj[keys[i]] === undefined) obj[keys[i]] = {};
+        obj = obj[keys[i]];
+      }
+      obj[keys[keys.length - 1]] = value;
+      Store.save(report, _currentPeriod);
+    },
+    confirmRemove: (id) => {
+      const n = NavTree.findNode(report.nav_tree, id);
+      if (!n) return;
+      // 保护 01 02 03 0301 系统节点 (封面/目录/组织架构/重要节点) 不让删
+      const protectedIds = ['n01', 'n02', 'n03', 'n0301'];
+      if (protectedIds.includes(id) || (n.page_id && ['01','02','03','0301'].includes(n.page_id))) {
+        toast('"' + n.name + '" 是系统固定节点, 不能删除', 'error');
+        return;
+      }
+      const cnt = (n.children || []).length;
+      const msg = cnt > 0 ? '此节点包含 ' + cnt + ' 个子节点, ' : '';
+      confirmModal('删除节点', msg + '确定删除 "' + n.name + '"?', () => {
+        NavTree.removeNode(report.nav_tree, id);
+        Store.save(report, _currentPeriod); rerender();
+        toast('已删除', 'success');
+      });
+    },
+    // report_list 桥接 (供 dialog HTML onclick 调用)
+    showReportList: () => ReportList.showReportList(),
+    batchDeleteReports: () => ReportList.batchDeleteReports(),
+    confirmBatchDelete: () => ReportList.confirmBatchDelete(),
+    confirmDeleteReport: (period) => ReportList.confirmDeleteReport(period),
+    confirmRenameReport: () => ReportList.confirmRenameReport(),
+    confirmEditDates: () => ReportList.confirmEditDates(),
+    toggleSelectAll: (checked) => ReportList.toggleSelectAll(checked),
+    updateBatchSelectInfo: () => ReportList.updateBatchSelectInfo(),
+    renameReport: (period) => ReportList.renameReport(period),
+    editPeriodDates: (period) => ReportList.editPeriodDates(period),
+    setAsBasePeriod: (period) => ReportList.setAsBasePeriod(period),
+    deleteReport: (period) => ReportList.deleteReport(period),
+    showGeneratePeriodsDialog: () => ReportList.showGeneratePeriodsDialog(),
+    confirmBaselineConflict: () => ReportList.confirmBaselineConflict(),
+    cancelBaselineConflict: () => ReportList.cancelBaselineConflict(),
+    useBaselineAndGenerate: () => ReportList.useBaselineAndGenerate(),
+    showBaselineConfirmDialog: () => ReportList.showBaselineConfirmDialog(),
+    updateGeneratePreview: () => ReportList.updateGeneratePreview(),
+    updateGeneratePreviewFromStart: () => ReportList.updateGeneratePreviewFromStart(),
+    updateGeneratePreviewFromEnd: () => ReportList.updateGeneratePreviewFromEnd(),
+    updateGeneratePreviewFromOthers: () => ReportList.updateGeneratePreviewFromOthers(),
+    updateGeneratePreviewFromDur: () => ReportList.updateGeneratePreviewFromDur(),
+    showConflictDialog: (conflicts, newPeriods) => ReportList.showConflictDialog(conflicts, newPeriods),
+    executeGenerateFromDialog: () => ReportList.executeGenerateFromDialog(),
+    handleConflict: (action) => ReportList.handleConflict(action),
+    toggleLabelFormat: (format) => {
+      // 切模式 + 重渲顶部 selector + 重开 modal
+      localStorage.setItem('bcy_label_format', format);
+      const overlay = document.getElementById('report-list-overlay');
+      if (overlay) overlay.remove();
+      ReportList.showReportList();
+      // 顶部 selector: 调 renderPeriodSelector 重渲 (用 closure rerender)
+      if (typeof rerender === 'function') rerender();
+      // 双重保险: 调 window._rerender (如果有)
+      if (typeof global._rerender === 'function') global._rerender();
+    },
+    addNewPeriod: () => {
+      ReportList.addNewPeriod();
+      if (typeof rerender === 'function') rerender();
+      if (typeof global._rerender === 'function') global._rerender();
+    },
+    applyNavFilter: () => {
+      // 读 3 个 checkbox 状态 -> 存 localStorage + rerender
+      const f = {
+        chapter: document.getElementById('filter-chapter') ? document.getElementById('filter-chapter').checked : true,
+        page: document.getElementById('filter-page') ? document.getElementById('filter-page').checked : true,
+        closing: document.getElementById('filter-closing') ? document.getElementById('filter-closing').checked : false
+      };
+      localStorage.setItem('bcy_nav_filter', JSON.stringify(f));
+      if (typeof rerender === 'function') rerender();
     }
-  }
-  function s09AcceptAll() {
-    Sections["09"]._drafts.forEach(draft => {
-      report.plan_items.push({ ...draft });
-    });
-    Sections["09"]._drafts = [];
-    Store.save(report, _currentPeriod);
-    rerender();
-  }
-  function s09ClearDrafts() {
-    Sections["09"]._drafts = [];
-    rerender();
-  }
-  function updatePlan(index, field, value) {
-    report.plan_items[index][field] = value;
-    Store.save(report, _currentPeriod);
-  }
-  function updatePlanDays(index, days) {
-    report.plan_items[index].days = days;
-    Store.save(report, _currentPeriod);
-    rerender();
-  }
-  function togglePlanCell(index, dayIndex) {
-    const days = report.plan_items[index].days || [];
-    const idx = days.indexOf(dayIndex);
-    if (idx > -1) {
-      days.splice(idx, 1);
-    } else {
-      days.push(dayIndex);
-      days.sort((a, b) => a - b);
-    }
-    report.plan_items[index].days = days;
-    Store.save(report, _currentPeriod);
-    rerender();
-  }
-  function removePlan(index) {
-    report.plan_items.splice(index, 1);
-    Store.save(report, _currentPeriod);
-    rerender();
-  }
-
-  // ====== 施工进度管理 ======
-  function uploadFloorPlans() {
-    toast("上传楼层平面图功能开发中", "info");
-  }
-  function enterAnnotateMode() {
-    toast("标注模式功能开发中", "info");
-  }
-  function aiExtendSchedule() {
-    toast("AI 扩展进度计划功能开发中", "info");
-  }
-
-  // ====== 协调事宜管理 ======
-  function updateCoord(index, field, value) {
-    report.coordination[index][field] = value;
-    Store.save(report, _currentPeriod);
-  }
-  function addCoord() {
-    report.coordination.push({
-      content: '',
-      owner: '',
-      deadline: '',
-      status: 'pending'
-    });
-    Store.save(report, _currentPeriod);
-    rerender();
-  }
-
-  // ====== 导出 App 全局 ======
-  global.App = {
-    goto, toggleGroup, autoFillPeriod,
-    changePeriod, showReportList, addNewPeriod, deleteReport, confirmDeleteReport, renameReport, confirmRenameReport,
-    editPeriodDates, confirmEditDates, setAsBasePeriod,
-    showGeneratePeriodsDialog, executeGenerateFromDialog,
-    toggleSelectAll, updateBatchSelectInfo, batchDeleteReports, confirmBatchDelete,
-    toggleAutoFillPeriod, updatePeriodInterval, updatePeriodCount, generatePeriods, handleConflict,
-    updateField, updateRoster, markLeave, addRoster, importRoster, aiRosterDiff,
-    updateWorkDone, removeWorkDone, addWorkDone, s04ImportFromLastWeek,
-    activateS04Tab, s04StartVoice, s04ExtractPaste, s04AcceptDraft, s04AcceptAllDrafts, s04ClearDrafts, s04AddFormRow, s04PickFile, s04HandleFile,
-    uploadPhotos, aiGroupPhotos,
-    updateLabor, aiRecomputeLabor,
-    updateEcc, aiParseEccScreenshot, uploadEccScreenshot,
-    updateDesign, removeDesign,
-    activateS08Tab, s08StartVoice, s08ExtractPaste, s08AcceptDraft, s08AcceptAll, s08ClearDrafts, s08AddForm,
-    activateS09Tab, s09AIDraft, s09StartVoice, s09ExtractPaste, s09AcceptDraft, s09AcceptAll, s09ClearDrafts,
-    updatePlan, updatePlanDays, togglePlanCell, removePlan,
-    uploadFloorPlans, enterAnnotateMode, aiExtendSchedule,
-    updateCoord, addCoord,
-    rebuildAI
   };
+
+  // 暴露内部辅助函数到 window, 供 report_list.js 等跨文件使用
+  global._currentPeriod_get = () => _currentPeriod;
+  global._currentPeriod_set = (p) => { _currentPeriod = p; };
+  global._toast = toast;
+  global._today = () => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+  global._rerender = rerender;
+  global._changePeriod = changePeriod;
+  global._init = init;
+  global._renderSection = renderSection;
+  global._renderNav = renderNav;
+  global._renderAnomalies = renderAnomalies;
+  global._findNodeByPageId = findNodeByPageId;
+  global._report = () => report;
+  global.App = App;
+  global.Store = Store;  // 由 store.js 注入
+  global.Rules = Rules;  // 由 rules.js 注入
 })(window);

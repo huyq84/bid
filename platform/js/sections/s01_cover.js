@@ -10,11 +10,14 @@ window.Sections["01"] = {
         <div class="flex items-center justify-between">
           <div>
             <h2 class="text-xl font-bold text-white">📋 ${report.project.name}</h2>
-            <p class="text-blue-200 text-xs mt-0.5">工作周报 · ${report.period.report_date}</p>
+            <div class="text-blue-200 text-xs mt-0.5 flex items-center gap-1">
+              <span>工作周报 ·</span>
+              <input type="date" class="bg-blue-700/40 text-white text-xs px-1.5 py-0.5 rounded border border-blue-400/30 focus:bg-blue-700/60 focus:border-blue-300 focus:outline-none transition-all"
+                value="${(() => { try { return report.period.report_date || (window._today && window._today()) || ''; } catch(e) { return ''; } })()}" onchange="App.updateField('period.report_date', this.value)">
+            </div>
           </div>
           <div class="text-right">
-            <div class="text-white font-bold text-lg">W${report.period.week_no}</div>
-            <div class="text-blue-200 text-xs">第 ${report.period.week_no} 周</div>
+            <div class="text-white font-bold text-lg">${(() => { try { const lp = (window._currentPeriod_get && window._currentPeriod_get()) || ''; const lf = localStorage.getItem('bcy_label_format') || 'custom'; return Store.getPeriodInfo(lp, lf).label; } catch(e) { return 'W' + (report.period.week_no || ''); } })()}</div>
           </div>
         </div>
       </div>
@@ -31,26 +34,21 @@ window.Sections["01"] = {
             <h3 class="font-semibold text-gray-800 text-sm">项目信息</h3>
           </div>
         </div>
-        <div class="p-4 grid grid-cols-4 gap-3">
+        <div class="p-4 grid grid-cols-3 gap-3">
           <div class="space-y-1">
             <label class="block text-xs font-medium text-gray-500">项目名称</label>
-            <input class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-md focus:ring-1.5 focus:ring-blue-500 focus:border-blue-500 transition-all"
-              value="${report.project.name}" onchange="App.updateField('project.name', this.value)" placeholder="项目名称">
-          </div>
-          <div class="space-y-1">
-            <label class="block text-xs font-medium text-gray-500">项目编号</label>
-            <input class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-md focus:ring-1.5 focus:ring-blue-500 focus:border-blue-500 transition-all"
-              value="${report.project.id}" onchange="App.updateField('project.id', this.value)" placeholder="项目编号">
+            <textarea class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-md focus:ring-1.5 focus:ring-blue-500 focus:border-blue-500 transition-all resize-y min-h-[38px]"
+              onchange="App.updateField('project.name', this.value)" placeholder="项目名称">${report.project.name}</textarea>
           </div>
           <div class="space-y-1">
             <label class="block text-xs font-medium text-gray-500">汇报单位</label>
-            <input class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-md focus:ring-1.5 focus:ring-blue-500 focus:border-blue-500 transition-all"
-              value="${report.project.subcontractor}" onchange="App.updateField('project.subcontractor', this.value)" placeholder="汇报单位">
+            <textarea class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-md focus:ring-1.5 focus:ring-blue-500 focus:border-blue-500 transition-all resize-y min-h-[38px]"
+              onchange="App.updateField('project.subcontractor', this.value)" placeholder="汇报单位">${report.project.subcontractor}</textarea>
           </div>
           <div class="space-y-1">
             <label class="block text-xs font-medium text-gray-500">总包单位</label>
-            <input class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-md focus:ring-1.5 focus:ring-blue-500 focus:border-blue-500 transition-all"
-              value="${report.project.general_contractor}" onchange="App.updateField('project.general_contractor', this.value)" placeholder="总包单位">
+            <textarea class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-md focus:ring-1.5 focus:ring-blue-500 focus:border-blue-500 transition-all resize-y min-h-[38px]"
+              onchange="App.updateField('project.general_contractor', this.value)" placeholder="总包单位">${report.project.general_contractor}</textarea>
           </div>
         </div>
       </div>
@@ -70,33 +68,33 @@ window.Sections["01"] = {
         <div class="p-4 grid grid-cols-3 gap-3">
           <div class="space-y-1">
             <label class="block text-xs font-medium text-gray-500">填报单位</label>
-            <input class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-md focus:ring-1.5 focus:ring-green-500 focus:border-green-500 transition-all"
-              value="${report.submitter.org}" onchange="App.updateField('submitter.org', this.value)" placeholder="填报单位">
+            <textarea class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-md focus:ring-1.5 focus:ring-green-500 focus:border-green-500 transition-all resize-y min-h-[38px]"
+              onchange="App.updateField('submitter.org', this.value)" placeholder="填报单位">${report.submitter.org}</textarea>
           </div>
           <div class="space-y-1">
             <label class="block text-xs font-medium text-gray-500">填报人</label>
-            <input class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-md focus:ring-1.5 focus:ring-green-500 focus:border-green-500 transition-all"
-              value="${report.submitter.user_id}" onchange="App.updateField('submitter.user_id', this.value)" placeholder="填报人">
+            <textarea class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-md focus:ring-1.5 focus:ring-green-500 focus:border-green-500 transition-all resize-y min-h-[38px]"
+              onchange="App.updateField('submitter.user_id', this.value)" placeholder="填报人">${report.submitter.user_id}</textarea>
           </div>
           <div class="space-y-1">
             <label class="block text-xs font-medium text-gray-500">职务</label>
-            <input class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-md focus:ring-1.5 focus:ring-green-500 focus:border-green-500 transition-all"
-              value="${report.submitter.role || ''}" onchange="App.updateField('submitter.role', this.value)" placeholder="职务">
+            <textarea class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-md focus:ring-1.5 focus:ring-green-500 focus:border-green-500 transition-all resize-y min-h-[38px]"
+              onchange="App.updateField('submitter.role', this.value)" placeholder="职务">${report.submitter.role || ''}</textarea>
           </div>
           <div class="space-y-1">
             <label class="block text-xs font-medium text-gray-500">接收单位</label>
-            <input class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-md focus:ring-1.5 focus:ring-green-500 focus:border-green-500 transition-all"
-              value="${report.receiver.org}" onchange="App.updateField('receiver.org', this.value)" placeholder="接收单位">
+            <textarea class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-md focus:ring-1.5 focus:ring-green-500 focus:border-green-500 transition-all resize-y min-h-[38px]"
+              onchange="App.updateField('receiver.org', this.value)" placeholder="接收单位">${report.receiver.org}</textarea>
           </div>
           <div class="space-y-1">
             <label class="block text-xs font-medium text-gray-500">接收人</label>
-            <input class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-md focus:ring-1.5 focus:ring-green-500 focus:border-green-500 transition-all"
-              value="${report.receiver.user_id || '—'}" onchange="App.updateField('receiver.user_id', this.value)" placeholder="接收人">
+            <textarea class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-md focus:ring-1.5 focus:ring-green-500 focus:border-green-500 transition-all resize-y min-h-[38px]"
+              onchange="App.updateField('receiver.user_id', this.value)" placeholder="接收人">${report.receiver.user_id || '—'}</textarea>
           </div>
           <div class="space-y-1">
             <label class="block text-xs font-medium text-gray-500">职务</label>
-            <input class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-md focus:ring-1.5 focus:ring-green-500 focus:border-green-500 transition-all"
-              value="${report.receiver.role}" onchange="App.updateField('receiver.role', this.value)" placeholder="职务">
+            <textarea class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-md focus:ring-1.5 focus:ring-green-500 focus:border-green-500 transition-all resize-y min-h-[38px]"
+              onchange="App.updateField('receiver.role', this.value)" placeholder="职务">${report.receiver.role}</textarea>
           </div>
         </div>
       </div>

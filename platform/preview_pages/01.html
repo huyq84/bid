@@ -1,5 +1,8 @@
 <!DOCTYPE html><html lang="zh-CN" style=""><head>
 <meta charset="utf-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>百草园城市更新项目 - 工作周报</title>
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
@@ -41,13 +44,13 @@
 </head>
 <body class="flex items-center justify-center min-h-screen bg-gray-900">
 <!-- BEGIN: PresentationPage -->
-<main class="main-container bg-white" data-purpose="report-cover" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuC7Kq2A2iTUUneEJe_CXRN_OIwQFLIPa5fiHmABzLcb4EVS2a-ZD4AiEPowL0dHNoQC9G-Kx233VJsz6wRwz10Slodu2nTNCxkhAvP4RsOhsus_GfxRzHKyXX_DFqi8nv6HEWP1IZSFgMd2PnJFf1YUFhWv4yBKYh_Ey2ZK8-U_uO089NWr65uzL3gBqsFB_FjCtEnmP9VbtbpYRlVKZN0rmI8rxEi7waCilqgboCfncydeLx7G5WUl5E69lSgg4rzljeUoFqKaQcBN'); background-size: cover; background-position: center center; background-repeat: no-repeat;">
+<main class="main-container bg-white" data-purpose="report-cover" style="background-image: url('../背景.png'); background-size: cover; background-position: center center; background-repeat: no-repeat;">
 
 <div class="content-wrapper h-full">
 <!-- BEGIN: TopBrandHeader -->
 <header class="pt-8 px-12 shrink-0" data-purpose="header-brand">
 <div class="flex items-center gap-4">
-<h1 class="text-[#0081cc] text-2xl font-bold tracking-widest">
+<h1 class="text-[#0081cc] text-2xl font-bold tracking-widest" data-bind="project.general_contractor">
             中建三局集团（深圳）有限公司
           </h1>
 <div class="flex-grow h-4 bg-[#00adef] mt-1 ml-2"></div>
@@ -59,17 +62,17 @@
 <div class="w-full bg-[#00adef] py-16 px-12 relative overflow-hidden flex flex-col items-center justify-center shadow-lg">
 <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
 <div class="relative z-10 text-center">
-<h2 class="text-white text-6xl font-bold tracking-[0.2em] mb-4 drop-shadow-md">
+<h2 class="text-white text-6xl font-bold tracking-[0.2em] mb-4 drop-shadow-md" data-bind="project.name">
               百草园城市更新项目
             </h2>
-<h3 class="text-yellow-400 text-6xl font-bold tracking-[0.2em] drop-shadow-md">
+<h3 class="text-yellow-400 text-6xl font-bold tracking-[0.2em] drop-shadow-md" data-bind="cover.title">
               工作周报
             </h3>
 </div>
 <div class="absolute bottom-6 right-12 text-right z-10">
-<p class="text-white text-xl font-bold mb-1"><span class="text-yellow-400">汇报单位：</span><span class="text-yellow-400">北京清尚</span></p>
-<p class="text-yellow-400 text-xl font-bold tracking-wider">
-              2026.5.18
+<p class="text-white text-xl font-bold mb-1"><span class="text-yellow-400">汇报单位：</span><span class="text-yellow-400" data-bind="project.subcontractor">北京清尚</span></p>
+<p class="text-yellow-400 text-xl font-bold tracking-wider" data-bind="period.report_date_fmt">
+              2026.05.18
             </p>
 </div>
 </div>
