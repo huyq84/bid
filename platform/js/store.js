@@ -329,7 +329,7 @@
       r.work_done = migrateWorkDone(prevReport.work_done);
     }
     if (prevReport && prevReport.pages_data && prevReport.pages_data['03'] && prevReport.pages_data['03'].rows) {
-      r.pages_data['03'].rows = prevReport.pages_data['03'].rows.map(p => ({ ...p, present: false, delta: 'carry' }));
+      r.pages_data['03'].rows = prevReport.pages_data['03'].rows.map(p => ({ ...p, present: false, delta: 'carry', reason: '' }));
     }
     if (prevReport && prevReport.labor_stats) {
       // 旧 next_week -> 新 this_week

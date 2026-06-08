@@ -19,6 +19,88 @@
   .export-bar button { background: #10b981; color:#fff; border: none; padding: 6px 14px; border-radius: 4px; font-size: 12px; cursor: pointer; }
   iframe { border: 0; width: 100%; height: 100%; display: block; background:#fff; }
   .spacer { height: 56px; }
+  
+  /* 进度动画遮罩 */
+  .progress-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+  }
+  .progress-content {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 40px 60px;
+    border-radius: 16px;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    min-width: 400px;
+  }
+  .progress-title {
+    font-size: 24px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 10px;
+  }
+  .progress-desc {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.9);
+    margin-bottom: 30px;
+  }
+  .progress-spinner {
+    width: 60px;
+    height: 60px;
+    border: 4px solid rgba(255, 255, 255, 0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 20px;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+  .progress-bar-container {
+    width: 100%;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 15px;
+  }
+  .progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #facc15, #f43f5e);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+    box-shadow: 0 0 10px rgba(250, 204, 21, 0.5);
+  }
+  .progress-steps {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.8);
+    margin-top: 10px;
+  }
+  
+  /* 周期选择器样式 */
+  #period-sel {
+    background: linear-gradient(135deg, rgba(255,255,255,0.15), rgba(255,255,255,0.05));
+    color: #fff;
+    border: 1px solid rgba(255,255,255,0.3);
+    cursor: pointer;
+    outline: none;
+  }
+  #period-sel:hover {
+    background: linear-gradient(135deg, rgba(255,255,255,0.25), rgba(255,255,255,0.15));
+  }
+  #period-sel option {
+    background: #1a1a2e;
+    color: #fff;
+    border: none;
+  }
 </style>
 </head>
 <body>
@@ -31,6 +113,9 @@
 <script src="js/nav_tree.js?v=v1"></script>
 <script src="js/store.js?v=v1"></script>
 <script src="js/preview_data.js?v=v1"></script>
+<script src="js/preview_print.js?v=v1"></script>
+<script src="js/preview_export_server.js?v=v1"></script>
+<script src="js/preview_export.js?v=v1"></script>
 <script>
   const PAGES = [
     { id: "01",    title: "封面" },
@@ -66,17 +151,16 @@
     ).join("");
     const exports = `
       <div class="export-bar">
-        <button onclick="exportPDF()">📥 导出 PDF</button>
+        <button onclick="PreviewExportServer.exportPDF()">📥 导出 PDF</button>
         <button onclick="exportWord()">📥 导出 Word</button>
         <button onclick="exportPPT()">📥 导出 PPT</button>
-        <button onclick="window.print()">🖨 打印</button>
+        <button onclick="PreviewPrint.printPDF()">🖨️ 打印</button>
       </div>`;
     nav.innerHTML = btns + exports;
     document.querySelector('.page-nav button[data-id]').classList.add('active');
   }
-  function exportPDF() { alert("📄 导出 PDF: v1 阶段通过浏览器打印 (Ctrl+P) 即可获得与现有PDF一致的版式。\n正式版将用 Playwright 后端批量导出。"); }
-  function exportWord() { alert("📄 导出 Word: v2 阶段实现, v1 留接口"); }
-  function exportPPT() { alert("📊 导出 PPT: v2 阶段实现, v1 留接口"); }
+  function exportWord() { alert("📄 导出 Word: 待实现"); }
+  function exportPPT() { alert("📊 导出 PPT: 待实现"); }
 
   buildNav();
   // v5.29: 顶部加周期选择器 + 启动数据绑定

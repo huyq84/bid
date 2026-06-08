@@ -40,6 +40,18 @@ window.Sections["03"] = {
           }).join('') +
         '</div>' +
       '</div>';
+      // 变化列: 已到岗 -> 在岗/新到/已离职 三态按钮; 未到岗 -> 可换行文本框
+      let deltaCell;
+      const reasonVal = (r.reason || '').replace(/"/g, '&quot;');
+      if (r.present) {
+        deltaCell = `<div class="inline-flex border border-slate-200 rounded overflow-hidden text-[11px] leading-none">
+            <button type="button" data-delta="carry" onclick="App.s03SetDelta(${i}, 'carry')" class="px-1.5 py-1 ${(!r.delta || r.delta === 'carry') ? 'bg-slate-700 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}">在岗</button>
+            <button type="button" data-delta="new" onclick="App.s03SetDelta(${i}, 'new')" class="px-1.5 py-1 border-l border-slate-200 ${r.delta === 'new' ? 'bg-emerald-500 text-white' : 'bg-white text-slate-600 hover:bg-emerald-50'}">新到</button>
+            <button type="button" data-delta="leave" onclick="App.s03SetDelta(${i}, 'leave')" class="px-1.5 py-1 border-l border-slate-200 ${r.delta === 'leave' ? 'bg-rose-500 text-white' : 'bg-white text-slate-600 hover:bg-rose-50'}">已离职</button>
+          </div>`;
+      } else {
+        deltaCell = `<textarea rows="2" class="w-full text-[11px] border border-amber-300 bg-amber-50 text-amber-900 rounded px-1.5 py-1 resize-y focus:outline-none focus:ring-2 focus:ring-amber-400" placeholder="请输入未到岗原因,例如:事假/病假/出差/调休等" onchange="App.s03Update(${i}, 'reason', this.value)">${r.reason || ''}</textarea>`;
+      }
       return `
       <tr class="hover:bg-blue-50 ${zebra}">
         <td class="text-center text-slate-500">${r.seq || (i+1)}</td>
@@ -50,11 +62,7 @@ window.Sections["03"] = {
           <input type="checkbox" ${r.present ? 'checked' : ''} onchange="App.s03Update(${i}, 'present', this.checked)">
         </td>
         <td class="text-center">
-          <div class="inline-flex border border-slate-200 rounded overflow-hidden text-[11px] leading-none">
-            <button type="button" data-delta="carry" onclick="App.s03SetDelta(${i}, 'carry')" class="px-1.5 py-1 ${(!r.delta || r.delta === 'carry') ? 'bg-slate-700 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}">在岗</button>
-            <button type="button" data-delta="new" onclick="App.s03SetDelta(${i}, 'new')" class="px-1.5 py-1 border-l border-slate-200 ${r.delta === 'new' ? 'bg-emerald-500 text-white' : 'bg-white text-slate-600 hover:bg-emerald-50'}">新到</button>
-            <button type="button" data-delta="leave" onclick="App.s03SetDelta(${i}, 'leave')" class="px-1.5 py-1 border-l border-slate-200 ${r.delta === 'leave' ? 'bg-rose-500 text-white' : 'bg-white text-slate-600 hover:bg-rose-50'}">已离职</button>
-          </div>
+          ${deltaCell}
         </td>
       </tr>
     `;
@@ -89,7 +97,7 @@ window.Sections["03"] = {
               <!-- v5.27: 表格字号 text-xs 12px → text-[10px] 10px, 跟 04/08/09 一致 -->
               <table class="w-full text-[10px] border-collapse table-fixed">
                 <colgroup>
-                  <col style="width: 40px"><col><col style="width: 80px"><col style="width: 120px"><col style="width: 50px"><col style="width: 100px">
+                  <col style="width: 40px"><col><col style="width: 80px"><col style="width: 120px"><col style="width: 50px"><col style="width: 180px">
                 </colgroup>
                 <thead class="bg-slate-100 text-slate-700 font-bold border-b border-slate-300 sticky top-0 z-10">
                   <tr>
@@ -120,7 +128,7 @@ window.Sections["03"] = {
                 ${photoData ? '<button type="button" onclick="App.s03ClearPhoto()" class="text-[11px] px-2 py-1 rounded bg-white/90 text-rose-600 shadow hover:bg-white border border-slate-200">清除</button>' : ''}
               </div>
               <!-- 渐变标签: 可编辑 -->
-              <div class="absolute -bottom-4 left-1/2 -translate-x-1/2 w-[85%]">
+              <div class="mt-4 w-[85%] mx-auto">
                 <input type="text" class="w-full text-white text-center py-2 px-3 rounded-lg shadow-md font-bold text-sm tracking-widest border border-white/20 focus:outline-none focus:ring-2 focus:ring-white/60" style="background: linear-gradient(90deg, #ffb84d 0%, #ff4d4d 100%);" value="${photoCaption}" placeholder="场景标签" onchange="App.s03UpdateCaption(this.value)">
               </div>
             </div>

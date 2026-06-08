@@ -158,10 +158,29 @@
     var rows = (pages['03'] && pages['03'].rows) || [];
     var uiCfg = (report && report.ui_config) || {};
 
+    // 是否存在未到岗人员：若全部到岗，则不显示"未到岗原因"列
+    var hasAbsent = false;
+    for (var idx = 0; idx < rows.length; idx++) {
+      if (!rows[idx].present) { hasAbsent = true; break; }
+    }
+
+    // 表头：根据是否存在未到岗人员，决定显示/隐藏 reason 列
+    var thead = doc.querySelector('[data-bind-rows="roster"]');
+    if (thead) {
+      var table = thead.closest('table');
+      if (table) {
+        var thRow = table.querySelector('thead tr');
+        if (thRow) {
+          var ths = thRow.querySelectorAll('th');
+          if (ths[ths.length - 1]) ths[ths.length - 1].style.display = hasAbsent ? '' : 'none';
+        }
+      }
+    }
+
     var tbody = doc.querySelector('[data-bind-rows="roster"]');
     rebuildRows(tbody, rows, function (tr, r, i) {
       var tds = tr.querySelectorAll('td');
-      // 顺序: seq / role / name / phone / present
+      // 顺序: seq / role / name / phone / present / reason
       if (tds[0]) tds[0].textContent = (r.seq != null ? r.seq : (i + 1));
       if (tds[1]) tds[1].textContent = dash(r.role);
       if (tds[2]) tds[2].textContent = dash(r.name);
@@ -169,20 +188,33 @@
       if (tds[4]) {
         if (r.present) {
           tds[4].textContent = '已到岗';
-          tds[4].className = 'py-0.5 text-center text-emerald-700 font-medium';
+          tds[4].className = 'py-0.5 border-r border-gray-200 text-center text-emerald-700 font-medium';
         } else {
-          tds[4].textContent = '—';
-          tds[4].className = 'py-0.5 text-center text-gray-400';
+          tds[4].textContent = '未到岗';
+          tds[4].className = 'py-0.5 border-r border-gray-200 text-center text-amber-700 font-medium';
         }
-        if (r.delta === 'leave') {
-          tr.classList.add('line-through', 'text-gray-400');
-        } else if (r.delta === 'new') {
-          tr.classList.add('font-semibold', 'text-blue-700');
-        } else if (i % 2 === 1) {
-          tr.classList.add('bg-gray-50');
-        }
-        tr.classList.add('hover:bg-blue-50');
       }
+      if (tds[5]) {
+        if (!hasAbsent) {
+          tds[5].style.display = 'none';
+        } else {
+          if (!r.present && r.reason) {
+            tds[5].textContent = r.reason;
+            tds[5].className = 'py-0.5 text-left pl-2 text-amber-900 bg-amber-50';
+          } else {
+            tds[5].textContent = '—';
+            tds[5].className = 'py-0.5 text-left pl-2 text-gray-400';
+          }
+        }
+      }
+      if (r.present && r.delta === 'leave') {
+        tr.classList.add('line-through', 'text-gray-400');
+      } else if (r.present && r.delta === 'new') {
+        tr.classList.add('font-semibold', 'text-blue-700');
+      } else if (i % 2 === 1) {
+        tr.classList.add('bg-gray-50');
+      }
+      tr.classList.add('hover:bg-blue-50');
     });
 
     var imgEl = doc.querySelector('[data-bind="s03_photo"]');
@@ -225,7 +257,15 @@
           if (pageId === '03' || pageId === '12') {
             var sel = pageId === '03' ? '[data-bind-rows="roster"]' : '[data-bind-rows="coordination"]';
             var tb = doc.querySelector(sel);
-            if (tb) tb.innerHTML = '<tr><td colspan="5" class="text-center text-gray-400 py-6">当前期 ' + escapeHtml(period) + ' 暂无数据, 请在填报端录入</td></tr>';
+            // 空数据场景: 03 默认 5 列 (不显示原因列, 也同步隐藏表头末列)
+            if (pageId === '03' && tb) {
+              var tbl03 = tb.closest('table');
+              if (tbl03) {
+                var lastTh = tbl03.querySelector('thead tr th:last-child');
+                if (lastTh) lastTh.style.display = 'none';
+              }
+            }
+            if (tb) tb.innerHTML = '<tr><td colspan="' + (pageId === '03' ? '5' : '5') + '" class="text-center text-gray-400 py-6">当前期 ' + escapeHtml(period) + ' 暂无数据, 请在填报端录入</td></tr>';
           }
         } catch (e) {}
         return;

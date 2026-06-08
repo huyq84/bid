@@ -1347,14 +1347,37 @@
       const rows = report.pages_data && report.pages_data['03'] && report.pages_data['03'].rows;
       if (rows && rows[i]) {
         rows[i][field] = val;
-        Store.save(report, _currentPeriod); rerender();
+        Store.save(report, _currentPeriod);
+        // 保存滚动位置，重新渲染后恢复
+        const scrollEl = document.querySelector('.s03-table-scroll');
+        const scrollTop = scrollEl ? scrollEl.scrollTop : 0;
+        rerender();
+        const newScrollEl = document.querySelector('.s03-table-scroll');
+        if (newScrollEl) newScrollEl.scrollTop = scrollTop;
       }
     },
     s03SetDelta: (i, val) => {
       const rows = report.pages_data && report.pages_data['03'] && report.pages_data['03'].rows;
       if (rows && rows[i]) {
         rows[i].delta = val;
-        Store.save(report, _currentPeriod); rerender();
+        Store.save(report, _currentPeriod);
+        // delta 变化只影响当前行按钮组，单独更新该行 DOM
+        const tr = document.querySelector('.s03-table-scroll tbody tr:nth-child(' + (i + 1) + ')');
+        if (tr) {
+          const buttons = tr.querySelectorAll('button[data-delta]');
+          buttons.forEach(btn => {
+            const dv = btn.getAttribute('data-delta');
+            if (dv === val) {
+              btn.className = 'px-1.5 py-1 bg-slate-700 text-white';
+            } else if (dv === 'new') {
+              btn.className = 'px-1.5 py-1 border-l border-slate-200 bg-white text-slate-600 hover:bg-emerald-50';
+            } else if (dv === 'leave') {
+              btn.className = 'px-1.5 py-1 border-l border-slate-200 bg-white text-slate-600 hover:bg-rose-50';
+            } else {
+              btn.className = 'px-1.5 py-1 border-l border-slate-200 bg-white text-slate-600 hover:bg-slate-50';
+            }
+          });
+        }
       }
     },
     s03AddRow: () => {
@@ -1362,7 +1385,7 @@
       if (!pd) return;
       const rows = pd.rows || (pd.rows = []);
       const nextSeq = rows.length ? Math.max.apply(null, rows.map(r => r.seq || 0)) + 1 : 1;
-      rows.push({ seq: nextSeq, role: '', name: '', phone: '', present: true, delta: 'new' });
+      rows.push({ seq: nextSeq, role: '', name: '', phone: '', present: true, delta: 'new', reason: '' });
       Store.save(report, _currentPeriod); rerender();
     },
     s03UploadPhoto: (input) => {
