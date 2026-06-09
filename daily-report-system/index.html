@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>施工日报系统 - Demo</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- ============== 顶部导航 ============== -->
+  <header class="topbar">
+    <div class="topbar-brand">
+      <div class="logo-mark">日</div>
+      <div>施工日报系统</div>
+    </div>
+    <div class="topbar-actions">
+      <div class="project-pill" id="backendStatus" style="background: rgba(255,255,255,0.15); cursor: pointer;" onclick="openLLMSettings()" title="后端/LLM 连接状态">
+        <span id="backendDot" style="width:6px; height:6px; border-radius:50%; background:#94a3b8;"></span>
+        <span id="backendLabel">检查中</span>
+      </div>
+      <div class="project-pill" id="projectPill" onclick="openProjectSwitcher()">
+        <span class="dot"></span>
+        <span id="projectName">加载中...</span>
+        <span style="opacity:0.7;">▾</span>
+      </div>
+      <div class="project-pill" style="background: rgba(255,255,255,0.1);">
+        👤 张明
+      </div>
+    </div>
+  </header>
+
+  <!-- ============== 主体 ============== -->
+  <main class="app-body">
+
+    <div class="tab-content">
+      <div class="main-col">
+        <!-- 今日概览 -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <div class="icon">📅</div>
+              <span id="todayDateLabel">今日日报</span>
+              <span style="margin-left:auto; font-size:10px; color:#94a3b8; font-weight:400;" id="weekInfo"></span>
+            </div>
+            <button class="btn btn-success btn-sm" onclick="confirmTodayReport()">✅ 一键确认</button>
+          </div>
+          <div class="card-body">
+            <div class="today-summary">
+              <div class="summary-item blue">
+                <div class="num" id="statProgress">0</div>
+                <div class="lbl">进度</div>
+              </div>
+              <div class="summary-item orange">
+                <div class="num" id="statMaterial">0</div>
+                <div class="lbl">材料</div>
+              </div>
+              <div class="summary-item red">
+                <div class="num" id="statSafety">0</div>
+                <div class="lbl">安全</div>
+              </div>
+              <div class="summary-item purple">
+                <div class="num" id="statCoordination">0</div>
+                <div class="lbl">协调</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 录入入口（4 个） -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <div class="icon">✚</div>
+              <span>快速录入</span>
+            </div>
+          </div>
+          <div class="card-body" style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 6px;">
+            <div class="entry-card" onclick="openVoiceInput()">
+              <div class="entry-icon voice">🎤</div>
+              <div class="entry-content">
+                <div class="entry-title">语音</div>
+              </div>
+            </div>
+            <div class="entry-card" onclick="openPhotoInput()">
+              <div class="entry-icon photo">📷</div>
+              <div class="entry-content">
+                <div class="entry-title">拍照</div>
+              </div>
+            </div>
+            <div class="entry-card" onclick="openManualInput()">
+              <div class="entry-icon manual">✏️</div>
+              <div class="entry-content">
+                <div class="entry-title">手动</div>
+              </div>
+            </div>
+            <div class="entry-card" onclick="openWeeklyReport()">
+              <div class="entry-icon weekly">📊</div>
+              <div class="entry-content">
+                <div class="entry-title">周报</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 今日事件流 -->
+        <div class="card">
+          <div class="toolbar">
+            <span style="font-size:13px; color:#64748b; margin-right:8px;">筛选：</span>
+            <div class="filter-chip active" data-filter="all" onclick="filterEvents('all', this)">全部</div>
+            <div class="filter-chip" data-filter="progress"     onclick="filterEvents('progress', this)">🔨 进度</div>
+            <div class="filter-chip" data-filter="material"     onclick="filterEvents('material', this)">📦 材料</div>
+            <div class="filter-chip" data-filter="safety"       onclick="filterEvents('safety', this)">🛡 安全</div>
+            <div class="filter-chip" data-filter="coordination" onclick="filterEvents('coordination', this)">🤝 协调</div>
+            <div class="filter-chip" data-filter="attendance"   onclick="filterEvents('attendance', this)">👥 考勤</div>
+          </div>
+          <div class="card-body">
+            <div class="timeline" id="eventTimeline"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧栏 -->
+      <aside>
+        <!-- 日报日历 -->
+        <div class="card calendar-card">
+          <div class="card-header">
+            <div class="card-title">
+              <div class="icon">📆</div>
+              <span>日报日历</span>
+            </div>
+            <div class="calendar-nav">
+              <button class="btn btn-ghost btn-sm" onclick="changeCalendarMonth(-1)">◀</button>
+              <span id="calendarMonthLabel"></span>
+              <button class="btn btn-ghost btn-sm" onclick="changeCalendarMonth(1)">▶</button>
+              <button class="btn btn-ghost btn-sm" onclick="selectAllDatesInMonth()" title="全选本月">◎</button>
+              <button class="btn btn-ghost btn-sm" onclick="selectAllReportedDates()" title="全选所有日报日期">ⓘ</button>
+              <button class="btn btn-ghost btn-sm" onclick="clearAllDates()" title="清除选择">✕</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="calendar-grid" id="calendarGrid">
+              <div class="calendar-weekday">日</div>
+              <div class="calendar-weekday">一</div>
+              <div class="calendar-weekday">二</div>
+              <div class="calendar-weekday">三</div>
+              <div class="calendar-weekday">四</div>
+              <div class="calendar-weekday">五</div>
+              <div class="calendar-weekday">六</div>
+            </div>
+            <div class="calendar-legend">
+              <div class="legend-item legend-btn" onclick="goToToday()"><span class="legend-dot today">●</span> 今天</div>
+              <div class="legend-item"><span class="legend-dot completed">✓</span> 已确认</div>
+              <div class="legend-item"><span class="legend-dot draft">○</span> 草稿</div>
+              <div class="legend-item">
+                <label class="toggle-switch">
+                  <input type="checkbox" onchange="toggleMultiSelect()">
+                  <span class="slider"></span>
+                </label>
+                <span class="toggle-label">多选</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 项目信息卡 -->
+        <div class="card" id="projectInfoCard">
+          <div class="card-header">
+            <div class="card-title">
+              <div class="icon">🏗</div>
+              <span>项目信息</span>
+            </div>
+          </div>
+          <div class="card-body" id="projectInfoBody"></div>
+        </div>
+
+        <!-- 事项台账 -->
+        <div class="card aside-scroll">
+          <div class="card-header">
+            <div class="card-title">
+              <div class="icon">📋</div>
+              <span>事项台账</span>
+            </div>
+            <button class="btn btn-ghost btn-sm" onclick="openIssueForm()">+ 新建</button>
+          </div>
+          <div class="card-body" id="issueList"></div>
+        </div>
+
+        <!-- 今日计划 -->
+        <div class="card aside-scroll">
+          <div class="card-header">
+            <div class="card-title">
+              <div class="icon">🎯</div>
+              <span>今日计划</span>
+            </div>
+            <button class="btn btn-ghost btn-sm" onclick="openDailyPlanForm()">+ 新建</button>
+          </div>
+          <div class="card-body" id="dailyPlanCard"></div>
+        </div>
+      </aside>
+    </div>
+
+  </main>
+
+  <!-- ============== 模态框：语音录入 ============== -->
+  <div class="modal-mask" id="modalVoice">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">🎤 语音录入</div>
+        <button class="modal-close" onclick="closeModal('modalVoice')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="text-align:center; margin-bottom:16px;">
+          <div class="recording-pulse" id="recordingBtn" onclick="toggleRecording()">🎤</div>
+          <div style="margin-top:10px; font-size:13px; color:#64748b;" id="recordingHint">
+            点击麦克风开始录音
+          </div>
+        </div>
+
+        <!-- LLM 调试面板 -->
+        <div id="voiceDebugPanel" style="display:none; margin-bottom:12px; border:1px solid #fbbf24; border-radius:4px; background:#fffbeb;">
+          <div style="display:flex; align-items:center; justify-content:space-between; padding:6px 10px; background:#fef3c7; border-bottom:1px solid #fbbf24; font-size:11px; font-weight:600; color:#92400e;">
+            <span>🔬 LLM 调试日志（实时）</span>
+            <span>
+              <button class="btn btn-sm btn-ghost" onclick="copyVoiceDebug()" style="padding:1px 6px; font-size:10px;">📋 复制</button>
+              <button class="btn btn-sm btn-ghost" onclick="clearVoiceDebug()" style="padding:1px 6px; font-size:10px;">🗑 清空</button>
+            </span>
+          </div>
+          <div id="voiceDebugLog" style="max-height:200px; overflow-y:auto; padding:6px 10px; font-family:monospace;"></div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">日期</label>
+          <input class="form-input" type="date" id="voiceDate">
+        </div>
+        <div class="form-group">
+          <label class="form-label">识别结果（可手动修改）</label>
+          <textarea class="form-textarea" id="voiceText" rows="4"
+            placeholder="例如：员工餐厅区天花吊顶龙骨安装，张师傅带两个人在做，进度到 80%"></textarea>
+          <div class="form-hint">说"停止"或点击麦克风结束录音，AI 会自动解析成结构化事件</div>
+        </div>
+
+        <div class="parse-preview" id="voiceParsePreview" style="display:none;">
+          <div class="parse-preview-header">
+            <div class="parse-preview-title">AI 解析结果（可编辑）</div>
+            <button class="btn btn-sm btn-ghost" onclick="reparseVoiceText()">🔄 重新识别</button>
+          </div>
+          <div class="parse-field">
+            <div class="parse-field-label">事件类型</div>
+            <select class="form-select" id="vp-type" style="width:100%;">
+              <option value="progress">📊 进度事件</option>
+              <option value="material">📦 材料进场</option>
+              <option value="safety">🛡 安全巡检</option>
+              <option value="coordination">🤝 协调沟通</option>
+              <option value="issue">⚠️ 问题事项</option>
+              <option value="attendance">👤 人员考勤</option>
+            </select>
+          </div>
+          <div class="parse-field">
+            <div class="parse-field-label" style="display:flex; align-items:center; justify-content:space-between;">
+              <span>区域</span>
+              <span>
+                <button class="btn btn-sm btn-ghost" onclick="addCustomArea('vp-area')" type="button">➕ 新增</button>
+                <button class="btn btn-sm btn-ghost" onclick="manageAreas()" type="button" title="管理区域列表">⚙️</button>
+              </span>
+            </div>
+            <select class="form-select" id="vp-area" style="width:100%;">
+              <option value="">请选择区域</option>
+            </select>
+            <div class="form-hint" id="vp-area-hint" style="display:none;"></div>
+          </div>
+          <div class="parse-field">
+            <div class="parse-field-label">任务</div>
+            <input class="form-input" type="text" id="vp-task" placeholder="任务名称">
+          </div>
+          <div class="parse-field">
+            <div class="parse-field-label">负责人</div>
+            <input class="form-input" type="text" id="vp-owner" placeholder="负责人">
+          </div>
+          <div class="parse-field">
+            <div class="parse-field-label">进度</div>
+            <input class="form-input" type="text" id="vp-progress" placeholder="如：50%">
+          </div>
+          <div class="parse-field">
+            <div class="parse-field-label">人数</div>
+            <input class="form-input" type="number" id="vp-headcount" placeholder="人数" min="0">
+          </div>
+          <div class="parse-field">
+            <div class="parse-field-label">可信度</div>
+            <div class="parse-field-value" id="vp-confidence">-</div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('modalVoice')">取消</button>
+        <button class="btn btn-primary" onclick="saveVoiceEvent()" id="voiceSaveBtn" disabled>保存为草稿</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== 模态框：拍照录入 ============== -->
+  <div class="modal-mask" id="modalPhoto">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">📷 拍照录入</div>
+        <button class="modal-close" onclick="closeModal('modalPhoto')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="photoDropZone" style="
+          border: 2px dashed #cbd5e1; border-radius: 8px;
+          padding: 40px 20px; text-align: center; cursor: pointer;
+          background: #f8fafc;
+        " onclick="mockUploadPhoto()">
+          <div style="font-size: 48px;">📷</div>
+          <div style="font-size: 14px; color: #475569; margin-top: 8px;">
+            点击模拟上传照片
+          </div>
+          <div style="font-size: 12px; color: #94a3b8; margin-top: 4px;">
+            支持 JPEG / PNG / WebP，2MB 以上自动压缩
+          </div>
+        </div>
+
+        <div id="photoPreviewArea" style="display:none;">
+          <div style="margin-top:14px;">
+            <div class="photo-thumb" style="width:100%; height:200px; font-size:48px;">📷</div>
+          </div>
+          <div class="parse-preview" style="margin-top:14px;">
+            <div class="parse-preview-title">AI 识别结果（请确认）</div>
+            <div class="parse-field">
+              <div class="parse-field-label">建议区域</div>
+              <div class="parse-field-value" id="pp-area">-</div>
+            </div>
+            <div class="parse-field">
+              <div class="parse-field-label">建议描述</div>
+              <div class="parse-field-value" id="pp-caption">-</div>
+            </div>
+            <div class="parse-field">
+              <div class="parse-field-label">可信度</div>
+              <div class="parse-field-value" id="pp-confidence">-</div>
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:14px;">
+            <label class="form-label">事件类型</label>
+            <select class="form-select" id="pp-type">
+              <option value="progress">🔨 进度</option>
+              <option value="safety">🛡 安全</option>
+              <option value="material">📦 材料</option>
+              <option value="coordination">🤝 协调</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">关联区域</label>
+            <select class="form-select" id="pp-area-select">
+              <!-- JS 渲染 -->
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">备注说明</label>
+            <textarea class="form-textarea" id="pp-note" rows="2" placeholder="可选"></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('modalPhoto')">取消</button>
+        <button class="btn btn-primary" onclick="savePhotoEvent()" id="photoSaveBtn" disabled>保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== 模态框：手动录入 ============== -->
+  <div class="modal-mask" id="modalManual">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">✏️ 手动录入</div>
+        <button class="modal-close" onclick="closeModal('modalManual')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">事件类型 <span class="req">*</span></label>
+          <select class="form-select" id="m-type" onchange="renderManualForm()">
+            <option value="progress">🔨 进度</option>
+            <option value="material">📦 材料</option>
+            <option value="safety">🛡 安全</option>
+            <option value="coordination">🤝 协调</option>
+            <option value="attendance">👥 考勤</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">时间 <span class="req">*</span></label>
+            <input class="form-input" type="time" id="m-time" value="14:00">
+          </div>
+          <div class="form-group">
+            <label class="form-label">所属区域 <span class="req">*</span></label>
+            <select class="form-select" id="m-area">
+              <!-- JS 渲染 -->
+            </select>
+          </div>
+        </div>
+        <div id="manualDynamicForm">
+          <!-- 根据 type 动态渲染 -->
+        </div>
+        <div class="form-group">
+          <label class="form-label">备注</label>
+          <textarea class="form-textarea" id="m-note" rows="2" placeholder="可选"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('modalManual')">取消</button>
+        <button class="btn btn-primary" onclick="saveManualEvent()">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== 模态框：事项台账表单 ============== -->
+  <div class="modal-mask" id="modalIssue">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">📋 事项登记</div>
+        <button class="modal-close" onclick="closeModal('modalIssue')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">事项类型 <span class="req">*</span></label>
+            <select class="form-select" id="i-type">
+              <option value="quality">质量整改</option>
+              <option value="safety">安全隐患</option>
+              <option value="coordination">协调事项</option>
+              <option value="ecc">ECC 专项</option>
+              <option value="change">工程变更</option>
+              <option value="visa">现场签证</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">优先级 <span class="req">*</span></label>
+            <select class="form-select" id="i-priority">
+              <option value="high">紧急</option>
+              <option value="medium" selected>中等</option>
+              <option value="low">一般</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">事项标题 <span class="req">*</span></label>
+          <input class="form-input" type="text" id="i-title" placeholder="一句话说清楚什么问题">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">所属区域 <span class="req">*</span></label>
+            <select class="form-select" id="i-area">
+              <!-- JS 渲染 -->
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">责任方 <span class="req">*</span></label>
+            <input class="form-input" type="text" id="i-owner" placeholder="姓名或班组">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">截止日期 <span class="req">*</span></label>
+          <input class="form-input" type="date" id="i-deadline">
+        </div>
+        <div class="form-group">
+          <label class="form-label">详细描述 <span class="req">*</span></label>
+          <textarea class="form-textarea" id="i-description" rows="3" placeholder="问题描述、影响范围、已采取措施等"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('modalIssue')">取消</button>
+        <button class="btn btn-primary" onclick="saveIssue()">创建事项</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== 模态框：周报预览 ============== -->
+  <div class="modal-mask" id="modalWeekly">
+    <div class="modal" style="max-width: 800px;">
+      <div class="modal-header">
+        <div class="modal-title">📊 周报初稿（Mock 聚合）</div>
+        <button class="modal-close" onclick="closeModal('modalWeekly')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="weeklySourceTip" style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:6px; padding:10px 14px; margin-bottom:16px; font-size:12px; color:#075985;">
+          💡 AI 智能聚合：基于本周 7 天日报自动生成
+        </div>
+        <div class="weekly-report" id="weeklyReportContent">
+          <!-- JS 渲染 -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('modalWeekly')">关闭</button>
+        <button class="btn btn-primary" onclick="exportWeeklyReport()">📤 导出到周报系统</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== 模态框：项目切换 ============== -->
+  <div class="modal-mask" id="modalProject">
+    <div class="modal" style="max-width: 480px;">
+      <div class="modal-header">
+        <div class="modal-title">切换项目</div>
+        <button class="modal-close" onclick="closeModal('modalProject')">✕</button>
+      </div>
+      <div class="modal-body" id="projectSwitcherBody">
+        <!-- JS 渲染 -->
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== 模态框：事件详情 ============== -->
+  <div class="modal-mask" id="modalEventDetail">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title" id="eventDetailTitle">事件详情</div>
+        <button class="modal-close" onclick="closeModal('modalEventDetail')">✕</button>
+      </div>
+      <div class="modal-body" id="eventDetailBody">
+        <!-- JS 渲染 -->
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('modalEventDetail')">关闭</button>
+        <button class="btn btn-primary" id="eventDetailConfirmBtn" onclick="confirmEventFromDetail()">✅ 确认事件</button>
+        <button class="btn btn-secondary" id="eventDetailEditBtn" onclick="openEventEdit()">✏️ 编辑</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== 模态框：编辑事件 ============== -->
+  <div class="modal-mask" id="modalEventEdit">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">✏️ 编辑事件</div>
+        <button class="modal-close" onclick="closeModal('modalEventEdit')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">日期 <span class="req">*</span></label>
+          <input class="form-input" type="date" id="edit-date">
+        </div>
+        <div class="form-group">
+          <label class="form-label">时间 <span class="req">*</span></label>
+          <input class="form-input" type="time" id="edit-time">
+        </div>
+        <div class="form-group">
+          <label class="form-label">区域 <span class="req">*</span></label>
+          <select class="form-select" id="edit-area">
+            <option value="">请选择区域</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">任务名称</label>
+          <input class="form-input" type="text" id="edit-task" placeholder="任务名称">
+        </div>
+        <div class="form-group">
+          <label class="form-label">负责人</label>
+          <input class="form-input" type="text" id="edit-owner" placeholder="负责人">
+        </div>
+        <div class="form-group">
+          <label class="form-label">进度</label>
+          <input class="form-input" type="text" id="edit-progress" placeholder="如：50%">
+        </div>
+        <div class="form-group">
+          <label class="form-label">人数</label>
+          <input class="form-input" type="number" id="edit-headcount" placeholder="人数" min="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label">备注</label>
+          <textarea class="form-textarea" id="edit-note" rows="3" placeholder="备注信息"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('modalEventEdit')">取消</button>
+        <button class="btn btn-primary" onclick="saveEventEdit()">保存修改</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== 模态框：日计划表单 ============== -->
+  <div class="modal-mask" id="modalDailyPlan">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">📋 新建日计划</div>
+        <button class="modal-close" onclick="closeModal('modalDailyPlan')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">日期 <span class="req">*</span></label>
+          <input class="form-input" type="date" id="dp-date">
+        </div>
+        <div class="form-group">
+          <label class="form-label">计划说明</label>
+          <textarea class="form-textarea" id="dp-description" rows="2" placeholder="今日工作计划概述"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">劳动力安排</label>
+          <div id="laborRows">
+            <div class="form-row labor-row">
+              <div class="form-group">
+                <label class="form-label">工种</label>
+                <input class="form-input" type="text" id="labor-type-0" placeholder="如：木工">
+              </div>
+              <div class="form-group">
+                <label class="form-label">人数</label>
+                <input class="form-input" type="number" id="labor-count-0" value="0" min="0">
+              </div>
+              <button class="btn btn-danger btn-sm" onclick="removeLaborRow(0)" style="margin-top:24px;">✕</button>
+            </div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="addLaborRow()">+ 添加工种</button>
+        </div>
+        <div class="form-group">
+          <label class="form-label">区域进度目标</label>
+          <div id="areaTargetRows">
+            <div class="form-row area-row">
+              <div class="form-group">
+                <label class="form-label">区域</label>
+                <select class="form-select" id="area-target-area-0">
+                  <!-- JS 渲染 -->
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">任务名称</label>
+                <input class="form-input" type="text" id="area-target-task-0" placeholder="任务名称">
+              </div>
+              <div class="form-group">
+                <label class="form-label">目标进度</label>
+                <input class="form-input" type="text" id="area-target-progress-0" placeholder="如：80%">
+              </div>
+              <button class="btn btn-danger btn-sm" onclick="removeAreaRow(0)" style="margin-top:24px;">✕</button>
+            </div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="addAreaRow()">+ 添加区域目标</button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('modalDailyPlan')">取消</button>
+        <button class="btn btn-primary" onclick="saveDailyPlan()">保存计划</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast 提示 -->
+  <div class="toast" id="toast"></div>
+
+  <!-- ============== 模态框：区域管理 ============== -->
+  <div class="modal-mask" id="modalAreas">
+    <div class="modal" style="max-width:480px;">
+      <div class="modal-header">
+        <div class="modal-title">⚙️ 区域管理</div>
+        <button class="modal-close" onclick="closeModal('modalAreas')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="font-size:11px; color:#64748b; margin-bottom:8px;" id="areasProjectName"></div>
+        <div class="form-group" style="display:flex; gap:4px;">
+          <input class="form-input" type="text" id="newAreaName" placeholder="新区域名称，如：VIP 接待室" style="flex:1;">
+          <input class="form-input" type="text" id="newAreaId" placeholder="ID（自动生成）" style="flex:0 0 80px;">
+          <button class="btn btn-primary" onclick="addAreaFromManager()">➕ 添加</button>
+        </div>
+        <div id="areasListContainer" style="max-height:300px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:4px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="closeModal('modalAreas')">完成</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== 模态框：LLM 设置 ============== -->
+  <div class="modal-mask" id="modalLLM">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">🤖 LLM 设置</div>
+        <button class="modal-close" onclick="closeModal('modalLLM')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="llmConfigBody">
+          <div style="text-align:center; padding:20px; color:#94a3b8;">加载中...</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('modalLLM')">关闭</button>
+        <button class="btn btn-primary" onclick="testLLMConnection()">🔌 测试连接</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 引入脚本 -->
+  <script src="mock-data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

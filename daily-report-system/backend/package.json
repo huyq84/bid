@@ -1,0 +1,16 @@
+{
+  "name": "daily-report-backend",
+  "version": "1.0.0",
+  "description": "日报系统后端 - LLM 代理 + 周报聚合",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5"
+  }
+}
