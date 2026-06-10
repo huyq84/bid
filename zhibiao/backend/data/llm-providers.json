@@ -1,0 +1,31 @@
+[
+  {
+    "id": "lp-1780940672700",
+    "name": "MiniMax 测试",
+    "base_url": "https://api.minimax.chat/v1",
+    "api_key": "sk-test",
+    "default_model": "MiniMax-M2.7",
+    "models_cache": [],
+    "cache_ts": 0,
+    "created_at": 1780940672700
+  },
+  {
+    "id": "lp-1780941753754",
+    "name": "MiniMax 生产",
+    "base_url": "https://api.minimax.chat/v1",
+    "api_key": "sk-cp-0pB24_Ytv4Kd3d_H2RqvAvatTU0Oy7D85jUWfvYxSrlWLhoFDNf-6VCzF8H2TlucoCN5rPqIbyjMX4JH5nHmRBg1fNx8h1c0PmpUyMOvupp6gqRmnN8W2Xc",
+    "default_model": "MiniMax-M3",
+    "models_cache": [
+      "MiniMax-M3",
+      "MiniMax-M2.7",
+      "MiniMax-M2.7-highspeed",
+      "MiniMax-M2.5",
+      "MiniMax-M2.5-highspeed",
+      "MiniMax-M2.1",
+      "MiniMax-M2.1-highspeed",
+      "MiniMax-M2"
+    ],
+    "cache_ts": 1780941761388,
+    "created_at": 1780941753755
+  }
+]

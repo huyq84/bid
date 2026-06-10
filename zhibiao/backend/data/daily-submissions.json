@@ -1,0 +1,67 @@
+[
+  {
+    "id": "d-1780941806599",
+    "date": "2026-05-19",
+    "project": "P001",
+    "reporter": "张三",
+    "tasks": [
+      {
+        "name": "木工封板",
+        "progress": 80,
+        "owner": "李四"
+      }
+    ],
+    "workers": [
+      {
+        "type": "木工",
+        "count": 15
+      }
+    ],
+    "notes": "现场情况正常",
+    "submitted_at": 1780941806599
+  },
+  {
+    "id": "d-1780941852505",
+    "date": "2026-05-20",
+    "project": "P001",
+    "reporter": "李四",
+    "tasks": [
+      {
+        "name": "电工穿线",
+        "progress": 100,
+        "owner": "王五"
+      }
+    ],
+    "workers": [],
+    "notes": "",
+    "submitted_at": 1780941852505
+  },
+  {
+    "id": "d-1780943380277",
+    "date": "2026-05-19",
+    "project": "P001",
+    "reporter": "张三",
+    "tasks": [
+      {
+        "name": "木工封板",
+        "specialty": "软装",
+        "area": "高管层",
+        "owner": "李四",
+        "progress": 80,
+        "status": "进行中",
+        "note": "正常",
+        "photos": []
+      }
+    ],
+    "workers": [
+      {
+        "specialty": "软装",
+        "type": "木工",
+        "count": 15,
+        "peak_count": 18
+      }
+    ],
+    "notes": "",
+    "submitted_at": 1780943380277
+  }
+]

@@ -703,7 +703,31 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="closeModal('modalWeekly')">关闭</button>
+        <button class="btn btn-outline" onclick="openWeeklyReportMapping()">📋 周报数据映射</button>
         <button class="btn btn-primary" onclick="exportWeeklyReport()">📤 导出到周报系统</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== 模态框：周报数据映射预览 ============== -->
+  <div class="modal-mask" id="modalWeeklyMapping">
+    <div class="modal" style="max-width: 900px;">
+      <div class="modal-header">
+        <div class="modal-title">📋 周报数据映射预览（原型）</div>
+        <button class="modal-close" onclick="closeModal('modalWeeklyMapping')">✕</button>
+      </div>
+      <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+        <div id="weeklyMappingTabs" style="display:flex; gap:4px; margin-bottom:16px; border-bottom:2px solid #e2e8f0; padding-bottom:4px;">
+          <button class="mapping-tab active" data-page="04" onclick="switchMappingTab('04')">04 工作完成</button>
+          <button class="mapping-tab" data-page="05" onclick="switchMappingTab('05')">05 工作现场</button>
+          <button class="mapping-tab" data-page="12" onclick="switchMappingTab('12')">12 协调事宜</button>
+        </div>
+        <div id="mappingContent">
+          <!-- JS 渲染 -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('modalWeeklyMapping')">关闭</button>
       </div>
     </div>
   </div>

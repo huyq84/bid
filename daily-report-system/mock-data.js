@@ -90,9 +90,9 @@ const MILESTONES = {
 };
 
 // ============================================================
-// 5. 日计划数据
+// 5. 日计划数据（localStorage 持久化）
 // ============================================================
-const PLANS = {
+const DEFAULT_PLANS = {
   baicaoyuan: [
     {
       id: 'PLAN001',
@@ -148,6 +148,20 @@ const PLANS = {
   'lvcheng-riverside': [],
   'vanke-metropolis': []
 };
+
+// 从 localStorage 读取，若不存在则使用默认值并写入
+let PLANS;
+try {
+  const stored = localStorage.getItem('daily_plans');
+  if (stored) {
+    PLANS = JSON.parse(stored);
+  } else {
+    PLANS = JSON.parse(JSON.stringify(DEFAULT_PLANS));
+    localStorage.setItem('daily_plans', JSON.stringify(PLANS));
+  }
+} catch (e) {
+  PLANS = JSON.parse(JSON.stringify(DEFAULT_PLANS));
+}
 
 // ============================================================
 // 6. 事件流（今天的日报核心数据）
@@ -397,7 +411,9 @@ const ISSUES = [
     description: '与石材供应商确认大板到货时间',
     resolution: '确认 6 月 10 日到场',
     closedDate: '2026-06-03',
-    photos: []
+    photos: [],
+    proposeDept: '清尚项目部',
+    cooperateDept: '石材供应商'
   },
   {
     id: 'I004',
@@ -413,6 +429,91 @@ const ISSUES = [
     description: '餐厅区筒灯位置与精装图偏差 30mm',
     resolution: '',
     photos: []
+  },
+  {
+    id: 'I005',
+    projectId: 'baicaoyuan',
+    type: 'coordination',
+    title: '高管区暖通管线与吊顶标高冲突',
+    areaId: 'A1',
+    priority: 'high',
+    status: 'in_progress',
+    createdDate: '2026-06-03',
+    deadline: '2026-06-12',
+    owner: '鲍永春',
+    description: '二层北侧走道暖通主管道标高低于吊顶设计标高，需协调三局机电调整',
+    resolution: '',
+    photos: [],
+    proposeDept: '精装项目部',
+    cooperateDept: '三局机电部'
+  },
+  {
+    id: 'I006',
+    projectId: 'baicaoyuan',
+    type: 'coordination',
+    title: '食堂区幕墙封闭时间需确认',
+    areaId: 'A2',
+    priority: 'high',
+    status: 'open',
+    createdDate: '2026-06-04',
+    deadline: '2026-06-10',
+    owner: '王亚广',
+    description: '食堂区南立面幕墙尚未封闭，影响室内天花封板工序，需确认幕墙单位进场时间',
+    resolution: '',
+    photos: [],
+    proposeDept: '精装项目部',
+    cooperateDept: '幕墙单位、总包'
+  },
+  {
+    id: 'I007',
+    projectId: 'baicaoyuan',
+    type: 'coordination',
+    title: '南塔咖啡厅机电移交滞后',
+    areaId: 'A3',
+    priority: 'high',
+    status: 'open',
+    createdDate: '2026-06-02',
+    deadline: '2026-06-15',
+    owner: '袁永超',
+    description: '南塔咖啡厅区域风管、喷淋追位未完成，精装吊顶无法封板',
+    resolution: '',
+    photos: [],
+    proposeDept: '精装项目部',
+    cooperateDept: '三局机电部、消防单位'
+  },
+  {
+    id: 'I008',
+    projectId: 'baicaoyuan',
+    type: 'coordination',
+    title: '北塔样板区石材大板供应',
+    areaId: 'A1',
+    priority: 'medium',
+    status: 'in_progress',
+    createdDate: '2026-05-30',
+    deadline: '2026-06-08',
+    owner: '陈芳',
+    description: '北塔咖啡厅样板区所需石材大板供货周期45天，需协调供应商加急排产',
+    resolution: '已联系供应商确认加急排产，预计6月15日前到场',
+    photos: [],
+    proposeDept: '清尚采购部',
+    cooperateDept: '石材供应商、项目部'
+  },
+  {
+    id: 'I009',
+    projectId: 'baicaoyuan',
+    type: 'coordination',
+    title: '地暖施工与精装交叉作业面移交',
+    areaId: 'A1',
+    priority: 'medium',
+    status: 'in_progress',
+    createdDate: '2026-06-01',
+    deadline: '2026-06-10',
+    owner: '鲍永春',
+    description: '高管区地暖施工完成后需移交精装进行地面面层施工，移交标准需各方确认',
+    resolution: '',
+    photos: [],
+    proposeDept: '精装项目部',
+    cooperateDept: '地暖单位、监理'
   }
 ];
 
@@ -686,9 +787,95 @@ function getMonthlyStats(year, month, projectId) {
   };
 }
 
+// ============================================================
+// 9. 周报数据映射（原型：日报 → 12 页周报）
+// ============================================================
+
+// --- 页面 04：上周工作完成情况 ---
+// 从 EVENTS（progress 类型）聚合周报"工作完成"表格数据
+function getPage04Data(projectId, weekStart, weekEnd) {
+  const allEvents = [...EVENTS, ...HISTORY_EVENTS];
+  const weekEvents = allEvents.filter(e =>
+    e.projectId === projectId &&
+    e.type === 'progress' &&
+    e.date >= weekStart && e.date <= weekEnd &&
+    e.status === 'confirmed'
+  );
+
+  // 按区域分组
+  const groups = {};
+  weekEvents.forEach(e => {
+    const key = e.areaId || '__unknown__';
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(e);
+  });
+
+  const rows = [];
+  let seq = 0;
+  Object.entries(groups).forEach(([areaId, events]) => {
+    const area = (AREAS[projectId] || []).find(a => a.id === areaId);
+    const areaName = area ? area.name : areaId;
+    // 区域 header 行
+    rows.push({ type: 'header', text: `${areaName}：` });
+    // 具体事项行
+    events.forEach(e => {
+      seq++;
+      const task = e.payload?.taskName || e.payload?.topic || '(未命名)';
+      const progress = e.payload?.progress || '';
+      rows.push({
+        type: 'detail',
+        seq: seq,
+        text: progress ? `${task}完成${progress}` : task,
+        owner: e.payload?.owner || '—'
+      });
+    });
+  });
+  return rows;
+}
+
+// --- 页面 05：工作现场照片 ---
+function getPage05Photos(projectId, weekStart, weekEnd, maxCount = 6) {
+  const allEvents = [...EVENTS, ...HISTORY_EVENTS];
+  const weekEvents = allEvents.filter(e =>
+    e.projectId === projectId &&
+    e.date >= weekStart && e.date <= weekEnd
+  );
+  const allPhotos = [];
+  weekEvents.forEach(e => {
+    (e.photos || []).forEach(p => {
+      allPhotos.push({
+        id: p.id,
+        caption: p.caption || '现场照片',
+        area: p.area || e.areaId || '',
+        eventType: e.type,
+        eventId: e.id
+      });
+    });
+  });
+  return allPhotos.slice(0, maxCount);
+}
+
+// --- 页面 12：协调事宜 ---
+function getPage12Data(projectId, onlyOpen = true) {
+  let items = ISSUES.filter(i =>
+    i.projectId === projectId &&
+    i.type === 'coordination'
+  );
+  if (onlyOpen) {
+    items = items.filter(i => i.status !== 'closed');
+  }
+  return items.map((i, idx) => ({
+    seq: idx + 1,
+    issue: i.title,
+    proposeDept: i.proposeDept || '—',
+    cooperateDept: i.cooperateDept || '—'
+  }));
+}
+
 // 暴露到全局
 window.MockData = {
   PROJECTS, AREAS, WORKERS, MILESTONES, PLANS, EVENTS, HISTORY_EVENTS, ISSUES, TODAY,
   TYPE_META, ISSUE_TYPE_META, PRIORITY_META, ISSUE_STATUS_META, MILESTONE_STATUS_META, SOURCE_META,
-  mockParseVoice, mockParsePhoto, mockAggregateWeekly, getDailyEvents, getMonthlyStats
+  mockParseVoice, mockParsePhoto, mockAggregateWeekly, getDailyEvents, getMonthlyStats,
+  getPage04Data, getPage05Photos, getPage12Data
 };

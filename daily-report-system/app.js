@@ -11,6 +11,7 @@ let selectedDates = [];
 let multiSelectMode = false;
 let laborRowCount = 1;
 let areaRowCount = 1;
+let editingPlanId = null;
 
 // ============================================================
 // 自定义对话框
@@ -178,7 +179,9 @@ function renderTodayEvents() {
   
   const sorted = [...filtered].sort((a, b) => a.time.localeCompare(b.time));
   
-  document.getElementById('eventTimeline').innerHTML = sorted.map(event => {
+  document.getElementById('eventTimeline').innerHTML = `
+    <div class="timeline-line"></div>
+    ${sorted.map(event => {
     const completionBadge = event.completionType === 'unplanned' 
       ? '<span class="event-completion-badge unplanned">📌 计划外</span>' 
       : (event.completionType === 'planned' && event.planId 
@@ -186,35 +189,38 @@ function renderTodayEvents() {
         : '');
     
     return `
-      <div class="event-item ${event.status === 'draft' ? 'draft' : ''}" 
-           onclick="openEventDetail('${event.id}')">
-        <div class="event-head">
-          <span class="event-time">${event.time}</span>
-          <span class="event-type-badge" style="background:${M.TYPE_META[event.type].color};">
-            ${M.TYPE_META[event.type].icon} ${M.TYPE_META[event.type].label}
-          </span>
-          ${completionBadge}
-          <span class="event-area">${getAreaName(event.areaId)}</span>
-          <span class="event-source">${M.SOURCE_META[event.source]?.icon || '⚙️'}</span>
-          <span class="event-status-badge ${event.status}">${event.status === 'draft' ? '草稿' : '已确认'}</span>
-        </div>
-        <div class="event-body">${renderEventContent(event)}</div>
-        ${event.voiceText ? `<div class="event-voice">${event.voiceText}</div>` : ''}
-        ${event.photos && event.photos.length > 0 ? renderPhotos(event.photos) : ''}
-        <div class="event-actions">
-          <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); confirmEvent('${event.id}')">
-            ${event.status === 'draft' ? '✅ 确认' : '🔄 撤回'}
-          </button>
-          <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); openEventDetail('${event.id}')">
-            查看详情
-          </button>
-          <button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteEvent('${event.id}')">
-            删除
-          </button>
+      <div class="event-row">
+        <div class="event-dot ${event.status === 'draft' ? 'draft' : ''}"></div>
+        <div class="event-item" onclick="openEventDetail('${event.id}')">
+          <div class="event-head">
+            <span class="event-time">${event.time}</span>
+            <span class="event-type-badge" style="background:${M.TYPE_META[event.type].color};">
+              ${M.TYPE_META[event.type].icon} ${M.TYPE_META[event.type].label}
+            </span>
+            ${completionBadge}
+            <span class="event-area">${getAreaName(event.areaId)}</span>
+            <span class="event-source">${M.SOURCE_META[event.source]?.icon || '⚙️'}</span>
+            <span class="event-status-badge ${event.status}">${event.status === 'draft' ? '草稿' : '已确认'}</span>
+          </div>
+          <div class="event-body">${renderEventContent(event)}</div>
+          ${event.voiceText ? `<div class="event-voice">${event.voiceText}</div>` : ''}
+          ${event.photos && event.photos.length > 0 ? renderPhotos(event.photos) : ''}
+          <div class="event-actions">
+            <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); confirmEvent('${event.id}')">
+              ${event.status === 'draft' ? '✅ 确认' : '🔄 撤回'}
+            </button>
+            <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); openEventDetail('${event.id}')">
+              查看详情
+            </button>
+            <button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteEvent('${event.id}')">
+              删除
+            </button>
+          </div>
         </div>
       </div>
     `;
-  }).join('');
+  }).join('')}
+  `;
 }
 
 function renderFilteredEvents() {
@@ -247,35 +253,40 @@ function renderFilteredEvents() {
     return;
   }
   
-  document.getElementById('eventTimeline').innerHTML = sorted.map(event => `
-    <div class="event-item ${event.status === 'draft' ? 'draft' : ''}" 
-         onclick="openEventDetail('${event.id}')">
-      <div class="event-head">
-        <span class="event-date" style="font-size:10px; color:#64748b; margin-right:6px;">${event.date}</span>
-        <span class="event-time">${event.time}</span>
-        <span class="event-type-badge" style="background:${M.TYPE_META[event.type].color};">
-          ${M.TYPE_META[event.type].icon} ${M.TYPE_META[event.type].label}
-        </span>
-        <span class="event-area">${getAreaName(event.areaId)}</span>
-        <span class="event-source">${M.SOURCE_META[event.source]?.icon || '⚙️'}</span>
-        <span class="event-status-badge ${event.status}">${event.status === 'draft' ? '草稿' : '已确认'}</span>
+  document.getElementById('eventTimeline').innerHTML = `
+    <div class="timeline-line"></div>
+    ${sorted.map(event => `
+      <div class="event-row">
+        <div class="event-dot ${event.status === 'draft' ? 'draft' : ''}"></div>
+        <div class="event-item" onclick="openEventDetail('${event.id}')">
+          <div class="event-head">
+            <span class="event-date" style="font-size:10px; color:#64748b; margin-right:6px;">${event.date}</span>
+            <span class="event-time">${event.time}</span>
+            <span class="event-type-badge" style="background:${M.TYPE_META[event.type].color};">
+              ${M.TYPE_META[event.type].icon} ${M.TYPE_META[event.type].label}
+            </span>
+            <span class="event-area">${getAreaName(event.areaId)}</span>
+            <span class="event-source">${M.SOURCE_META[event.source]?.icon || '⚙️'}</span>
+            <span class="event-status-badge ${event.status}">${event.status === 'draft' ? '草稿' : '已确认'}</span>
+          </div>
+          <div class="event-body">${renderEventContent(event)}</div>
+          ${event.voiceText ? `<div class="event-voice">${event.voiceText}</div>` : ''}
+          ${event.photos && event.photos.length > 0 ? renderPhotos(event.photos) : ''}
+          <div class="event-actions">
+            <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); confirmEvent('${event.id}')">
+              ${event.status === 'draft' ? '✅ 确认' : '🔄 撤回'}
+            </button>
+            <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); openEventDetail('${event.id}')">
+              查看详情
+            </button>
+            <button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteEvent('${event.id}')">
+              删除
+            </button>
+          </div>
+        </div>
       </div>
-      <div class="event-body">${renderEventContent(event)}</div>
-      ${event.voiceText ? `<div class="event-voice">${event.voiceText}</div>` : ''}
-      ${event.photos && event.photos.length > 0 ? renderPhotos(event.photos) : ''}
-      <div class="event-actions">
-        <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); confirmEvent('${event.id}')">
-          ${event.status === 'draft' ? '✅ 确认' : '🔄 撤回'}
-        </button>
-        <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); openEventDetail('${event.id}')">
-          查看详情
-        </button>
-        <button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteEvent('${event.id}')">
-          删除
-        </button>
-      </div>
-    </div>
-  `).join('');
+    `).join('')}
+  `;
 }
 
 function renderEventContent(event) {
@@ -718,12 +729,14 @@ function goToToday() {
 // 今日计划卡片
 // ============================================================
 function renderDailyPlanCard() {
-  // 查找今天有效的计划（在日期范围内）
+  const today = M.TODAY;
   const todayPlans = (M.PLANS[currentProjectId] || []).filter(p => {
-    if (!p.startDate || !p.endDate) return false;
-    return p.startDate <= M.TODAY && p.endDate >= M.TODAY && p.status !== 'cancelled';
+    if (p.status === 'cancelled') return false;
+    if (p.startDate && p.endDate) return p.startDate <= today && p.endDate >= today;
+    if (p.date) return p.date === today;
+    return false;
   });
-  
+
   if (!todayPlans || todayPlans.length === 0) {
     document.getElementById('dailyPlanCard').innerHTML = `
       <div style="text-align:center; padding:12px; color:#94a3b8;">
@@ -733,23 +746,25 @@ function renderDailyPlanCard() {
     `;
     return;
   }
-  
+
   let html = '';
-  
+
   todayPlans.forEach(plan => {
-    const totalWorkers = plan.laborRequirements?.reduce((sum, l) => sum + l.count, 0) || 0;
+    const laborList = plan.laborRequirements || plan.laborSchedule || [];
+    const totalWorkers = laborList.reduce((sum, l) => sum + (l.count || 0), 0);
     const typeMeta = M.TYPE_META[plan.eventType] || { icon: '📋', label: '计划', color: '#64748b' };
-    
+    const displayProcess = plan.process || plan.description || '施工计划';
+
     html += `
       <div style="background:#f8fafc; border-radius:6px; padding:10px; margin-bottom:8px; border-left:3px solid ${typeMeta.color};">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-          <span style="font-size:12px; font-weight:600; color:#334155;">${typeMeta.icon} ${plan.process}</span>
+          <span style="font-size:12px; font-weight:600; color:#334155;">${typeMeta.icon} ${displayProcess}</span>
           <span style="font-size:10px; padding:1px 6px; background:${typeMeta.color}; color:#fff; border-radius:4px;">${plan.status === 'completed' ? '已完成' : '进行中'}</span>
         </div>
         
         ${plan.buildingNo || plan.floorNo ? `
           <div style="font-size:11px; color:#64748b; margin-bottom:4px;">
-            🏗️ ${plan.buildingNo || ''} ${plan.floorNo ? '· ' + plan.floorNo : ''}
+            🏗️ ${plan.buildingNo || ''}${plan.floorNo ? ' · ' + plan.floorNo : ''}
           </div>
         ` : ''}
         
@@ -759,11 +774,14 @@ function renderDailyPlanCard() {
           </div>
         ` : ''}
         
-        ${plan.laborRequirements?.length > 0 ? `
+        ${totalWorkers > 0 ? `
           <div style="margin-bottom:4px;">
             <div style="font-size:10px; color:#64748b; margin-bottom:2px;">👷 出勤：${totalWorkers}人</div>
             <div style="display:flex; flex-wrap:wrap; gap:3px;">
-              ${plan.laborRequirements.map(l => `<span style="font-size:10px; padding:1px 4px; background:#fff; border-radius:3px;">${l.trade}: ${l.count}人</span>`).join('')}
+              ${laborList.map(l => {
+                const trade = l.trade || l.laborType;
+                return `<span style="font-size:10px; padding:1px 4px; background:#fff; border-radius:3px;">${trade}: ${l.count}人</span>`;
+              }).join('')}
             </div>
           </div>
         ` : ''}
@@ -774,15 +792,20 @@ function renderDailyPlanCard() {
           </div>
         ` : ''}
         
-        ${plan.description ? `
+        ${plan.description && !plan.process ? `
           <div style="font-size:11px; color:#64748b; margin-top:4px; padding-top:4px; border-top:1px dashed #e2e8f0;">
             ${plan.description}
           </div>
         ` : ''}
+        
+        <div style="display:flex; gap:4px; margin-top:6px; padding-top:6px; border-top:1px solid #e2e8f0;">
+          <button class="btn btn-ghost btn-sm" onclick="editDailyPlan('${plan.id}')" style="font-size:10px; padding:2px 8px;">✏️ 编辑</button>
+          <button class="btn btn-ghost btn-sm" onclick="deleteDailyPlan('${plan.id}')" style="font-size:10px; padding:2px 8px; color:#ef4444;">🗑 删除</button>
+        </div>
       </div>
     `;
   });
-  
+
   document.getElementById('dailyPlanCard').innerHTML = html;
 }
 
@@ -831,8 +854,13 @@ function populateAreaSelects() {
 // 日计划表单
 // ============================================================
 function openDailyPlanForm() {
+  editingPlanId = null;
   laborRowCount = 1;
   areaRowCount = 1;
+  
+  // 恢复模态框标题和按钮文字
+  document.querySelector('#modalDailyPlan .modal-title').textContent = '📋 新建日计划';
+  document.querySelector('#modalDailyPlan .modal-footer .btn-primary').textContent = '保存计划';
   
   // 设置默认日期为今天
   const today = M.TODAY;
@@ -930,7 +958,7 @@ function removeAreaRow(index) {
 }
 
 function saveDailyPlan() {
-  // 获取表单数据
+  console.log('[日计划] saveDailyPlan 开始', { editingPlanId, projectId: currentProjectId });
   const startDate = document.getElementById('dp-start-date').value;
   const endDate = document.getElementById('dp-end-date').value;
   const eventType = document.getElementById('dp-event-type').value;
@@ -946,7 +974,6 @@ function saveDailyPlan() {
   const safetyNotes = document.getElementById('dp-safety-notes').value;
   const description = document.getElementById('dp-description').value;
   
-  // 收集劳动力需求
   const laborRequirements = [];
   document.querySelectorAll('.labor-row').forEach((row, index) => {
     const type = document.getElementById(`labor-type-${index}`)?.value;
@@ -956,20 +983,16 @@ function saveDailyPlan() {
     }
   });
   
-  // 验证必填字段
   if (!startDate || !endDate) {
     showToast('请选择日期范围', 'error');
     return;
   }
-  
   if (!process) {
     showToast('请填写工序', 'error');
     return;
   }
   
-  // 创建计划对象
   const plan = {
-    id: `PLAN${String(Date.now()).slice(-3)}`,
     projectId: currentProjectId,
     startDate,
     endDate,
@@ -985,23 +1008,125 @@ function saveDailyPlan() {
     materials: materials ? materials.split('\n').filter(m => m.trim()) : [],
     machinery: machinery ? machinery.split('\n').filter(m => m.trim()) : [],
     safetyNotes,
-    description,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
+    description
   };
   
-  // 保存到全局数据
   if (!M.PLANS[currentProjectId]) {
+    console.log('[日计划] 初始化项目计划数组', currentProjectId);
     M.PLANS[currentProjectId] = [];
   }
-  M.PLANS[currentProjectId].unshift(plan);
   
-  // 更新日历标记
+  console.log('[日计划] 保存前长度:', M.PLANS[currentProjectId].length);
+  
+  if (editingPlanId) {
+    const idx = M.PLANS[currentProjectId].findIndex(p => p.id === editingPlanId);
+    if (idx > -1) {
+      const existing = M.PLANS[currentProjectId][idx];
+      plan.id = editingPlanId;
+      plan.createdAt = existing.createdAt;
+      plan.updatedAt = new Date().toISOString();
+      M.PLANS[currentProjectId][idx] = plan;
+    }
+    editingPlanId = null;
+    document.querySelector('#modalDailyPlan .modal-title').textContent = '📋 新建日计划';
+    document.querySelector('#modalDailyPlan .modal-footer .btn-primary').textContent = '保存计划';
+    showToast('日计划已更新', 'success');
+  } else {
+    plan.id = `PLAN${String(Date.now()).slice(-3)}`;
+    plan.createdAt = new Date().toISOString();
+    plan.updatedAt = plan.createdAt;
+    M.PLANS[currentProjectId].unshift(plan);
+    showToast('日计划已保存', 'success');
+  }
+  
+  console.log('[日计划] 保存后长度:', M.PLANS[currentProjectId].length, '计划ID:', plan.id);
+  
+  localStorage.setItem('daily_plans', JSON.stringify(M.PLANS));
+  
   updateCalendarPlanMarks();
-  
   closeModal('modalDailyPlan');
   renderDailyPlanCard();
-  showToast('日计划已保存', 'success');
+}
+
+function editDailyPlan(planId) {
+  const plan = (M.PLANS[currentProjectId] || []).find(p => p.id === planId);
+  if (!plan) {
+    showToast('计划未找到', 'error');
+    return;
+  }
+  
+  editingPlanId = planId;
+  
+  document.getElementById('dp-start-date').value = plan.startDate || plan.date || M.TODAY;
+  document.getElementById('dp-end-date').value = plan.endDate || plan.date || M.TODAY;
+  document.getElementById('dp-event-type').value = plan.eventType || 'progress';
+  document.getElementById('dp-status').value = plan.status || 'active';
+  document.getElementById('dp-building-no').value = plan.buildingNo || '';
+  document.getElementById('dp-floor-no').value = plan.floorNo || '';
+  renderAreaSelect('dp-area');
+  document.getElementById('dp-area').value = plan.area || '';
+  document.getElementById('dp-process').value = plan.process || '';
+  document.getElementById('dp-owner').value = plan.owner || '';
+  document.getElementById('dp-progress').value = plan.progress || '';
+  document.getElementById('dp-materials').value = (plan.materials || []).join('\n');
+  document.getElementById('dp-machinery').value = (plan.machinery || []).join('\n');
+  document.getElementById('dp-safety-notes').value = plan.safetyNotes || '';
+  document.getElementById('dp-description').value = plan.description || '';
+  
+  const laborList = plan.laborRequirements || plan.laborSchedule || [];
+  if (laborList.length > 0) {
+    laborRowCount = laborList.length;
+    document.getElementById('laborRows').innerHTML = laborList.map((l, i) => {
+      const trade = l.trade || l.laborType;
+      return `
+        <div class="form-row labor-row">
+          <div class="form-group">
+            <label class="form-label">工种</label>
+            <input class="form-input" type="text" id="labor-type-${i}" value="${trade || ''}" placeholder="如：木工">
+          </div>
+          <div class="form-group">
+            <label class="form-label">人数</label>
+            <input class="form-input" type="number" id="labor-count-${i}" value="${l.count || 0}" min="0">
+          </div>
+          <button class="btn btn-danger btn-sm" onclick="removeLaborRow(${i})" style="margin-top:24px;">✕</button>
+        </div>
+      `;
+    }).join('');
+  } else {
+    document.getElementById('laborRows').innerHTML = `
+      <div class="form-row labor-row">
+        <div class="form-group">
+          <label class="form-label">工种</label>
+          <input class="form-input" type="text" id="labor-type-0" placeholder="如：木工、钢筋工">
+        </div>
+        <div class="form-group">
+          <label class="form-label">人数</label>
+          <input class="form-input" type="number" id="labor-count-0" value="0" min="0">
+        </div>
+        <button class="btn btn-danger btn-sm" onclick="removeLaborRow(0)" style="margin-top:24px;">✕</button>
+      </div>
+    `;
+    laborRowCount = 1;
+  }
+  
+  document.querySelector('#modalDailyPlan .modal-title').textContent = '✏️ 编辑日计划';
+  document.querySelector('#modalDailyPlan .modal-footer .btn-primary').textContent = '更新计划';
+  
+  showModal('modalDailyPlan');
+}
+
+async function deleteDailyPlan(planId) {
+  const confirmed = await showConfirm('确定要删除此计划吗？', '删除计划', '🗑');
+  if (!confirmed) return;
+  
+  const plans = M.PLANS[currentProjectId] || [];
+  const idx = plans.findIndex(p => p.id === planId);
+  if (idx > -1) {
+    plans.splice(idx, 1);
+    localStorage.setItem('daily_plans', JSON.stringify(M.PLANS));
+    renderDailyPlanCard();
+    showToast('计划已删除', 'success');
+  }
 }
 
 // ============================================================
@@ -2435,8 +2560,10 @@ function renderPlanSelect(dateStr) {
   
   // 筛选出当天有效的计划
   const dayPlans = projectPlans.filter(p => {
-    if (!p.startDate || !p.endDate || p.status === 'cancelled') return false;
-    return p.startDate <= dateStr && p.endDate >= dateStr;
+    if (p.status === 'cancelled') return false;
+    if (p.startDate && p.endDate) return p.startDate <= dateStr && p.endDate >= dateStr;
+    if (p.date) return p.date === dateStr;
+    return false;
   });
   
   let html = '<option value="">无（计划外工作）</option>';
@@ -2831,6 +2958,165 @@ function exportWeeklyReport() {
 }
 
 // ============================================================
+// 周报数据映射预览（原型）
+// ============================================================
+function openWeeklyReportMapping() {
+  closeModal('modalWeekly');
+  showModal('modalWeeklyMapping');
+  // 默认显示 04 页面
+  renderMappingPage04();
+}
+
+function switchMappingTab(page) {
+  document.querySelectorAll('.mapping-tab').forEach(t => t.classList.remove('active'));
+  document.querySelector(`.mapping-tab[data-page="${page}"]`).classList.add('active');
+  if (page === '04') renderMappingPage04();
+  else if (page === '05') renderMappingPage05();
+  else if (page === '12') renderMappingPage12();
+}
+
+function getWeekRange() {
+  const today = new Date(M.TODAY);
+  const dayOfWeek = today.getDay();
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  return {
+    weekStart: formatDateObj(monday),
+    weekEnd: formatDateObj(sunday)
+  };
+}
+
+function renderMappingPage04() {
+  const { weekStart, weekEnd } = getWeekRange();
+  const rows = M.getPage04Data(currentProjectId, weekStart, weekEnd);
+
+  if (rows.length === 0) {
+    document.getElementById('mappingContent').innerHTML = `
+      <div style="text-align:center; padding:40px 0; color:#94a3b8;">
+        <div style="font-size:40px;">📋</div>
+        <p style="margin-top:12px;">本周（${weekStart} ~ ${weekEnd}）暂无已确认的进度事件</p>
+        <p style="font-size:12px; margin-top:4px;">请先在日报中录入并确认事件</p>
+      </div>`;
+    return;
+  }
+
+  let html = `
+    <div style="margin-bottom:12px; font-size:13px; color:#64748b;">
+      数据源：本周 ${weekStart} ~ ${weekEnd} 已确认的进度事件
+      <span style="margin-left:12px; font-weight:600; color:#0f172a;">共 ${rows.length} 行</span>
+    </div>
+    <table class="mapping-table" style="width:100%; border-collapse:collapse; font-size:13px;">
+      <thead>
+        <tr style="background:#00adef; color:#fff;">
+          <th style="padding:8px; border:1px solid #ccc; width:50px;">序号</th>
+          <th style="padding:8px; border:1px solid #ccc;">计划事项及完成情况</th>
+          <th style="padding:8px; border:1px solid #ccc; width:100px;">责任人</th>
+        </tr>
+      </thead>
+      <tbody>`;
+  rows.forEach(r => {
+    if (r.type === 'header') {
+      html += `
+        <tr style="background:#e0f2fe;">
+          <td style="padding:6px 8px; border:1px solid #ccc; text-align:center; font-weight:600; color:#006494;"></td>
+          <td style="padding:6px 8px; border:1px solid #ccc; font-weight:600; color:#006494;" colspan="2">${r.text}</td>
+        </tr>`;
+    } else {
+      const bg = r.seq % 2 === 0 ? '#f8fafc' : '#fff';
+      html += `
+        <tr style="background:${bg};">
+          <td style="padding:6px 8px; border:1px solid #ccc; text-align:center;">${r.seq}</td>
+          <td style="padding:6px 8px; border:1px solid #ccc;">${r.text}</td>
+          <td style="padding:6px 8px; border:1px solid #ccc; text-align:center;">${r.owner}</td>
+        </tr>`;
+    }
+  });
+  html += `</tbody></table>`;
+  document.getElementById('mappingContent').innerHTML = html;
+}
+
+function renderMappingPage05() {
+  const { weekStart, weekEnd } = getWeekRange();
+  const photos = M.getPage05Photos(currentProjectId, weekStart, weekEnd);
+
+  if (photos.length === 0) {
+    document.getElementById('mappingContent').innerHTML = `
+      <div style="text-align:center; padding:40px 0; color:#94a3b8;">
+        <div style="font-size:40px;">📷</div>
+        <p style="margin-top:12px;">本周（${weekStart} ~ ${weekEnd}）暂无照片数据</p>
+        <p style="font-size:12px; margin-top:4px;">请先在日报中通过拍照录入</p>
+      </div>`;
+    return;
+  }
+
+  let html = `
+    <div style="margin-bottom:12px; font-size:13px; color:#64748b;">
+      数据源：本周 ${weekStart} ~ ${weekEnd} 事件中的照片
+      <span style="margin-left:12px; font-weight:600; color:#0f172a;">共 ${photos.length} 张</span>
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(${Math.min(photos.length, 3)}, 1fr); gap:12px;">`;
+  photos.forEach(p => {
+    html += `
+      <div style="border:1px solid #e2e8f0; border-radius:6px; overflow:hidden;">
+        <div style="background:#f1f5f9; height:120px; display:flex; align-items:center; justify-content:center; color:#94a3b8; font-size:12px;">
+          📷 ${p.id}（Mock 图片占位）
+        </div>
+        <div style="padding:6px 10px; font-size:12px; color:#475569;">
+          <div style="font-weight:600;">${p.caption}</div>
+          <div style="color:#94a3b8;">区域：${p.area} | 类型：${M.TYPE_META[p.eventType]?.label || p.eventType}</div>
+        </div>
+      </div>`;
+  });
+  html += `</div>`;
+  document.getElementById('mappingContent').innerHTML = html;
+}
+
+function renderMappingPage12() {
+  const items = M.getPage12Data(currentProjectId, true);
+  const { weekStart, weekEnd } = getWeekRange();
+
+  let html = `
+    <div style="margin-bottom:12px; font-size:13px; color:#64748b;">
+      数据源：事项台账中的协调类型
+      <span style="margin-left:12px; font-weight:600; color:#0f172a;">${items.length} 项未闭环</span>
+      <span style="margin-left:8px; font-size:12px; color:#94a3b8;">（共 ${M.ISSUES.filter(i => i.projectId === currentProjectId && i.type === 'coordination').length} 项）</span>
+    </div>
+    <table class="mapping-table" style="width:100%; border-collapse:collapse; font-size:13px;">
+      <thead>
+        <tr style="background:#0ea5e9; color:#fff;">
+          <th style="padding:8px; border:1px solid #166534; width:50px;">序号</th>
+          <th style="padding:8px; border:1px solid #166534;">需协调事宜</th>
+          <th style="padding:8px; border:1px solid #166534; width:100px;">提出部门</th>
+          <th style="padding:8px; border:1px solid #166534; width:100px;">配合部门</th>
+        </tr>
+      </thead>
+      <tbody>`;
+  if (items.length === 0) {
+    html += `
+      <tr>
+        <td style="padding:30px; border:1px solid #166534; text-align:center; color:#94a3b8;" colspan="4">
+          暂无未闭环的协调事项
+        </td>
+      </tr>`;
+  } else {
+    items.forEach((item, i) => {
+      const bg = i % 2 === 0 ? '#dbeafe' : '#eff6ff';
+      html += `
+        <tr style="background:${bg};">
+          <td style="padding:8px; border:1px solid #166534; text-align:center;">${item.seq}</td>
+          <td style="padding:8px; border:1px solid #166534;">${item.issue}</td>
+          <td style="padding:8px; border:1px solid #166534; text-align:center;">${item.proposeDept}</td>
+          <td style="padding:8px; border:1px solid #166534; text-align:center;">${item.cooperateDept}</td>
+        </tr>`;
+    });
+  }
+  html += `</tbody></table>`;
+  document.getElementById('mappingContent').innerHTML = html;
+}
+
+// ============================================================
 // 工具函数
 // ============================================================
 function formatDate(dateStr) {
@@ -2876,7 +3162,7 @@ function showToast(message, type = 'info') {
 // ============================================================
 // LLM 集成（追加 - 不影响原有逻辑）
 // ============================================================
-const API_BASE = 'http://192.168.2.105:3010/api';
+const API_BASE = 'http://localhost:3010/api' ;
 let lastSource = 'mock';
 let lastLatencyMs = 0;
 let backendOnline = false;
