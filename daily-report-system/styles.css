@@ -501,22 +501,154 @@ aside .card { margin-bottom: 0; }
 .weekly-area-name { font-weight: 600; color: #0f172a; font-size: 13px; }
 .weekly-area-tasks { color: #475569; font-size: 13px; margin-top: 4px; }
 
-/* 周报映射 Tab */
-.mapping-tab {
-  padding: 6px 16px;
-  border: none;
-  background: transparent;
-  color: #64748b;
-  font-size: 14px;
-  cursor: pointer;
-  border-radius: 4px 4px 0 0;
-  font-family: inherit;
+/* 模版色彩覆盖 */
+/* 周报全页容器 */
+.report-page-frame {
+  width: 1280px; height: 720px; position: relative; overflow: hidden;
+  background-image: url('背景.png'); background-size: cover; background-position: center;
+  margin: 0 auto; page-break-after: always;
 }
-.mapping-tab:hover { background: #f1f5f9; color: #0f172a; }
-.mapping-tab.active {
-  background: #00adef;
-  color: #fff;
-  font-weight: 600;
+.report-page-frame.no-bg { background-image: none !important; background-color: #fff; }
+
+/* ========== 平台风格周报预览 ========== */
+#modalWeeklyMapping {
+  font-family: -apple-system, "Microsoft YaHei", "PingFang SC", sans-serif;
+}
+#modalWeeklyMapping .report-container {
+  display: flex; flex-direction: column; width: 100%; height: 100vh;
+}
+#modalWeeklyMapping .page-nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 50;
+  background: linear-gradient(135deg,#16213e,#0f3460);
+  padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 6px;
+  align-items: center; box-shadow: 0 4px 16px rgba(0,0,0,.5);
+}
+#modalWeeklyMapping .page-nav button {
+  background: linear-gradient(135deg,#37a3eb,#2563eb); color: #fff;
+  border: none; padding: 6px 12px; border-radius: 4px;
+  font-size: 12px; cursor: pointer; font-family: inherit;
+}
+#modalWeeklyMapping .page-nav button.active {
+  background: linear-gradient(135deg,#f43f5e,#facc15); color:#1a1a2e; font-weight: bold;
+}
+#modalWeeklyMapping .page-nav button:hover { transform: translateY(-1px); }
+#modalWeeklyMapping .nav-controls {
+  display: flex; align-items: center; gap: 8px; margin-left: 12px;
+}
+#modalWeeklyMapping .nav-controls select {
+  background: linear-gradient(135deg,rgba(255,255,255,0.15),rgba(255,255,255,0.05));
+  color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px;
+  padding: 4px 8px; font-size: 12px; cursor: pointer; outline: none; font-family: inherit;
+}
+#modalWeeklyMapping .nav-controls select:hover {
+  background: linear-gradient(135deg,rgba(255,255,255,0.25),rgba(255,255,255,0.15));
+}
+#modalWeeklyMapping .nav-controls select option { background: #1a1a2e; color: #fff; }
+#modalWeeklyMapping .period-date {
+  background: linear-gradient(135deg,rgba(255,255,255,0.15),rgba(255,255,255,0.05));
+  color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px;
+  padding: 4px 8px; font-size: 12px; cursor: pointer; outline: none;
+  font-family: inherit; color-scheme: dark;
+}
+#modalWeeklyMapping .week-range { font-size: 11px; color: rgba(255,255,255,0.6); white-space: nowrap; }
+#modalWeeklyMapping .nav-bg-btn {
+  background: transparent; border: 1px solid rgba(255,255,255,0.3);
+  color: rgba(255,255,255,0.8); padding: 4px 8px; border-radius: 4px;
+  font-size: 11px; cursor: pointer; font-family: inherit;
+}
+#modalWeeklyMapping .nav-bg-btn:hover { background: rgba(255,255,255,0.1); }
+#modalWeeklyMapping .export-bar { margin-left: auto; display: flex; gap: 6px; }
+#modalWeeklyMapping .export-bar button {
+  background: #10b981; color:#fff; border: none; padding: 6px 14px;
+  border-radius: 4px; font-size: 12px; cursor: pointer; font-family: inherit;
+}
+#modalWeeklyMapping .export-bar button:hover { transform: translateY(-1px); }
+#modalWeeklyMapping .spacer { height: 56px; flex-shrink: 0; }
+#modalWeeklyMapping .frame-wrap {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+#modalWeeklyMapping .frame-content {
+  width: 1280px; height: 720px; overflow: hidden;
+  background: transparent; border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.45);
+}
+
+#modalWeeklyMapping[data-template="bcy"] .page-nav button { background: linear-gradient(135deg,#059669,#047857); }
+#modalWeeklyMapping[data-template="bcy"] .page-nav button.active { background: linear-gradient(135deg,#f43f5e,#facc15); color:#1a1a2e; }
+#modalWeeklyMapping[data-template="generic"] .page-nav button { background: linear-gradient(135deg,#6366f1,#4f46e5); }
+#modalWeeklyMapping[data-template="generic"] .page-nav button.active { background: linear-gradient(135deg,#f43f5e,#facc15); color:#1a1a2e; }
+.report-page-frame:last-child { page-break-after: auto; }
+.report-page-header {
+  position: absolute; top: 0; left: 0; right: 0; height: 75px;
+}
+.report-page-header .trapezoid {
+  position: absolute; top: 23px; left: 0; width: 58px; height: 52px;
+  background-color: #37a3eb;
+  clip-path: polygon(0 0, 60% 0, 100% 100%, 0 100%);
+}
+.report-page-header .header-line {
+  position: absolute; top: 75px; left: 72px; right: 0; height: 3px;
+  background-color: #37a3eb;
+}
+.report-page-content {
+  width: 1280px; height: 720px; padding: 80px 30px 20px;
+  box-sizing: border-box; overflow: hidden;
+}
+
+/* 进度遮罩 */
+.progress-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.8); display: flex; align-items: center;
+  justify-content: center; z-index: 9999;
+}
+.progress-content {
+  background: linear-gradient(135deg,#667eea,#764ba2);
+  padding: 40px 60px; border-radius: 16px; text-align: center;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5); min-width: 400px;
+}
+.progress-title { font-size: 24px; font-weight: 700; color: #fff; margin-bottom: 10px; }
+.progress-desc { font-size: 14px; color: rgba(255,255,255,0.9); margin-bottom: 30px; }
+.progress-spinner {
+  width: 60px; height: 60px; border: 4px solid rgba(255,255,255,0.3);
+  border-top-color: #fff; border-radius: 50%;
+  animation: spin 1s linear infinite; margin: 0 auto 20px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.progress-bar-container {
+  width: 100%; height: 8px; background: rgba(255,255,255,0.3);
+  border-radius: 4px; overflow: hidden; margin-bottom: 15px;
+}
+.progress-bar {
+  height: 100%; background: linear-gradient(90deg,#facc15,#f43f5e);
+  border-radius: 4px; transition: width 0.3s ease;
+  box-shadow: 0 0 10px rgba(250,204,21,0.5);
+}
+.progress-steps { font-size: 13px; color: rgba(255,255,255,0.8); margin-top: 10px; }
+
+/* 打印样式 */
+@media print {
+  @page { size: 1280px 720px; margin: 0; }
+  body { margin: 0; padding: 0; }
+  #modalWeeklyMapping .page-nav, #modalWeeklyMapping .spacer,
+  #modalWeeklyMapping .frame-wrap, .progress-overlay,
+  #toast, .modal-mask:not(#modalWeeklyMapping), .btn:not(#modalWeeklyMapping *) {
+    display: none !important;
+  }
+  #modalWeeklyMapping {
+    background: #fff !important; align-items: stretch !important; padding: 0 !important;
+  }
+  #modalWeeklyMapping .report-container { height: auto; }
+  #modalWeeklyMapping .frame-content {
+    width: 1280px; height: 720px; margin: 0; box-shadow: none;
+    border-radius: 0; overflow: hidden;
+  }
+  .report-page-frame {
+    width: 1280px; height: 720px; margin: 0; box-shadow: none;
+    border-radius: 0; page-break-after: always; overflow: hidden;
+  }
+  .report-page-frame:last-child { page-break-after: auto; }
+  .report-page-content { width: 1280px; height: 720px; padding:80px 30px 20px; box-sizing:border-box; overflow: hidden; }
 }
 
 /* ---------- Toast 提示 ---------- */
