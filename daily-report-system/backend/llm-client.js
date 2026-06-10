@@ -191,10 +191,10 @@ ${text}
 
   // 业务封装 2: 照片解析
   // 输入: { imageBase64, caption, projectId, areas, type }
-  // 输出: { areaId, areaName, caption, taskHint, confidence }
+  // 输出: { areaId, areaName, caption, taskHint, confidence, payload }
   async parsePhoto({ imageBase64, caption, projectId, areas = [], type = 'progress' }) {
     const system = `你是施工现场照片识别助手。
-根据照片和/或用户提供的文字描述，判断照片所属区域、推测施工任务和工序。
+根据照片内容和用户提供的语音/文字描述，判断照片所属区域、推测施工任务、负责人、进度等信息。
 
 【严格输出 JSON 规则】只输出一个 JSON 对象，不要输出 JSON 以外的任何内容（包括 \`\`\` 标记）。
 
@@ -213,22 +213,43 @@ ${text}
   "caption": "照片描述（10-30 字，说明看到什么）",
   "taskHint": "推测的施工任务（如天花吊顶龙骨安装）",
   "workType": "木工" | "电工" | "瓦工" | "油漆工" | "焊工" | "其他",
+  "payload": {
+    "taskName": "任务名称",
+    "owner": "负责人姓名（从描述中提取）",
+    "progress": "进度百分比（如50%）",
+    "headcount": 人数（整数）
+  },
   "confidence": 0~1
 }`;
 
-    // 注意：MiniMax-M3 是否支持 vision 不确定
-    // 如果不支持，照片的 base64 无法传给 LLM，只能用 caption
-    // 所以这里降级为只用 caption 推断
-    const userMsg = `【项目】${projectId}
-【区域列表】
-${areas.map(a => `- ${a.id}: ${a.name}`).join('\n')}
+    // 构建消息内容：包含图片（如果有）和文字描述
+    const userContent = [];
+    
+    // 添加文字提示
+    let textMsg = `【项目】${projectId}\n`;
+    textMsg += `【区域列表】\n${areas.map(a => `- ${a.id}: ${a.name}`).join('\n')}\n\n`;
+    if (caption) {
+      textMsg += `【用户语音/文字描述】\n${caption}\n\n`;
+    } else {
+      textMsg += `【用户语音/文字描述】\n（无，请根据图片内容推断）\n\n`;
+    }
+    textMsg += `请结合图片和描述，识别施工内容并输出 JSON：`;
+    
+    userContent.push({ type: 'text', text: textMsg });
+    
+    // 添加图片（如果有 base64 数据）
+    if (imageBase64 && imageBase64.trim()) {
+      userContent.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/jpeg',
+          data: imageBase64.trim()
+        }
+      });
+    }
 
-【用户文字描述】
-${caption || '（无）'}
-
-请输出 JSON：`;
-
-    const raw = await this.chat({ system, messages: [{ role: 'user', content: userMsg }], temperature: 0.3 });
+    const raw = await this.chat({ system, messages: [{ role: 'user', content: userContent }], temperature: 0.3 });
 
     return this._parseJsonSafe(raw, caption || '', projectId, areas, [], 'photo');
   }
@@ -304,6 +325,31 @@ ${JSON.stringify(issuesCompact, null, 2)}
     const raw = await this.chat({ system, messages: [{ role: 'user', content: userMsg }], temperature: 0.5, maxTokens: 4096 });
 
     return this._parseJsonSafe(raw, '', '', areas, [], 'weekly');
+  }
+
+  // 文本优化
+  async optimizeText({ text, projectId }) {
+    const system = `你是一个专业的施工日报文本优化助手。请对用户输入的文本进行专业优化处理：
+
+优化规则：
+1. 语言专业化：将口语化表达转换为专业施工术语
+2. 表达规范化：统一用词，确保语法正确
+3. 结构清晰化：优化句子结构，增强逻辑连贯性
+4. 删除冗余：移除不必要的语气词和重复内容
+5. 添加专业术语：适当添加施工领域专业词汇
+
+请直接输出优化后的文本，不要输出其他内容。`;
+
+    const userMsg = `请优化以下文本，使其更专业、规范：
+
+${text}`;
+
+    const raw = await this.chat({ system, messages: [{ role: 'user', content: userMsg }], temperature: 0.3, maxTokens: 1024 });
+
+    return {
+      optimizedText: raw.trim(),
+      confidence: 0.9
+    };
   }
 
   // 内部：JSON 安全解析（处理 LLM 可能夹带 markdown 代码块的情况）

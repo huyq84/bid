@@ -44,7 +44,6 @@
               <span id="todayDateLabel">今日日报</span>
               <span style="margin-left:auto; font-size:10px; color:#94a3b8; font-weight:400;" id="weekInfo"></span>
             </div>
-            <button class="btn btn-success btn-sm" onclick="confirmTodayReport()">✅ 一键确认</button>
           </div>
           <div class="card-body">
             <div class="today-summary">
@@ -114,6 +113,7 @@
             <div class="filter-chip" data-filter="safety"       onclick="filterEvents('safety', this)">🛡 安全</div>
             <div class="filter-chip" data-filter="coordination" onclick="filterEvents('coordination', this)">🤝 协调</div>
             <div class="filter-chip" data-filter="attendance"   onclick="filterEvents('attendance', this)">👥 考勤</div>
+            <button class="btn btn-success btn-sm" onclick="confirmTodayReport()" style="margin-left:auto; margin-right:4px;">✅ 一键确认</button>
           </div>
           <div class="card-body">
             <div class="timeline" id="eventTimeline"></div>
@@ -218,77 +218,113 @@
           </div>
         </div>
 
-        <!-- LLM 调试面板 -->
-        <div id="voiceDebugPanel" style="display:none; margin-bottom:12px; border:1px solid #fbbf24; border-radius:4px; background:#fffbeb;">
-          <div style="display:flex; align-items:center; justify-content:space-between; padding:6px 10px; background:#fef3c7; border-bottom:1px solid #fbbf24; font-size:11px; font-weight:600; color:#92400e;">
-            <span>🔬 LLM 调试日志（实时）</span>
-            <span>
-              <button class="btn btn-sm btn-ghost" onclick="copyVoiceDebug()" style="padding:1px 6px; font-size:10px;">📋 复制</button>
-              <button class="btn btn-sm btn-ghost" onclick="clearVoiceDebug()" style="padding:1px 6px; font-size:10px;">🗑 清空</button>
-            </span>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">📅 日期</label>
+            <input class="form-input" type="date" id="voiceDate">
           </div>
-          <div id="voiceDebugLog" style="max-height:200px; overflow-y:auto; padding:6px 10px; font-family:monospace;"></div>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">日期</label>
-          <input class="form-input" type="date" id="voiceDate">
+          <div class="form-group">
+            <label class="form-label">⏰ 时间</label>
+            <input class="form-input" type="time" id="voiceTime">
+          </div>
         </div>
         <div class="form-group">
-          <label class="form-label">识别结果（可手动修改）</label>
-          <textarea class="form-textarea" id="voiceText" rows="4"
+          <label class="form-label">🎤 识别结果（可手动修改）</label>
+          <textarea class="form-textarea" id="voiceText" rows="3"
             placeholder="例如：员工餐厅区天花吊顶龙骨安装，张师傅带两个人在做，进度到 80%"></textarea>
+          <div class="voice-actions">
+            <button class="btn btn-sm btn-primary" onclick="parseVoiceText(document.getElementById('voiceText').value)">🔍 解析语音内容</button>
+            <button class="btn btn-sm btn-secondary" onclick="optimizeVoiceTextForVoice()" id="voiceOptimizeBtn">✨ 内容优化</button>
+            <button class="btn btn-sm btn-ghost" onclick="document.getElementById('voiceText').value=''">🗑 清空</button>
+          </div>
           <div class="form-hint">说"停止"或点击麦克风结束录音，AI 会自动解析成结构化事件</div>
+          <div class="optimize-hint" id="voiceOptimizeHint" style="display:none; margin-top:8px; font-size:11px; color:#94a3b8; text-align:center;"></div>
         </div>
 
-        <div class="parse-preview" id="voiceParsePreview" style="display:none;">
-          <div class="parse-preview-header">
-            <div class="parse-preview-title">AI 解析结果（可编辑）</div>
-            <button class="btn btn-sm btn-ghost" onclick="reparseVoiceText()">🔄 重新识别</button>
-          </div>
-          <div class="parse-field">
-            <div class="parse-field-label">事件类型</div>
-            <select class="form-select" id="vp-type" style="width:100%;">
-              <option value="progress">📊 进度事件</option>
-              <option value="material">📦 材料进场</option>
-              <option value="safety">🛡 安全巡检</option>
-              <option value="coordination">🤝 协调沟通</option>
-              <option value="issue">⚠️ 问题事项</option>
-              <option value="attendance">👤 人员考勤</option>
-            </select>
-          </div>
-          <div class="parse-field">
-            <div class="parse-field-label" style="display:flex; align-items:center; justify-content:space-between;">
-              <span>区域</span>
-              <span>
-                <button class="btn btn-sm btn-ghost" onclick="addCustomArea('vp-area')" type="button">➕ 新增</button>
-                <button class="btn btn-sm btn-ghost" onclick="manageAreas()" type="button" title="管理区域列表">⚙️</button>
-              </span>
+        <!-- AI识别结果卡片（与拍照录入一致）-->
+        <div id="voiceParsePreview" class="result-card">
+          <div class="result-header">
+            <div class="result-title">
+              <span>✨</span>
+              <span>AI 识别结果</span>
+              <span class="result-badge">可编辑</span>
             </div>
-            <select class="form-select" id="vp-area" style="width:100%;">
-              <option value="">请选择区域</option>
-            </select>
-            <div class="form-hint" id="vp-area-hint" style="display:none;"></div>
+            <div class="header-actions">
+              <button class="btn btn-xs btn-ghost" onclick="reparseVoiceText()">🔄 重新识别</button>
+            </div>
           </div>
-          <div class="parse-field">
-            <div class="parse-field-label">任务</div>
-            <input class="form-input" type="text" id="vp-task" placeholder="任务名称">
+          <div class="form-grid">
+            <!-- 事件类型 -->
+            <div class="form-group">
+              <label class="form-label">📋 事件类型</label>
+              <select class="form-select" id="vp-type">
+                <option value="progress">📊 进度事件</option>
+                <option value="material">📦 材料进场</option>
+                <option value="safety">🛡 安全巡检</option>
+                <option value="coordination">🤝 协调沟通</option>
+                <option value="issue">⚠️ 问题事项</option>
+                <option value="attendance">👤 人员考勤</option>
+              </select>
+            </div>
+            
+            <!-- 区域 -->
+            <div class="form-group">
+              <label class="form-label">📍 区域</label>
+              <div class="area-select-wrapper">
+                <select class="form-select" id="vp-area">
+                  <option value="">请选择区域</option>
+                </select>
+                <div class="area-actions">
+                  <button class="btn btn-xs btn-primary" onclick="addCustomArea('vp-area')">➕</button>
+                  <button class="btn btn-xs btn-ghost" onclick="manageAreas()" title="管理区域列表">⚙️</button>
+                </div>
+              </div>
+              <div class="form-hint" id="vp-area-hint"></div>
+            </div>
+            
+            <!-- 任务 -->
+            <div class="form-group">
+              <label class="form-label">📝 任务</label>
+              <input class="form-input" type="text" id="vp-task" placeholder="任务名称">
+            </div>
+            
+            <!-- 负责人 -->
+            <div class="form-group">
+              <label class="form-label">👤 负责人</label>
+              <input class="form-input" type="text" id="vp-owner" placeholder="负责人">
+            </div>
+            
+            <!-- 进度 -->
+            <div class="form-group">
+              <label class="form-label">📈 进度</label>
+              <input class="form-input" type="text" id="vp-progress" placeholder="如：50%">
+            </div>
+            
+            <!-- 人数 -->
+            <div class="form-group">
+              <label class="form-label">👥 人数</label>
+              <input class="form-input" type="number" id="vp-headcount" placeholder="人数" min="0">
+            </div>
+            
+            <!-- 描述 -->
+            <div class="form-group full-width">
+              <label class="form-label">💬 描述</label>
+              <input class="form-input" type="text" id="vp-caption" placeholder="描述信息">
+            </div>
+            
+            <!-- 可信度 -->
+            <div class="form-group">
+              <label class="form-label">🎯 可信度</label>
+              <div class="confidence-display">
+                <div id="vp-confidence" class="confidence-value">-</div>
+              </div>
+            </div>
           </div>
-          <div class="parse-field">
-            <div class="parse-field-label">负责人</div>
-            <input class="form-input" type="text" id="vp-owner" placeholder="负责人">
-          </div>
-          <div class="parse-field">
-            <div class="parse-field-label">进度</div>
-            <input class="form-input" type="text" id="vp-progress" placeholder="如：50%">
-          </div>
-          <div class="parse-field">
-            <div class="parse-field-label">人数</div>
-            <input class="form-input" type="number" id="vp-headcount" placeholder="人数" min="0">
-          </div>
-          <div class="parse-field">
-            <div class="parse-field-label">可信度</div>
-            <div class="parse-field-value" id="vp-confidence">-</div>
+          
+          <!-- 备注 -->
+          <div class="form-group">
+            <label class="form-label">📌 备注说明</label>
+            <textarea class="form-textarea" id="vp-note" rows="2" placeholder="可选"></textarea>
           </div>
         </div>
       </div>
@@ -301,63 +337,195 @@
 
   <!-- ============== 模态框：拍照录入 ============== -->
   <div class="modal-mask" id="modalPhoto">
-    <div class="modal">
-      <div class="modal-header">
-        <div class="modal-title">📷 拍照录入</div>
+    <div class="modal photo-modal">
+      <div class="modal-header photo-modal-header">
+        <div class="modal-title photo-modal-title">
+          <span>📷</span>
+          <span>拍照录入</span>
+        </div>
         <button class="modal-close" onclick="closeModal('modalPhoto')">✕</button>
       </div>
-      <div class="modal-body">
-        <div id="photoDropZone" style="
-          border: 2px dashed #cbd5e1; border-radius: 8px;
-          padding: 40px 20px; text-align: center; cursor: pointer;
-          background: #f8fafc;
-        " onclick="mockUploadPhoto()">
-          <div style="font-size: 48px;">📷</div>
-          <div style="font-size: 14px; color: #475569; margin-top: 8px;">
-            点击模拟上传照片
-          </div>
-          <div style="font-size: 12px; color: #94a3b8; margin-top: 4px;">
-            支持 JPEG / PNG / WebP，2MB 以上自动压缩
+      <div class="modal-body photo-modal-body">
+        <div id="photoUploadZone" class="photo-upload-zone" onclick="showPhotoOptions()">
+          <div class="upload-icon">📷</div>
+          <div class="upload-title">拍照或选择图片</div>
+          <div class="upload-hint">支持 JPEG / PNG / WebP</div>
+          <input type="file" id="photoCaptureInput" accept="image/*" capture="environment" style="display:none;" onchange="handlePhotoUpload(event)">
+          <input type="file" id="photoFileInput" accept="image/*" style="display:none;" onchange="handlePhotoUpload(event)">
+        </div>
+
+        <!-- 拍照选项菜单 -->
+        <div id="photoOptionsMenu" class="photo-options-menu">
+          <div class="options-content">
+            <div class="options-title">选择图片来源</div>
+            <div class="options-buttons">
+              <button class="option-btn capture-btn" onclick="doCapture()">
+                <span class="btn-icon">📷</span>
+                <span>拍照</span>
+              </button>
+              <button class="option-btn select-btn" onclick="doSelect()">
+                <span class="btn-icon">🖼</span>
+                <span>从相册选择</span>
+              </button>
+            </div>
+            <button class="option-btn cancel-btn" onclick="closePhotoOptions()">取消</button>
           </div>
         </div>
 
-        <div id="photoPreviewArea" style="display:none;">
-          <div style="margin-top:14px;">
-            <div class="photo-thumb" style="width:100%; height:200px; font-size:48px;">📷</div>
-          </div>
-          <div class="parse-preview" style="margin-top:14px;">
-            <div class="parse-preview-title">AI 识别结果（请确认）</div>
-            <div class="parse-field">
-              <div class="parse-field-label">建议区域</div>
-              <div class="parse-field-value" id="pp-area">-</div>
+        <div id="photoPreviewArea" class="photo-preview-area">
+          <div id="pp-hint" class="preview-hint">等待识别...</div>
+          
+          <!-- VLM注意力热力图可视化动画 -->
+          <div id="vlm-visualization" class="vlm-visualization">
+            <div class="vlm-grid">
+              <!-- 左侧：图片 + 热力图叠加 -->
+              <div class="vlm-image-container">
+                <img id="vlm-photo" src="" class="vlm-photo">
+                <div id="attention-grid" class="attention-grid"></div>
+                <div id="heat-spots" class="heat-spots"></div>
+              </div>
+              
+              <!-- 右侧：Transformer模块和数据流 -->
+              <div class="vlm-info">
+                <div class="vlm-question-box">
+                  <div class="question-label">🔍 识别提问</div>
+                  <div id="vlm-question" class="question-text">正在分析图片...</div>
+                </div>
+                <div class="vlm-transformer-box">
+                  <div class="transformer-label">🧠 Transformer 注意力</div>
+                  <div id="transformer-visual" class="transformer-visual">
+                    <div class="transformer-block"></div>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div class="parse-field">
-              <div class="parse-field-label">建议描述</div>
-              <div class="parse-field-value" id="pp-caption">-</div>
+            <div id="particle-flow" class="particle-flow"></div>
+          </div>
+          
+          <!-- 普通预览图 -->
+          <div id="simple-preview" class="simple-preview">
+            <img id="photoPreviewImg" src="" class="preview-image">
+          </div>
+          
+          <!-- 语音辅助输入 -->
+          <div class="voice-section">
+            <div class="voice-header">
+              <span class="voice-title">🎤 语音辅助描述</span>
+              <div class="voice-controls">
+                <div class="recording-pulse" id="photoVoiceBtn" onclick="togglePhotoVoiceRecording()"></div>
+                <span id="photoVoiceHint" class="voice-hint">点击录音</span>
+              </div>
             </div>
-            <div class="parse-field">
-              <div class="parse-field-label">可信度</div>
-              <div class="parse-field-value" id="pp-confidence">-</div>
+            <textarea class="voice-textarea" id="pp-voice-text" placeholder="语音描述或手动输入，帮助AI更准确识别图片内容..."></textarea>
+            <div class="voice-actions">
+              <button class="btn btn-sm btn-primary" onclick="parseVoiceTextForPhoto()">🔍 解析语音内容</button>
+              <button class="btn btn-sm btn-secondary" onclick="optimizeVoiceText()" id="optimizeBtn">✨ 内容优化</button>
+              <button class="btn btn-sm btn-ghost" onclick="clearVoiceText()">🗑 清空</button>
+            </div>
+            <div class="optimize-hint" id="optimizeHint" style="display:none; margin-top:8px; font-size:11px; color:#94a3b8; text-align:center;"></div>
+          </div>
+        </div>
+
+        <!-- 表单字段 -->
+        <div class="photo-form">
+          <!-- 日期和时间 -->
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">📅 日期</label>
+              <input class="form-input" type="date" id="pp-date">
+            </div>
+            <div class="form-group">
+              <label class="form-label">⏰ 时间</label>
+              <input class="form-input" type="time" id="pp-time">
             </div>
           </div>
-          <div class="form-group" style="margin-top:14px;">
-            <label class="form-label">事件类型</label>
-            <select class="form-select" id="pp-type">
-              <option value="progress">🔨 进度</option>
-              <option value="safety">🛡 安全</option>
-              <option value="material">📦 材料</option>
-              <option value="coordination">🤝 协调</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">关联区域</label>
-            <select class="form-select" id="pp-area-select">
-              <!-- JS 渲染 -->
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">备注说明</label>
-            <textarea class="form-textarea" id="pp-note" rows="2" placeholder="可选"></textarea>
+          
+          <!-- AI识别结果卡片 -->
+          <div class="result-card">
+            <div class="result-header">
+              <div class="result-title">
+                <span>✨</span>
+                <span>AI 识别结果</span>
+                <span class="result-badge">可编辑</span>
+              </div>
+              <div class="header-actions">
+                <button class="btn btn-xs btn-ghost" onclick="doRetake()">🔄 重新拍照</button>
+                <button class="btn btn-xs btn-ghost" onclick="reparsePhoto()">🔍 重新识别</button>
+              </div>
+            </div>
+            <div class="form-grid">
+              <!-- 事件类型 -->
+              <div class="form-group">
+                <label class="form-label">📋 事件类型</label>
+                <select class="form-select" id="pp-type">
+                  <option value="progress">📊 进度事件</option>
+                  <option value="material">📦 材料进场</option>
+                  <option value="safety">🛡 安全巡检</option>
+                  <option value="coordination">🤝 协调沟通</option>
+                  <option value="issue">⚠️ 问题事项</option>
+                  <option value="attendance">👤 人员考勤</option>
+                </select>
+              </div>
+              
+              <!-- 区域 -->
+              <div class="form-group">
+                <label class="form-label">📍 区域</label>
+                <div class="area-select-wrapper">
+                  <select class="form-select" id="pp-area">
+                    <option value="">请选择区域</option>
+                  </select>
+                  <div class="area-actions">
+                    <button class="btn btn-xs btn-primary" onclick="addCustomArea('pp-area')">➕</button>
+                    <button class="btn btn-xs btn-ghost" onclick="manageAreas()" title="管理区域列表">⚙️</button>
+                  </div>
+                </div>
+                <div class="form-hint" id="pp-area-hint"></div>
+              </div>
+              
+              <!-- 任务 -->
+              <div class="form-group">
+                <label class="form-label">📝 任务</label>
+                <input class="form-input" type="text" id="pp-task" placeholder="任务名称">
+              </div>
+              
+              <!-- 负责人 -->
+              <div class="form-group">
+                <label class="form-label">👤 负责人</label>
+                <input class="form-input" type="text" id="pp-owner" placeholder="负责人">
+              </div>
+              
+              <!-- 进度 -->
+              <div class="form-group">
+                <label class="form-label">📈 进度</label>
+                <input class="form-input" type="text" id="pp-progress" placeholder="如：50%">
+              </div>
+              
+              <!-- 人数 -->
+              <div class="form-group">
+                <label class="form-label">👥 人数</label>
+                <input class="form-input" type="number" id="pp-headcount" placeholder="人数" min="0">
+              </div>
+              
+              <!-- 描述 -->
+              <div class="form-group full-width">
+                <label class="form-label">💬 描述</label>
+                <input class="form-input" type="text" id="pp-caption" placeholder="描述信息">
+              </div>
+              
+              <!-- 可信度 -->
+              <div class="form-group">
+                <label class="form-label">🎯 可信度</label>
+                <div class="confidence-display">
+                  <div id="pp-confidence" class="confidence-value">-</div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- 备注 -->
+            <div class="form-group">
+              <label class="form-label">📌 备注说明</label>
+              <textarea class="form-textarea" id="pp-note" rows="2" placeholder="可选"></textarea>
+            </div>
           </div>
         </div>
       </div>
@@ -388,16 +556,60 @@
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label class="form-label">时间 <span class="req">*</span></label>
-            <input class="form-input" type="time" id="m-time" value="14:00">
+            <label class="form-label">日期 <span class="req">*</span></label>
+            <input class="form-input" type="date" id="m-date" value="">
           </div>
           <div class="form-group">
-            <label class="form-label">所属区域 <span class="req">*</span></label>
-            <select class="form-select" id="m-area">
-              <!-- JS 渲染 -->
-            </select>
+            <label class="form-label">时间 <span class="req">*</span></label>
+            <input class="form-input" type="time" id="m-time">
           </div>
         </div>
+        <div class="form-group">
+          <label class="form-label">关联计划</label>
+          <select class="form-select" id="m-plan" onchange="onPlanSelect(this.value)">
+            <option value="">无（计划外工作）</option>
+            <!-- JS 渲染当天的计划 -->
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">完成类型</label>
+          <select class="form-select" id="m-completion-type">
+            <option value="planned">计划内</option>
+            <option value="unplanned">计划外</option>
+          </select>
+        </div>
+        
+        <!-- 新增：施工位置字段 -->
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">楼号/施工段</label>
+            <input class="form-input" type="text" id="m-building-no" placeholder="如：1号楼、A区">
+          </div>
+          <div class="form-group">
+            <label class="form-label">层号</label>
+            <input class="form-input" type="text" id="m-floor-no" placeholder="如：F1、B2">
+          </div>
+        </div>
+        
+        <div class="form-group">
+          <label class="form-label">所属区域 <span class="req">*</span></label>
+          <select class="form-select" id="m-area">
+            <!-- JS 渲染 -->
+          </select>
+        </div>
+        
+        <!-- 新增：工序和负责人字段 -->
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">工序</label>
+            <input class="form-input" type="text" id="m-process" placeholder="如：钢筋绑扎">
+          </div>
+          <div class="form-group">
+            <label class="form-label">负责人</label>
+            <input class="form-input" type="text" id="m-owner" placeholder="姓名或班组">
+          </div>
+        </div>
+        
         <div id="manualDynamicForm">
           <!-- 根据 type 动态渲染 -->
         </div>
@@ -579,27 +791,95 @@
 
   <!-- ============== 模态框：日计划表单 ============== -->
   <div class="modal-mask" id="modalDailyPlan">
-    <div class="modal">
+    <div class="modal" style="max-width:600px;">
       <div class="modal-header">
         <div class="modal-title">📋 新建日计划</div>
         <button class="modal-close" onclick="closeModal('modalDailyPlan')">✕</button>
       </div>
       <div class="modal-body">
-        <div class="form-group">
-          <label class="form-label">日期 <span class="req">*</span></label>
-          <input class="form-input" type="date" id="dp-date">
+        <!-- 基本信息 -->
+        <div class="form-section">
+          <div class="section-title">基本信息</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">开始日期 <span class="req">*</span></label>
+              <input class="form-input" type="date" id="dp-start-date">
+            </div>
+            <div class="form-group">
+              <label class="form-label">结束日期 <span class="req">*</span></label>
+              <input class="form-input" type="date" id="dp-end-date">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">事件类型 <span class="req">*</span></label>
+              <select class="form-select" id="dp-event-type">
+                <option value="progress">🔨 进度</option>
+                <option value="material">📦 材料</option>
+                <option value="safety">🛡 安全</option>
+                <option value="coordination">🤝 协调</option>
+                <option value="attendance">👥 考勤</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">状态</label>
+              <select class="form-select" id="dp-status">
+                <option value="active" selected>进行中</option>
+                <option value="completed">已完成</option>
+                <option value="cancelled">已取消</option>
+              </select>
+            </div>
+          </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">计划说明</label>
-          <textarea class="form-textarea" id="dp-description" rows="2" placeholder="今日工作计划概述"></textarea>
+        
+        <!-- 施工位置 -->
+        <div class="form-section">
+          <div class="section-title">施工位置</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">楼号/施工段</label>
+              <input class="form-input" type="text" id="dp-building-no" placeholder="如：1号楼、A区">
+            </div>
+            <div class="form-group">
+              <label class="form-label">层号</label>
+              <input class="form-input" type="text" id="dp-floor-no" placeholder="如：F1、B2">
+            </div>
+            <div class="form-group">
+              <label class="form-label">区域</label>
+              <select class="form-select" id="dp-area">
+                <option value="">请选择区域</option>
+              </select>
+            </div>
+          </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">劳动力安排</label>
+        
+        <!-- 工序与负责人 -->
+        <div class="form-section">
+          <div class="section-title">工序信息</div>
+          <div class="form-group">
+            <label class="form-label">工序 <span class="req">*</span></label>
+            <input class="form-input" type="text" id="dp-process" placeholder="如：钢筋绑扎、混凝土浇筑">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">负责人</label>
+              <input class="form-input" type="text" id="dp-owner" placeholder="姓名或班组">
+            </div>
+            <div class="form-group">
+              <label class="form-label">当前进度</label>
+              <input class="form-input" type="text" id="dp-progress" placeholder="如：50%">
+            </div>
+          </div>
+        </div>
+        
+        <!-- 劳动力安排 -->
+        <div class="form-section">
+          <div class="section-title">劳动力需求</div>
           <div id="laborRows">
             <div class="form-row labor-row">
               <div class="form-group">
                 <label class="form-label">工种</label>
-                <input class="form-input" type="text" id="labor-type-0" placeholder="如：木工">
+                <input class="form-input" type="text" id="labor-type-0" placeholder="如：木工、钢筋工">
               </div>
               <div class="form-group">
                 <label class="form-label">人数</label>
@@ -610,28 +890,33 @@
           </div>
           <button class="btn btn-ghost btn-sm" onclick="addLaborRow()">+ 添加工种</button>
         </div>
-        <div class="form-group">
-          <label class="form-label">区域进度目标</label>
-          <div id="areaTargetRows">
-            <div class="form-row area-row">
-              <div class="form-group">
-                <label class="form-label">区域</label>
-                <select class="form-select" id="area-target-area-0">
-                  <!-- JS 渲染 -->
-                </select>
-              </div>
-              <div class="form-group">
-                <label class="form-label">任务名称</label>
-                <input class="form-input" type="text" id="area-target-task-0" placeholder="任务名称">
-              </div>
-              <div class="form-group">
-                <label class="form-label">目标进度</label>
-                <input class="form-input" type="text" id="area-target-progress-0" placeholder="如：80%">
-              </div>
-              <button class="btn btn-danger btn-sm" onclick="removeAreaRow(0)" style="margin-top:24px;">✕</button>
-            </div>
+        
+        <!-- 材料与机械 -->
+        <div class="form-section">
+          <div class="section-title">材料与机械</div>
+          <div class="form-group">
+            <label class="form-label">材料清单</label>
+            <textarea class="form-textarea" id="dp-materials" rows="2" placeholder="请输入材料清单，每行一种"></textarea>
           </div>
-          <button class="btn btn-ghost btn-sm" onclick="addAreaRow()">+ 添加区域目标</button>
+          <div class="form-group">
+            <label class="form-label">机械设备</label>
+            <textarea class="form-textarea" id="dp-machinery" rows="2" placeholder="请输入机械设备，每行一台"></textarea>
+          </div>
+        </div>
+        
+        <!-- 安全注意事项 -->
+        <div class="form-section">
+          <div class="section-title">安全管理</div>
+          <div class="form-group">
+            <label class="form-label">安全注意事项</label>
+            <textarea class="form-textarea" id="dp-safety-notes" rows="2" placeholder="安全要求、防护措施等"></textarea>
+          </div>
+        </div>
+        
+        <!-- 计划描述 -->
+        <div class="form-group">
+          <label class="form-label">计划说明</label>
+          <textarea class="form-textarea" id="dp-description" rows="2" placeholder="工作计划概述"></textarea>
         </div>
       </div>
       <div class="modal-footer">
@@ -681,6 +966,32 @@
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="closeModal('modalLLM')">关闭</button>
         <button class="btn btn-primary" onclick="testLLMConnection()">🔌 测试连接</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== 自定义确认对话框 ============== -->
+  <div id="confirmDialog" class="confirm-dialog-overlay">
+    <div class="confirm-dialog">
+      <div class="confirm-icon" id="confirmIcon">⚠️</div>
+      <div class="confirm-title" id="confirmTitle">确认操作</div>
+      <div class="confirm-message" id="confirmMessage">确定要执行此操作吗？</div>
+      <div class="confirm-actions">
+        <button class="btn btn-ghost" id="confirmCancel">取消</button>
+        <button class="btn btn-danger" id="confirmOk">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== 自定义输入对话框 ============== -->
+  <div id="promptDialog" class="confirm-dialog-overlay">
+    <div class="confirm-dialog">
+      <div class="confirm-icon">✏️</div>
+      <div class="confirm-title" id="promptTitle">请输入</div>
+      <input type="text" class="prompt-input" id="promptInput" placeholder="">
+      <div class="confirm-actions">
+        <button class="btn btn-ghost" id="promptCancel">取消</button>
+        <button class="btn btn-primary" id="promptOk">确定</button>
       </div>
     </div>
   </div>

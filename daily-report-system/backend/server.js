@@ -14,6 +14,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { MinMaxClient } from './llm-client.js';
 import { mockParseVoice, mockParsePhoto, mockAggregateWeekly } from './mock-fallback.js';
+import os from 'os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -141,12 +142,38 @@ app.post('/api/parse-voice', async (req, res) => {
 app.post('/api/parse-photo', async (req, res) => {
   const { imageBase64, caption, projectId, areas, type } = req.body;
   const start = Date.now();
+  
+  // 调试日志
+  console.log('[照片解析请求]');
+  console.log('  projectId:', projectId);
+  console.log('  caption:', caption ? caption.slice(0, 50) + '...' : '(空)');
+  console.log('  areas:', JSON.stringify(areas));
+  console.log('  type:', type);
+  
   try {
     const result = await llm.parsePhoto({ imageBase64, caption, projectId, areas, type });
+    console.log('[照片解析结果]', JSON.stringify(result));
     res.json({ source: 'llm', latencyMs: Date.now() - start, ...result });
   } catch (e) {
     console.warn('[降级] LLM 照片解析失败，回退 mock:', e.message);
     const result = mockParsePhoto(caption, projectId, areas, type);
+    console.log('[Mock解析结果]', JSON.stringify(result));
+    res.json({ source: 'mock', latencyMs: Date.now() - start, fallbackReason: e.message, ...result });
+  }
+});
+
+// 文本优化
+app.post('/api/optimize-text', async (req, res) => {
+  const { text, projectId } = req.body;
+  if (!text) return res.status(400).json({ error: 'text 不能为空' });
+
+  const start = Date.now();
+  try {
+    const result = await llm.optimizeText({ text, projectId });
+    res.json({ source: 'llm', latencyMs: Date.now() - start, ...result });
+  } catch (e) {
+    console.warn('[降级] LLM 文本优化失败，回退 mock:', e.message);
+    const result = mockOptimizeText(text);
     res.json({ source: 'mock', latencyMs: Date.now() - start, fallbackReason: e.message, ...result });
   }
 });
@@ -170,11 +197,29 @@ app.post('/api/aggregate-weekly', async (req, res) => {
 // ============================================================
 // 启动
 // ============================================================
-const PORT = process.env.BACKEND_PORT || 3001;
-app.listen(PORT, () => {
+const PORT = process.env.BACKEND_PORT || 3010;
+app.listen(PORT, '0.0.0.0', async () => {
+  // 收集局域网IPv4地址
+  const networkInterfaces = os.networkInterfaces();
+  const lanIps = [];
+  Object.values(networkInterfaces).forEach(adapterList => {
+    adapterList.forEach(netInfo => {
+      // 筛选非本地回环的IPv4局域网地址
+      if (netInfo.family === 'IPv4' && !netInfo.internal) {
+        lanIps.push(netInfo.address);
+      }
+    });
+  });
+
   console.log(`\n========================================`);
   console.log(`  日报后端已启动`);
-  console.log(`  http://localhost:${PORT}`);
+  console.log(`  本机访问: http://localhost:${PORT}`);
+  console.log(`  局域网访问地址：`);
+  if (lanIps.length > 0) {
+    lanIps.forEach(ip => console.log(`    http://${ip}:${PORT}`));
+  } else {
+    console.log(`    未检测到局域网网卡，请检查WiFi/网线连接`);
+  }
   console.log(`  健康检查: http://localhost:${PORT}/api/health`);
   console.log(`========================================\n`);
 });

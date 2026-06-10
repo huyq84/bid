@@ -24,7 +24,7 @@ python -m http.server 8080
 # 方式 1：直接跑
 cd backend
 node server.js
-# 监听 http://localhost:3001
+# 监听 http://localhost:3010
 
 # 方式 2：watch 模式（改 server.js / llm-client.js 自动重启）
 cd backend
@@ -54,7 +54,7 @@ node test-e2e.js
 ```
 ┌────────────────────────┐  fetch  ┌─────────────────────────┐
 │  index.html (静态)     │ ──────▶ │  backend/server.js      │
-│  + app.js              │         │  (Express, 端口 3001)   │
+│  + app.js              │         │  (Express, 端口 3010)   │
 │  + mock-data.js        │         │                         │
 │  + styles.css          │         │  ├─ llm-client.js       │ ──▶ MiniMax /v1/messages
 └────────────────────────┘         │  └─ mock-fallback.js    │ （LLM 失败时回退）

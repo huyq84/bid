@@ -12,6 +12,80 @@ let multiSelectMode = false;
 let laborRowCount = 1;
 let areaRowCount = 1;
 
+// ============================================================
+// 自定义对话框
+// ============================================================
+let confirmResolve = null;
+let promptResolve = null;
+
+// 显示确认对话框
+function showConfirm(message, title = '确认操作', icon = '⚠️') {
+  return new Promise((resolve) => {
+    confirmResolve = resolve;
+    document.getElementById('confirmIcon').textContent = icon;
+    document.getElementById('confirmTitle').textContent = title;
+    document.getElementById('confirmMessage').textContent = message;
+    document.getElementById('confirmDialog').style.display = 'flex';
+  });
+}
+
+// 隐藏确认对话框
+function hideConfirm(result) {
+  document.getElementById('confirmDialog').style.display = 'none';
+  if (confirmResolve) {
+    confirmResolve(result);
+    confirmResolve = null;
+  }
+}
+
+// 显示输入对话框
+function showPrompt(title, defaultValue = '') {
+  return new Promise((resolve) => {
+    promptResolve = resolve;
+    document.getElementById('promptTitle').textContent = title;
+    document.getElementById('promptInput').value = defaultValue;
+    document.getElementById('promptDialog').style.display = 'flex';
+    document.getElementById('promptInput').focus();
+  });
+}
+
+// 隐藏输入对话框
+function hidePrompt(result) {
+  document.getElementById('promptDialog').style.display = 'none';
+  if (promptResolve) {
+    promptResolve(result);
+    promptResolve = null;
+  }
+}
+
+// 初始化对话框事件
+document.addEventListener('DOMContentLoaded', () => {
+  // 确认对话框按钮
+  document.getElementById('confirmOk').onclick = () => hideConfirm(true);
+  document.getElementById('confirmCancel').onclick = () => hideConfirm(false);
+  document.getElementById('confirmDialog').onclick = (e) => {
+    if (e.target.id === 'confirmDialog') hideConfirm(false);
+  };
+  
+  // 输入对话框按钮
+  document.getElementById('promptOk').onclick = () => {
+    const value = document.getElementById('promptInput').value;
+    hidePrompt(value);
+  };
+  document.getElementById('promptCancel').onclick = () => hidePrompt(null);
+  document.getElementById('promptDialog').onclick = (e) => {
+    if (e.target.id === 'promptDialog') hidePrompt(null);
+  };
+  document.getElementById('promptInput').onkeydown = (e) => {
+    if (e.key === 'Enter') {
+      const value = document.getElementById('promptInput').value;
+      hidePrompt(value);
+    } else if (e.key === 'Escape') {
+      hidePrompt(null);
+    }
+  };
+});
+
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', () => {
   initCustomAreas();  // 先加载用户自定义区域
@@ -104,34 +178,43 @@ function renderTodayEvents() {
   
   const sorted = [...filtered].sort((a, b) => a.time.localeCompare(b.time));
   
-  document.getElementById('eventTimeline').innerHTML = sorted.map(event => `
-    <div class="event-item ${event.status === 'draft' ? 'draft' : ''}" 
-         onclick="openEventDetail('${event.id}')">
-      <div class="event-head">
-        <span class="event-time">${event.time}</span>
-        <span class="event-type-badge" style="background:${M.TYPE_META[event.type].color};">
-          ${M.TYPE_META[event.type].icon} ${M.TYPE_META[event.type].label}
-        </span>
-        <span class="event-area">${getAreaName(event.areaId)}</span>
-        <span class="event-source">${M.SOURCE_META[event.source]?.icon || '⚙️'}</span>
-        <span class="event-status-badge ${event.status}">${event.status === 'draft' ? '草稿' : '已确认'}</span>
+  document.getElementById('eventTimeline').innerHTML = sorted.map(event => {
+    const completionBadge = event.completionType === 'unplanned' 
+      ? '<span class="event-completion-badge unplanned">📌 计划外</span>' 
+      : (event.completionType === 'planned' && event.planId 
+        ? `<span class="event-completion-badge planned">✅ 计划内</span>` 
+        : '');
+    
+    return `
+      <div class="event-item ${event.status === 'draft' ? 'draft' : ''}" 
+           onclick="openEventDetail('${event.id}')">
+        <div class="event-head">
+          <span class="event-time">${event.time}</span>
+          <span class="event-type-badge" style="background:${M.TYPE_META[event.type].color};">
+            ${M.TYPE_META[event.type].icon} ${M.TYPE_META[event.type].label}
+          </span>
+          ${completionBadge}
+          <span class="event-area">${getAreaName(event.areaId)}</span>
+          <span class="event-source">${M.SOURCE_META[event.source]?.icon || '⚙️'}</span>
+          <span class="event-status-badge ${event.status}">${event.status === 'draft' ? '草稿' : '已确认'}</span>
+        </div>
+        <div class="event-body">${renderEventContent(event)}</div>
+        ${event.voiceText ? `<div class="event-voice">${event.voiceText}</div>` : ''}
+        ${event.photos && event.photos.length > 0 ? renderPhotos(event.photos) : ''}
+        <div class="event-actions">
+          <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); confirmEvent('${event.id}')">
+            ${event.status === 'draft' ? '✅ 确认' : '🔄 撤回'}
+          </button>
+          <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); openEventDetail('${event.id}')">
+            查看详情
+          </button>
+          <button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteEvent('${event.id}')">
+            删除
+          </button>
+        </div>
       </div>
-      <div class="event-body">${renderEventContent(event)}</div>
-      ${event.voiceText ? `<div class="event-voice">${event.voiceText}</div>` : ''}
-      ${event.photos && event.photos.length > 0 ? renderPhotos(event.photos) : ''}
-      <div class="event-actions">
-        <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); confirmEvent('${event.id}')">
-          ${event.status === 'draft' ? '✅ 确认' : '🔄 撤回'}
-        </button>
-        <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); openEventDetail('${event.id}')">
-          查看详情
-        </button>
-        <button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteEvent('${event.id}')">
-          删除
-        </button>
-      </div>
-    </div>
-  `).join('');
+    `;
+  }).join('');
 }
 
 function renderFilteredEvents() {
@@ -330,8 +413,9 @@ function confirmTodayReport() {
     : '当前日期没有草稿事件', 'success');
 }
 
-function deleteEvent(eventId) {
-  if (!confirm('确定要删除这个事件吗？')) return;
+async function deleteEvent(eventId) {
+  const confirmed = await showConfirm('确定要删除这个事件吗？', '删除事件', '🗑️');
+  if (!confirmed) return;
   const index = M.EVENTS.findIndex(e => e.id === eventId);
   if (index > -1) {
     M.EVENTS.splice(index, 1);
@@ -466,6 +550,9 @@ function updateCalendar() {
   
   const allEvents = [...M.EVENTS, ...M.HISTORY_EVENTS];
   
+  // 获取项目的所有计划
+  const projectPlans = M.PLANS[currentProjectId] || [];
+  
   let html = `
     <div class="calendar-weekday">日</div>
     <div class="calendar-weekday">一</div>
@@ -490,18 +577,34 @@ function updateCalendar() {
     const isToday = dateStr === todayStr;
     const isSelected = selectedDates.includes(dateStr);
     
+    // 检查是否有计划覆盖此日期
+    const hasPlan = projectPlans.some(p => {
+      if (!p.startDate || !p.endDate || p.status === 'cancelled') return false;
+      return p.startDate <= dateStr && p.endDate >= dateStr;
+    });
+    
+    // 计算当天的计划数量
+    const planCount = projectPlans.filter(p => {
+      if (!p.startDate || !p.endDate || p.status === 'cancelled') return false;
+      return p.startDate <= dateStr && p.endDate >= dateStr;
+    }).length;
+    
     let className = 'calendar-day';
     if (isToday) className += ' today';
     if (isSelected) className += ' selected';
+    if (hasPlan) className += ' has-plan';
     
     let statusDots = '';
-    if (confirmedCount > 0 || draftCount > 0) {
+    if (confirmedCount > 0 || draftCount > 0 || planCount > 0) {
       statusDots = '<div class="calendar-dots">';
       if (confirmedCount > 0) {
         statusDots += `<span class="calendar-dot confirmed">✓${confirmedCount}</span>`;
       }
       if (draftCount > 0) {
         statusDots += `<span class="calendar-dot draft">○${draftCount}</span>`;
+      }
+      if (planCount > 0) {
+        statusDots += `<span class="calendar-dot plan">📋${planCount}</span>`;
       }
       statusDots += '</div>';
     }
@@ -615,53 +718,100 @@ function goToToday() {
 // 今日计划卡片
 // ============================================================
 function renderDailyPlanCard() {
-  const todayPlan = (M.PLANS[currentProjectId] || []).find(p => p.date === M.TODAY);
+  // 查找今天有效的计划（在日期范围内）
+  const todayPlans = (M.PLANS[currentProjectId] || []).filter(p => {
+    if (!p.startDate || !p.endDate) return false;
+    return p.startDate <= M.TODAY && p.endDate >= M.TODAY && p.status !== 'cancelled';
+  });
   
-  if (!todayPlan) {
+  if (!todayPlans || todayPlans.length === 0) {
     document.getElementById('dailyPlanCard').innerHTML = `
       <div style="text-align:center; padding:12px; color:#94a3b8;">
-        <div style="font-size:24px; margin-bottom:4px;">�</div>
+        <div style="font-size:24px; margin-bottom:4px;">📋</div>
         <div style="font-size:12px;">暂无今日计划</div>
       </div>
     `;
     return;
   }
   
-  const totalWorkers = todayPlan.laborSchedule?.reduce((sum, l) => sum + l.count, 0) || 0;
+  let html = '';
   
-  document.getElementById('dailyPlanCard').innerHTML = `
-    ${todayPlan.description ? `<div style="font-size:13px; color:#334155; margin-bottom:10px;">${todayPlan.description}</div>` : ''}
-    ${todayPlan.laborSchedule?.length > 0 ? `
-      <div style="margin-bottom:8px;">
-        <div style="font-size:11px; color:#64748b; margin-bottom:3px;">👷 出勤：${totalWorkers}人</div>
-        <div style="display:flex; flex-wrap:wrap; gap:4px;">
-          ${todayPlan.laborSchedule.map(l => `<span style="font-size:11px; padding:2px 6px; background:#f1f5f9; border-radius:4px;">${l.laborType}: ${l.count}人</span>`).join('')}
+  todayPlans.forEach(plan => {
+    const totalWorkers = plan.laborRequirements?.reduce((sum, l) => sum + l.count, 0) || 0;
+    const typeMeta = M.TYPE_META[plan.eventType] || { icon: '📋', label: '计划', color: '#64748b' };
+    
+    html += `
+      <div style="background:#f8fafc; border-radius:6px; padding:10px; margin-bottom:8px; border-left:3px solid ${typeMeta.color};">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <span style="font-size:12px; font-weight:600; color:#334155;">${typeMeta.icon} ${plan.process}</span>
+          <span style="font-size:10px; padding:1px 6px; background:${typeMeta.color}; color:#fff; border-radius:4px;">${plan.status === 'completed' ? '已完成' : '进行中'}</span>
         </div>
-      </div>
-    ` : ''}
-    ${todayPlan.areaTargets?.length > 0 ? `
-      <div>
-        <div style="font-size:11px; color:#64748b; margin-bottom:3px;">📍 区域目标</div>
-        <div style="display:grid; gap:2px;">
-          ${todayPlan.areaTargets.map(t => `
-            <div style="font-size:12px; padding:4px 8px; background:#f0f9ff; border-radius:4px;">
-              ${getAreaName(t.areaId)} · ${t.taskName} · ${t.targetProgress}
+        
+        ${plan.buildingNo || plan.floorNo ? `
+          <div style="font-size:11px; color:#64748b; margin-bottom:4px;">
+            🏗️ ${plan.buildingNo || ''} ${plan.floorNo ? '· ' + plan.floorNo : ''}
+          </div>
+        ` : ''}
+        
+        ${plan.owner ? `
+          <div style="font-size:11px; color:#64748b; margin-bottom:4px;">
+            👤 负责人：${plan.owner}
+          </div>
+        ` : ''}
+        
+        ${plan.laborRequirements?.length > 0 ? `
+          <div style="margin-bottom:4px;">
+            <div style="font-size:10px; color:#64748b; margin-bottom:2px;">👷 出勤：${totalWorkers}人</div>
+            <div style="display:flex; flex-wrap:wrap; gap:3px;">
+              ${plan.laborRequirements.map(l => `<span style="font-size:10px; padding:1px 4px; background:#fff; border-radius:3px;">${l.trade}: ${l.count}人</span>`).join('')}
             </div>
-          `).join('')}
-        </div>
+          </div>
+        ` : ''}
+        
+        ${plan.progress ? `
+          <div style="font-size:11px; color:#00adef;">
+            📊 当前进度：${plan.progress}
+          </div>
+        ` : ''}
+        
+        ${plan.description ? `
+          <div style="font-size:11px; color:#64748b; margin-top:4px; padding-top:4px; border-top:1px dashed #e2e8f0;">
+            ${plan.description}
+          </div>
+        ` : ''}
       </div>
-    ` : ''}
-  `;
+    `;
+  });
+  
+  document.getElementById('dailyPlanCard').innerHTML = html;
+}
+
+// 更新日历计划标记
+function updateCalendarPlanMarks() {
+  updateCalendar();
 }
 
 // ============================================================
 // 表单操作
 // ============================================================
+function renderAreaSelect(selectId) {
+  const areas = getProjectAreas();
+  const html = '<option value="">请选择区域</option>' +
+    areas.map(a => `<option value="${a.id}">${a.name}${a.custom ? ' ★' : ''}</option>`).join('') +
+    '<option value="_custom">其他（自定义）</option>';
+  
+  const select = document.getElementById(selectId);
+  if (select) {
+    select.innerHTML = html;
+  }
+}
+
 function populateAreaSelects() {
   // 用 getProjectAreas() 替代 M.AREAS（支持用户新增区域）
   const areas = getProjectAreas();
   const html = '<option value="">请选择区域</option>' +
-    areas.map(a => `<option value="${a.id}">${a.name}${a.custom ? ' ★' : ''}</option>`).join('');
+    areas.map(a => `<option value="${a.id}">${a.name}${a.custom ? ' ★' : ''}</option>`).join('') +
+    '<option value="_custom">其他（自定义）</option>';
 
   document.querySelectorAll('select[id$="-area"], select[id*="area-"]').forEach(el => {
     const current = el.value;
@@ -669,6 +819,11 @@ function populateAreaSelects() {
     if (current && areas.find(a => a.id === current)) {
       el.value = current;
     }
+  });
+  
+  // 隐藏所有自定义输入框
+  document.querySelectorAll('.custom-area-input').forEach(input => {
+    input.style.display = 'none';
   });
 }
 
@@ -678,13 +833,34 @@ function populateAreaSelects() {
 function openDailyPlanForm() {
   laborRowCount = 1;
   areaRowCount = 1;
-  document.getElementById('dp-date').value = M.TODAY;
+  
+  // 设置默认日期为今天
+  const today = M.TODAY;
+  document.getElementById('dp-start-date').value = today;
+  document.getElementById('dp-end-date').value = today;
+  
+  // 清空其他字段
+  document.getElementById('dp-event-type').value = 'progress';
+  document.getElementById('dp-status').value = 'active';
+  document.getElementById('dp-building-no').value = '';
+  document.getElementById('dp-floor-no').value = '';
+  document.getElementById('dp-process').value = '';
+  document.getElementById('dp-owner').value = '';
+  document.getElementById('dp-progress').value = '';
+  document.getElementById('dp-materials').value = '';
+  document.getElementById('dp-machinery').value = '';
+  document.getElementById('dp-safety-notes').value = '';
   document.getElementById('dp-description').value = '';
+  
+  // 渲染区域选择
+  renderAreaSelect('dp-area');
+  
+  // 初始化工种行
   document.getElementById('laborRows').innerHTML = `
     <div class="form-row labor-row">
       <div class="form-group">
         <label class="form-label">工种</label>
-        <input class="form-input" type="text" id="labor-type-0" placeholder="如：木工">
+        <input class="form-input" type="text" id="labor-type-0" placeholder="如：木工、钢筋工">
       </div>
       <div class="form-group">
         <label class="form-label">人数</label>
@@ -693,25 +869,7 @@ function openDailyPlanForm() {
       <button class="btn btn-danger btn-sm" onclick="removeLaborRow(0)" style="margin-top:24px;">✕</button>
     </div>
   `;
-  document.getElementById('areaTargetRows').innerHTML = `
-    <div class="form-row area-row">
-      <div class="form-group">
-        <label class="form-label">区域</label>
-        <select class="form-select" id="area-target-area-0">
-          ${(M.AREAS[currentProjectId] || []).map(a => `<option value="${a.id}">${a.name}</option>`).join('')}
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">任务名称</label>
-        <input class="form-input" type="text" id="area-target-task-0" placeholder="任务名称">
-      </div>
-      <div class="form-group">
-        <label class="form-label">目标进度</label>
-        <input class="form-input" type="text" id="area-target-progress-0" placeholder="如：80%">
-      </div>
-      <button class="btn btn-danger btn-sm" onclick="removeAreaRow(0)" style="margin-top:24px;">✕</button>
-    </div>
-  `;
+  
   showModal('modalDailyPlan');
 }
 
@@ -772,47 +930,74 @@ function removeAreaRow(index) {
 }
 
 function saveDailyPlan() {
-  const date = document.getElementById('dp-date').value;
+  // 获取表单数据
+  const startDate = document.getElementById('dp-start-date').value;
+  const endDate = document.getElementById('dp-end-date').value;
+  const eventType = document.getElementById('dp-event-type').value;
+  const status = document.getElementById('dp-status').value;
+  const buildingNo = document.getElementById('dp-building-no').value;
+  const floorNo = document.getElementById('dp-floor-no').value;
+  const area = document.getElementById('dp-area').value;
+  const process = document.getElementById('dp-process').value;
+  const owner = document.getElementById('dp-owner').value;
+  const progress = document.getElementById('dp-progress').value;
+  const materials = document.getElementById('dp-materials').value;
+  const machinery = document.getElementById('dp-machinery').value;
+  const safetyNotes = document.getElementById('dp-safety-notes').value;
   const description = document.getElementById('dp-description').value;
   
-  const laborSchedule = [];
+  // 收集劳动力需求
+  const laborRequirements = [];
   document.querySelectorAll('.labor-row').forEach((row, index) => {
     const type = document.getElementById(`labor-type-${index}`)?.value;
     const count = parseInt(document.getElementById(`labor-count-${index}`)?.value) || 0;
     if (type && count > 0) {
-      laborSchedule.push({ laborType: type, count });
+      laborRequirements.push({ trade: type, count });
     }
   });
   
-  const areaTargets = [];
-  document.querySelectorAll('.area-row').forEach((row, index) => {
-    const areaId = document.getElementById(`area-target-area-${index}`)?.value;
-    const taskName = document.getElementById(`area-target-task-${index}`)?.value;
-    const targetProgress = document.getElementById(`area-target-progress-${index}`)?.value;
-    if (areaId && taskName) {
-      areaTargets.push({ areaId, taskName, targetProgress: targetProgress || '0%' });
-    }
-  });
-  
-  if (!date) {
-    showToast('请选择日期', 'error');
+  // 验证必填字段
+  if (!startDate || !endDate) {
+    showToast('请选择日期范围', 'error');
     return;
   }
   
+  if (!process) {
+    showToast('请填写工序', 'error');
+    return;
+  }
+  
+  // 创建计划对象
   const plan = {
     id: `PLAN${String(Date.now()).slice(-3)}`,
     projectId: currentProjectId,
-    date,
+    startDate,
+    endDate,
+    eventType,
+    status,
+    buildingNo,
+    floorNo,
+    area,
+    process,
+    owner,
+    progress: progress || '0%',
+    laborRequirements,
+    materials: materials ? materials.split('\n').filter(m => m.trim()) : [],
+    machinery: machinery ? machinery.split('\n').filter(m => m.trim()) : [],
+    safetyNotes,
     description,
-    laborSchedule,
-    areaTargets,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
   };
   
+  // 保存到全局数据
   if (!M.PLANS[currentProjectId]) {
     M.PLANS[currentProjectId] = [];
   }
   M.PLANS[currentProjectId].unshift(plan);
+  
+  // 更新日历标记
+  updateCalendarPlanMarks();
   
   closeModal('modalDailyPlan');
   renderDailyPlanCard();
@@ -834,13 +1019,22 @@ function initCustomAreas() {
       customAreas[pid] = areas.map(a => ({ ...a, custom: false }));
     }
   }
-  // 持久化
+  // 持久化：合并保存的自定义区域（不覆盖预置区域）
   try {
     const saved = localStorage.getItem('customAreas');
     if (saved) {
       const parsed = JSON.parse(saved);
-      for (const [pid, areas] of Object.entries(parsed)) {
-        customAreas[pid] = areas.map(a => ({ ...a, custom: true }));
+      for (const [pid, savedAreas] of Object.entries(parsed)) {
+        if (!customAreas[pid]) {
+          customAreas[pid] = [];
+        }
+        // 合并自定义区域（去重）
+        const existingIds = new Set(customAreas[pid].map(a => a.id));
+        for (const area of savedAreas) {
+          if (!existingIds.has(area.id)) {
+            customAreas[pid].push({ ...area, custom: true });
+          }
+        }
       }
     }
   } catch (e) { /* ignore */ }
@@ -884,8 +1078,8 @@ function renderAreaOptions(selectId, selectedId = '') {
 }
 
 // 在指定 select 上方增加新区域（弹输入）
-function addCustomArea(selectId) {
-  const name = prompt('请输入新区域名称（如：VIP 接待室）：');
+async function addCustomArea(selectId) {
+  const name = await showPrompt('请输入新区域名称（如：VIP 接待室）：');
   if (!name || !name.trim()) return;
   const areas = getProjectAreas();
   // 检查是否已存在
@@ -911,8 +1105,10 @@ function addCustomArea(selectId) {
 }
 
 // 删除区域
-function removeArea(areaId) {
-  if (!confirm(`确定删除区域 "${findAreaById(areaId)?.name || areaId}"？`)) return;
+async function removeArea(areaId) {
+  const areaName = findAreaById(areaId)?.name || areaId;
+  const confirmed = await showConfirm(`确定删除区域 "${areaName}"？`, '删除区域', '🗑️');
+  if (!confirmed) return;
   if (!customAreas[currentProjectId]) return;
   const area = customAreas[currentProjectId].find(a => a.id === areaId);
   if (area && !area.custom) {
@@ -922,14 +1118,15 @@ function removeArea(areaId) {
   customAreas[currentProjectId] = customAreas[currentProjectId].filter(a => a.id !== areaId);
   saveCustomAreas();
   refreshAreaSelectors();
+  renderAreasList();  // 刷新区域管理弹窗列表
   showToast('区域已删除', 'success');
 }
 
 // 重命名区域
-function renameArea(areaId) {
+async function renameArea(areaId) {
   const area = findAreaById(areaId);
   if (!area) return;
-  const newName = prompt('修改区域名称：', area.name);
+  const newName = await showPrompt('修改区域名称：', area.name);
   if (!newName || !newName.trim() || newName === area.name) return;
   if (findAreaByName(newName.trim())) {
     showToast(`"${newName}" 已存在`, 'error');
@@ -938,6 +1135,7 @@ function renameArea(areaId) {
   area.name = newName.trim();
   saveCustomAreas();
   refreshAreaSelectors();
+  renderAreasList();  // 刷新区域管理弹窗列表
   showToast('区域已重命名', 'success');
 }
 
@@ -1030,21 +1228,21 @@ function addAreaFromManager() {
 function openVoiceInput() {
   const today = new Date();
   const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const nowStr = `${String(today.getHours()).padStart(2, '0')}:${String(today.getMinutes()).padStart(2, '0')}`;
 
   const selectedDate = selectedDates.length > 0 ? selectedDates[0] : todayStr;
   document.getElementById('voiceDate').value = selectedDate;
+  document.getElementById('voiceTime').value = nowStr;
 
   document.getElementById('voiceText').value = '';
-  document.getElementById('voiceParsePreview').style.display = 'none';
-  document.getElementById('voiceSaveBtn').disabled = true;
+  document.getElementById('voiceParsePreview').style.display = 'block';
+  document.getElementById('voiceSaveBtn').disabled = false;
   document.getElementById('recordingBtn').classList.remove('recording');
   document.getElementById('recordingHint').textContent = '点击麦克风开始录音';
   document.getElementById('vp-area-hint').style.display = 'none';
-  // 清空调试日志
-  clearVoiceDebug();
+  showModal('modalVoice');
   // 关键：填充区域选项
   renderAreaOptions('vp-area', '');
-  showModal('modalVoice');
 }
 
 function toggleRecording() {
@@ -1081,85 +1279,6 @@ function mockRecordingComplete() {
   parseVoiceText(randomText);
 }
 
-// 调试日志收集
-let voiceDebugLog = [];
-// 暴露到 window（方便测试 + 控制台调试）
-if (typeof window !== 'undefined') window.voiceDebugLog = voiceDebugLog;
-
-function logVoiceDebug(stage, data) {
-  const entry = { time: new Date().toISOString().slice(11, 19), stage, data };
-  voiceDebugLog.push(entry);
-  // 重新同步到 window（保持引用一致）
-  if (typeof window !== 'undefined') window.voiceDebugLog = voiceDebugLog;
-  // 同步到控制台
-  const tag = '🎤[voice]';
-  if (data instanceof Error) {
-    console.error(tag, stage, data);
-  } else {
-    console.log(tag, stage, data);
-  }
-  // 同步刷新调试面板（如果存在）
-  renderVoiceDebugPanel();
-}
-
-function renderVoiceDebugPanel() {
-  const panel = document.getElementById('voiceDebugPanel');
-  if (!panel) return;
-  if (voiceDebugLog.length === 0) {
-    panel.style.display = 'none';
-    return;
-  }
-  panel.style.display = 'block';
-  const html = voiceDebugLog.map((e, i) => {
-    const dataStr = typeof e.data === 'object' 
-      ? JSON.stringify(e.data, null, 2) 
-      : String(e.data);
-    return `<div style="border-bottom:1px solid #e2e8f0; padding:6px 0;">
-      <div style="font-size:10px; color:#94a3b8;">#${i+1} · ${e.time} · ${e.stage}</div>
-      <pre style="margin:4px 0 0 0; font-size:10px; color:#0f172a; white-space:pre-wrap; word-break:break-all; max-height:200px; overflow-y:auto;">${dataStr.replace(/</g, '&lt;')}</pre>
-    </div>`;
-  }).join('');
-  document.getElementById('voiceDebugLog').innerHTML = html;
-  // 自动滚动到底部
-  const log = document.getElementById('voiceDebugLog');
-  if (log) log.scrollTop = log.scrollHeight;
-}
-
-function clearVoiceDebug() {
-  voiceDebugLog = [];
-  if (typeof window !== 'undefined') window.voiceDebugLog = voiceDebugLog;
-  renderVoiceDebugPanel();
-}
-
-function copyVoiceDebug() {
-  const text = voiceDebugLog.map(e => `[${e.time}] ${e.stage}\n${JSON.stringify(e.data, null, 2)}`).join('\n\n');
-
-  // 优先用现代 API
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text).then(() => {
-      showToast('日志已复制到剪贴板', 'success');
-    }).catch(() => fallbackCopy(text));
-  } else {
-    fallbackCopy(text);
-  }
-}
-
-function fallbackCopy(text) {
-  try {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand('copy');
-    document.body.removeChild(ta);
-    showToast(ok ? '日志已复制' : '复制失败，请手动选择', ok ? 'success' : 'error');
-  } catch (e) {
-    showToast('复制失败：' + e.message, 'error');
-  }
-}
-
 // 核心：解析语音（调 LLM 真实接口，失败降级 mock）
 async function parseVoiceText(text) {
   if (!text || !text.trim()) return;
@@ -1175,12 +1294,6 @@ async function parseVoiceText(text) {
     areas: areasPayload
   };
 
-  logVoiceDebug('📤 发起 LLM 请求', {
-    url: API_BASE + '/parse-voice',
-    method: 'POST',
-    body: requestBody
-  });
-
   const t0 = Date.now();
   try {
     const r = await fetch(API_BASE + '/parse-voice', {
@@ -1188,34 +1301,15 @@ async function parseVoiceText(text) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody)
     });
-    logVoiceDebug('📥 收到 HTTP 响应', {
-      status: r.status,
-      ok: r.ok,
-      headers: Object.fromEntries(r.headers.entries())
-    });
 
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const parsed = await r.json();
-    logVoiceDebug('✅ LLM 返回结果（耗时 ' + (Date.now() - t0) + 'ms）', parsed);
 
     applyVoiceParseResult(parsed);
     if (hint) hint.textContent = `🤖 LLM 真实 · ${parsed.latencyMs || 0}ms · 来源 ${parsed.source}`;
-    logVoiceDebug('🎯 已应用到表单', {
-      type: document.getElementById('vp-type').value,
-      areaId: document.getElementById('vp-area').value,
-      task: document.getElementById('vp-task').value,
-      owner: document.getElementById('vp-owner').value,
-      progress: document.getElementById('vp-progress').value,
-      headcount: document.getElementById('vp-headcount').value
-    });
   } catch (e) {
-    logVoiceDebug('❌ LLM 调用失败，降级到 mock', {
-      error: e.message,
-      stack: e.stack
-    });
     // 降级到本地 mock
     const parsed = M.mockParseVoice(text, currentProjectId);
-    logVoiceDebug('⚙️ Mock fallback 结果', parsed);
     applyVoiceParseResult(parsed);
     if (hint) hint.textContent = `⚙️ Mock 模式（LLM 离线）· ${e.message}`;
   }
@@ -1228,6 +1322,7 @@ function applyVoiceParseResult(parsed) {
   document.getElementById('vp-owner').value = parsed.payload?.owner || '';
   document.getElementById('vp-progress').value = parsed.payload?.progress || '';
   document.getElementById('vp-headcount').value = parsed.payload?.headcount || '';
+  document.getElementById('vp-caption').value = parsed.caption || parsed.payload?.caption || '';
   document.getElementById('vp-confidence').textContent = `${((parsed.confidence || 0) * 100).toFixed(0)}%`;
 
   // 关键：处理 LLM 识别出的"区域"——可能是名字（"VIP 接待室"）也可能是 ID（"A1"）
@@ -1267,14 +1362,15 @@ function handleParsedArea(areaRef) {
 }
 
 // 弹询问："LLM 识别到新区域 [VIP 接待室]，要添加吗？"
-function showAreaConfirmDialog(areaName) {
+function showAreaConfirmDialog(areaName, selectId = 'vp-area') {
+  const hintId = `${selectId}-hint`;
   const existingMatch = findAreaByName(areaName);
   if (existingMatch) {
-    renderAreaOptions('vp-area', existingMatch.id);
+    renderAreaOptions(selectId, existingMatch.id);
     return;
   }
   // 重建 select：标出"建议新增"项
-  const select = document.getElementById('vp-area');
+  const select = document.getElementById(selectId);
   if (!select) return;
   const areas = getProjectAreas();
   select.innerHTML =
@@ -1283,12 +1379,12 @@ function showAreaConfirmDialog(areaName) {
     areas.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
 
   // 提示文字
-  const hint = document.getElementById('vp-area-hint');
+  const hint = document.getElementById(hintId);
   if (hint) {
     hint.style.display = 'block';
     hint.innerHTML = `💡 LLM 识别到新区域 <strong>"${areaName}"</strong>。请选择：
-      <button class="btn btn-sm btn-primary" style="margin-left:6px;" onclick="confirmAddNewArea('${areaName.replace(/'/g, "\\'")}', 'vp-area')">➕ 添加为新区域</button>
-      <button class="btn btn-sm btn-ghost" onclick="dismissNewAreaHint()">忽略（从已有选）</button>
+      <button class="btn btn-sm btn-primary" style="margin-left:6px;" onclick="confirmAddNewArea('${areaName.replace(/'/g, "\\'")}', '${selectId}')">➕ 添加为新区域</button>
+      <button class="btn btn-sm btn-ghost" onclick="dismissNewAreaHint('${selectId}')">忽略（从已有选）</button>
     `;
   }
 }
@@ -1312,9 +1408,9 @@ function confirmAddNewArea(name, selectId) {
   showToast(`已新增区域：${name}（${newId}）`, 'success');
 }
 
-function dismissNewAreaHint() {
-  renderAreaOptions('vp-area', '');
-  const hint = document.getElementById('vp-area-hint');
+function dismissNewAreaHint(selectId = 'vp-area') {
+  renderAreaOptions(selectId, '');
+  const hint = document.getElementById(`${selectId}-hint`);
   if (hint) hint.style.display = 'none';
 }
 
@@ -1332,6 +1428,7 @@ async function reparseVoiceText() {
 function saveVoiceEvent() {
   const text = document.getElementById('voiceText').value;
   const date = document.getElementById('voiceDate').value;
+  const time = document.getElementById('voiceTime').value;
   
   if (!date) {
     showToast('请选择日期', 'error');
@@ -1350,21 +1447,22 @@ function saveVoiceEvent() {
     id: `E${String(Date.now()).slice(-3)}`,
     projectId: currentProjectId,
     date: date,
-    time: new Date().toTimeString().slice(0, 5),
+    time: time || new Date().toTimeString().slice(0, 5),
     type: type,
     areaId: areaId,
     payload: {
       taskName: document.getElementById('vp-task').value,
       owner: document.getElementById('vp-owner').value,
       progress: document.getElementById('vp-progress').value,
-      headcount: parseInt(document.getElementById('vp-headcount').value) || 0
+      headcount: parseInt(document.getElementById('vp-headcount').value) || 0,
+      caption: document.getElementById('vp-caption').value
     },
     submitter: '张明',
     source: 'voice',
     confidence: parseFloat(document.getElementById('vp-confidence').textContent) / 100 || 0.85,
     status: 'draft',
     voiceText: text,
-    note: ''
+    note: document.getElementById('vp-note').value
   };
   
   M.EVENTS.unshift(event);
@@ -1381,46 +1479,920 @@ function saveVoiceEvent() {
 // ============================================================
 function openPhotoInput() {
   document.getElementById('photoPreviewArea').style.display = 'none';
-  document.getElementById('photoDropZone').style.display = 'block';
+  document.getElementById('photoUploadZone').style.display = 'block';
+  document.getElementById('photoOptionsMenu').style.display = 'none';
   document.getElementById('photoSaveBtn').disabled = true;
+  document.getElementById('photoFileInput').value = '';
+  document.getElementById('photoCaptureInput').value = '';
+  
+  // 初始化日期和时间字段：优先使用选中日期，否则使用今天和当前时间
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const nowStr = `${String(today.getHours()).padStart(2, '0')}:${String(today.getMinutes()).padStart(2, '0')}`;
+  const selectedDate = selectedDates.length > 0 ? selectedDates[0] : todayStr;
+  document.getElementById('pp-date').value = selectedDate;
+  document.getElementById('pp-time').value = nowStr;
+  
+  // 初始化区域选项
+  renderAreaOptions('pp-area', '');
+  
   showModal('modalPhoto');
 }
 
-function mockUploadPhoto() {
-  document.getElementById('photoDropZone').style.display = 'none';
-  document.getElementById('photoPreviewArea').style.display = 'block';
+function showPhotoOptions() {
+  document.getElementById('photoOptionsMenu').style.display = 'block';
+}
+
+function closePhotoOptions() {
+  document.getElementById('photoOptionsMenu').style.display = 'none';
+}
+
+function doCapture() {
+  closePhotoOptions();
+  document.getElementById('photoCaptureInput').click();
+}
+
+function doSelect() {
+  closePhotoOptions();
+  document.getElementById('photoFileInput').click();
+}
+
+function doRetake() {
+  document.getElementById('photoPreviewArea').style.display = 'none';
+  document.getElementById('photoUploadZone').style.display = 'block';
+  document.getElementById('photoPreviewImg').src = '';
+  document.getElementById('photoFileInput').value = '';
+  document.getElementById('photoCaptureInput').value = '';
+  document.getElementById('pp-voice-text').value = '';
+  document.getElementById('photoSaveBtn').disabled = true;
+}
+
+// 拍照界面的语音录音功能
+let photoVoiceRecording = false;
+
+function togglePhotoVoiceRecording() {
+  const btn = document.getElementById('photoVoiceBtn');
+  const hint = document.getElementById('photoVoiceHint');
+
+  if (photoVoiceRecording) {
+    btn.classList.remove('recording');
+    hint.textContent = '点击录音';
+    photoVoiceRecording = false;
+    mockPhotoVoiceRecordingComplete();
+  } else {
+    btn.classList.add('recording');
+    hint.textContent = '录音中... 点击停止';
+    photoVoiceRecording = true;
+    setTimeout(() => {
+      if (photoVoiceRecording) {
+        togglePhotoVoiceRecording();
+      }
+    }, 3000);
+  }
+}
+
+function mockPhotoVoiceRecordingComplete() {
+  const mockTexts = [
+    '这是员工餐厅的天花吊顶，龙骨已经安装完成',
+    '高管办公区墙面基层处理，进度大概一半',
+    '多功能厅安全检查，灭火器需要更换',
+    '商业展示区地面铺设，大理石材料进场',
+    'VIP接待室电路改造，电工师傅在施工'
+  ];
+  const randomText = mockTexts[Math.floor(Math.random() * mockTexts.length)];
+  const currentText = document.getElementById('pp-voice-text').value;
+  document.getElementById('pp-voice-text').value = currentText ? currentText + ' ' + randomText : randomText;
   
-  const parsed = M.mockParsePhoto();
-  document.getElementById('pp-area').textContent = getAreaName(parsed.areaId);
-  document.getElementById('pp-caption').textContent = parsed.caption;
-  document.getElementById('pp-confidence').textContent = `${(parsed.confidence * 100).toFixed(0)}%`;
+  // 自动触发解析
+  setTimeout(() => {
+    parseVoiceText();
+  }, 500);
+}
+
+// 单独解析拍照界面的语音文本内容
+async function parseVoiceTextForPhoto() {
+  const voiceText = document.getElementById('pp-voice-text').value.trim();
+  if (!voiceText) {
+    showToast('请先输入语音描述', 'warning');
+    return;
+  }
   
+  const hint = document.getElementById('pp-hint');
+  if (hint) {
+    hint.textContent = '⏳ 正在解析语音内容...';
+  }
+  
+  try {
+    const response = await fetch(API_BASE + '/parse-photo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        caption: voiceText,
+        projectId: currentProjectId,
+        areas: getProjectAreas() || [],
+        type: 'text_only'
+      })
+    }).catch(error => {
+      throw new Error('网络错误: ' + error.message);
+    });
+    
+    if (!response.ok) {
+      throw new Error('HTTP ' + response.status);
+    }
+    
+    const result = await response.json();
+    
+    document.getElementById('pp-type').value = result.type || 'progress';
+    document.getElementById('pp-area').value = result.areaId || '';
+    document.getElementById('pp-task').value = result.taskHint || result.payload?.taskName || '';
+    document.getElementById('pp-owner').value = result.payload?.owner || '';
+    document.getElementById('pp-progress').value = result.payload?.progress || '';
+    document.getElementById('pp-headcount').value = result.payload?.headcount || '';
+    if (!document.getElementById('pp-caption').value) {
+      document.getElementById('pp-caption').value = result.caption || voiceText;
+    }
+    document.getElementById('pp-confidence').textContent = `${(result.confidence * 100).toFixed(0)}%`;
+    if (hint) hint.textContent = result.source === 'llm' 
+      ? `🤖 LLM 解析完成` 
+      : `⚙️ Mock 模式`;
+    
+    // 处理识别到的新区域
+    if (result.areaName && !result.areaId) {
+      showAreaConfirmDialog(result.areaName, 'pp-area');
+    }
+    
+    showToast('语音内容解析完成', 'success');
+    
+  } catch (error) {
+    console.error('语音解析失败:', error);
+    // 降级到 mock
+    const parsed = M.mockParsePhoto(voiceText, M.AREAS[currentProjectId] || []);
+    document.getElementById('pp-type').value = parsed.type || 'progress';
+    document.getElementById('pp-area').value = parsed.areaId || '';
+    document.getElementById('pp-task').value = parsed.taskHint || parsed.payload?.taskName || '';
+    document.getElementById('pp-owner').value = parsed.payload?.owner || '';
+    document.getElementById('pp-progress').value = parsed.payload?.progress || '';
+    document.getElementById('pp-headcount').value = parsed.payload?.headcount || '';
+    if (!document.getElementById('pp-caption').value) {
+      document.getElementById('pp-caption').value = parsed.caption || voiceText;
+    }
+    document.getElementById('pp-confidence').textContent = `${(parsed.confidence * 100).toFixed(0)}%`;
+    if (hint) hint.textContent = `⚙️ Mock 模式`;
+    showToast('语音解析失败，使用模拟数据', 'warning');
+    
+    // 处理识别到的新区域
+    if (parsed.areaName && !parsed.areaId) {
+      showAreaConfirmDialog(parsed.areaName, 'pp-area');
+    }
+  }
+  
+  document.getElementById('photoSaveBtn').disabled = false;
+}
+
+// 逐字显示文本动画
+function typeText(element, text, speed = 30) {
+  return new Promise((resolve) => {
+    if (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT') {
+      element.value = '';
+    } else {
+      element.textContent = '';
+    }
+    let index = 0;
+    const interval = setInterval(() => {
+      if (index < text.length) {
+        if (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT') {
+          element.value += text[index];
+        } else {
+          element.textContent += text[index];
+        }
+        index++;
+      } else {
+        clearInterval(interval);
+        resolve();
+      }
+    }, speed);
+  });
+}
+
+// 内容优化函数
+let originalVoiceText = '';
+async function optimizeVoiceText() {
+  const textarea = document.getElementById('pp-voice-text');
+  const hint = document.getElementById('optimizeHint');
+  const optimizeBtn = document.getElementById('optimizeBtn');
+  const voiceText = textarea.value.trim();
+  
+  if (!voiceText) {
+    showToast('请先输入文本内容', 'warning');
+    return;
+  }
+  
+  // 保存原始内容
+  if (originalVoiceText !== voiceText) {
+    originalVoiceText = voiceText;
+  }
+  
+  // 显示优化中状态
+  optimizeBtn.disabled = true;
+  optimizeBtn.innerHTML = '⏳ 优化中...';
+  hint.textContent = '正在优化文本内容...';
+  hint.style.display = 'block';
+  
+  // 添加柔光过渡动画
+  textarea.classList.add('textarea-animating');
+  
+  // 创建扫描线效果 - 创建在textarea上方
+  const wrapper = document.createElement('div');
+  wrapper.className = 'animation-wrapper';
+  wrapper.style.width = textarea.offsetWidth + 'px';
+  wrapper.style.height = textarea.offsetHeight + 'px';
+  wrapper.style.top = textarea.offsetTop + 'px';
+  wrapper.style.left = textarea.offsetLeft + 'px';
+  
+  const scanLine = document.createElement('div');
+  scanLine.className = 'scan-line';
+  scanLine.style.height = textarea.offsetHeight + 'px';
+  
+  const parent = textarea.parentElement;
+  parent.style.position = 'relative';
+  parent.appendChild(wrapper);
+  wrapper.appendChild(scanLine);
+  
+  try {
+    // 等待扫描动画完成（1秒）
+    await new Promise(r => setTimeout(r, 1000));
+    
+    // 移除扫描线和包装器
+    wrapper.remove();
+    
+    // 旧文字淡化效果
+    textarea.classList.add('textarea-fading');
+    
+    await new Promise(r => setTimeout(r, 400));
+    
+    // 调用后端优化接口
+    const response = await fetch(API_BASE + '/optimize-text', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: voiceText,
+        projectId: currentProjectId
+      })
+    });
+    
+    const result = await response.json();
+    
+    if (result.optimizedText) {
+      // 清除淡化动画，添加优化完成动画
+      textarea.classList.remove('textarea-fading');
+      textarea.classList.add('textarea-optimized');
+      
+      // 逐字显示效果
+      await typeText(textarea, result.optimizedText, 35);
+      
+      hint.innerHTML = `✨ 优化完成！<a href="#" onclick="restoreOriginalText()" style="color:#00adef; text-decoration:underline;">点击恢复原文</a>`;
+      hint.style.display = 'block';
+      showToast('文本内容已优化', 'success');
+    } else {
+      textarea.classList.remove('textarea-fading');
+      hint.textContent = '优化失败，保持原内容';
+      setTimeout(() => { hint.style.display = 'none'; }, 3000);
+    }
+    
+  } catch (error) {
+    console.error('文本优化失败:', error);
+    textarea.classList.remove('textarea-fading');
+    
+    // 降级到本地mock优化
+    const optimized = mockOptimizeText(voiceText);
+    const optimizedText = optimized.optimizedText || optimized;
+    
+    // 逐字显示效果
+    await typeText(textarea, optimizedText, 35);
+    
+    hint.innerHTML = `✨ 本地优化完成！<a href="#" onclick="restoreOriginalText()" style="color:#00adef; text-decoration:underline;">点击恢复原文</a>`;
+    hint.style.display = 'block';
+    showToast('文本优化完成（本地模式）', 'success');
+  } finally {
+    // 清除动画类
+    textarea.classList.remove('textarea-animating', 'textarea-fading', 'textarea-optimized');
+    optimizeBtn.disabled = false;
+    optimizeBtn.innerHTML = '✨ 内容优化';
+  }
+}
+
+// 恢复原始文本
+function restoreOriginalText() {
+  const textarea = document.getElementById('pp-voice-text');
+  const hint = document.getElementById('optimizeHint');
+  
+  if (originalVoiceText) {
+    textarea.value = originalVoiceText;
+    hint.textContent = '已恢复原文';
+    setTimeout(() => { hint.style.display = 'none'; }, 2000);
+  }
+}
+
+// 清空语音文本
+function clearVoiceText() {
+  document.getElementById('pp-voice-text').value = '';
+  originalVoiceText = '';
+  document.getElementById('optimizeHint').style.display = 'none';
+}
+
+// 语音录入界面的内容优化函数
+let originalVoiceTextForVoice = '';
+async function optimizeVoiceTextForVoice() {
+  const textarea = document.getElementById('voiceText');
+  const hint = document.getElementById('voiceOptimizeHint');
+  const optimizeBtn = document.getElementById('voiceOptimizeBtn');
+  const voiceText = textarea.value.trim();
+  
+  if (!voiceText) {
+    showToast('请先输入文本内容', 'warning');
+    return;
+  }
+  
+  // 保存原始内容
+  if (originalVoiceTextForVoice !== voiceText) {
+    originalVoiceTextForVoice = voiceText;
+  }
+  
+  // 显示优化中状态
+  optimizeBtn.disabled = true;
+  optimizeBtn.innerHTML = '⏳ 优化中...';
+  hint.textContent = '正在优化文本内容...';
+  hint.style.display = 'block';
+  
+  // 添加柔光过渡动画
+  textarea.classList.add('textarea-animating');
+  
+  // 创建扫描线效果 - 创建在textarea上方
+  const wrapper = document.createElement('div');
+  wrapper.className = 'animation-wrapper';
+  wrapper.style.width = textarea.offsetWidth + 'px';
+  wrapper.style.height = textarea.offsetHeight + 'px';
+  wrapper.style.top = textarea.offsetTop + 'px';
+  wrapper.style.left = textarea.offsetLeft + 'px';
+  
+  const scanLine = document.createElement('div');
+  scanLine.className = 'scan-line';
+  scanLine.style.height = textarea.offsetHeight + 'px';
+  
+  const parent = textarea.parentElement;
+  parent.style.position = 'relative';
+  parent.appendChild(wrapper);
+  wrapper.appendChild(scanLine);
+  
+  try {
+    // 等待扫描动画完成（1秒）
+    await new Promise(r => setTimeout(r, 1000));
+    
+    // 移除扫描线和包装器
+    wrapper.remove();
+    
+    // 旧文字淡化效果
+    textarea.classList.add('textarea-fading');
+    
+    await new Promise(r => setTimeout(r, 400));
+    
+    // 调用后端优化接口
+    const response = await fetch(API_BASE + '/optimize-text', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: voiceText,
+        projectId: currentProjectId
+      })
+    });
+    
+    const result = await response.json();
+    
+    if (result.optimizedText) {
+      // 清除淡化动画，添加优化完成动画
+      textarea.classList.remove('textarea-fading');
+      textarea.classList.add('textarea-optimized');
+      
+      // 逐字显示效果
+      await typeText(textarea, result.optimizedText, 35);
+      
+      hint.innerHTML = `✨ 优化完成！<a href="#" onclick="restoreOriginalTextForVoice()" style="color:#00adef; text-decoration:underline;">点击恢复原文</a>`;
+      hint.style.display = 'block';
+      showToast('文本内容已优化', 'success');
+    } else {
+      textarea.classList.remove('textarea-fading');
+      hint.textContent = '优化失败，保持原内容';
+      setTimeout(() => { hint.style.display = 'none'; }, 3000);
+    }
+    
+  } catch (error) {
+    console.error('文本优化失败:', error);
+    textarea.classList.remove('textarea-fading');
+    
+    // 降级到本地mock优化
+    const optimized = mockOptimizeText(voiceText);
+    const optimizedText = optimized.optimizedText || optimized;
+    
+    // 逐字显示效果
+    await typeText(textarea, optimizedText, 35);
+    
+    hint.innerHTML = `✨ 本地优化完成！<a href="#" onclick="restoreOriginalTextForVoice()" style="color:#00adef; text-decoration:underline;">点击恢复原文</a>`;
+    hint.style.display = 'block';
+    showToast('文本优化完成（本地模式）', 'success');
+  } finally {
+    // 清除动画类
+    textarea.classList.remove('textarea-animating', 'textarea-fading', 'textarea-optimized');
+    optimizeBtn.disabled = false;
+    optimizeBtn.innerHTML = '✨ 内容优化';
+  }
+}
+
+// 恢复语音录入界面的原始文本
+function restoreOriginalTextForVoice() {
+  const textarea = document.getElementById('voiceText');
+  const hint = document.getElementById('voiceOptimizeHint');
+  
+  if (originalVoiceTextForVoice) {
+    textarea.value = originalVoiceTextForVoice;
+    hint.textContent = '已恢复原文';
+    setTimeout(() => { hint.style.display = 'none'; }, 2000);
+  }
+}
+
+// Mock文本优化（本地降级）
+function mockOptimizeText(text) {
+  // 专业词汇替换
+  const replacements = [
+    // 施工术语优化
+    [/(\d+)个?(\s+)?(人|名|位)/g, '$1人'],
+    [/(\d+)%?(\s+)?(进度|完成|做了)/g, '进度$1%'],
+    [/(\d+)层/g, '$1层楼'],
+    [/(\d+)平米/g, '$1平方米'],
+    [/(\d+)平方/g, '$1平方米'],
+    [/(\d+)米/g, '$1米'],
+    
+    // 规范化表达
+    [/搞|弄|做/g, '进行'],
+    [/弄好|搞好|做好/g, '完成'],
+    [/在搞|在弄|在做/g, '正在进行'],
+    [/已经|已/g, '已'],
+    [/今天|今日/g, '今日'],
+    [/明天/g, '明日'],
+    
+    // 施工任务优化
+    [/刷墙|刮腻子/g, '墙面涂刷'],
+    [/贴砖/g, '瓷砖铺贴'],
+    [/吊顶|天花板/g, '吊顶施工'],
+    [/水电|管线/g, '水电安装'],
+    [/油漆/g, '油漆施工'],
+    [/木工/g, '木工作业'],
+    [/钢筋|绑扎/g, '钢筋绑扎'],
+    [/混凝土|浇筑/g, '混凝土浇筑'],
+    [/防水/g, '防水施工'],
+    [/保温/g, '保温施工'],
+    
+    // 状态描述优化
+    [/差不多|大概|左右/g, '约'],
+    [/很快|马上/g, '即将'],
+    [/好了|完了/g, '完成'],
+    [/没好|没完成/g, '未完成'],
+    
+    // 地点描述优化
+    [/这边|那边/g, '该区域'],
+    [/楼上|楼下/g, '楼上区域|楼下区域'],
+    
+    // 清理冗余词
+    [/然后|然后呢|然后就/g, ''],
+    [/那个|那个什么/g, ''],
+    [/呃|嗯|啊/g, ''],
+    [/吧|嘛|呢/g, ''],
+    
+    // 标点规范化
+    [/。{2,}/g, '。'],
+    [/，{2,}/g, '，'],
+    [/！{2,}/g, '！'],
+    [/\?{2,}/g, '？'],
+  ];
+  
+  let result = text;
+  for (const [pattern, replacement] of replacements) {
+    result = result.replace(pattern, replacement);
+  }
+  
+  // 添加专业术语
+  if (!result.includes('施工') && !result.includes('作业') && !result.includes('安装')) {
+    // 检查是否包含任务关键词
+    const taskKeywords = ['墙面', '地面', '吊顶', '水电', '油漆', '木工', '钢筋', '混凝土', '防水', '保温', '瓷砖'];
+    for (const kw of taskKeywords) {
+      if (result.includes(kw)) {
+        result = result.replace(kw, kw + '施工');
+        break;
+      }
+    }
+  }
+  
+  // 去除首尾空格和多余空格
+  result = result.replace(/\s+/g, ' ').trim();
+  
+  return result;
+}
+
+function handlePhotoUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  
+  // 验证文件类型
+  if (!file.type.startsWith('image/')) {
+    showToast('请选择图片文件', 'error');
+    return;
+  }
+  
+  // 隐藏选择菜单
+  closePhotoOptions();
+  
+  // 显示预览
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const previewUrl = e.target.result;
+    document.getElementById('photoPreviewImg').src = previewUrl;
+    document.getElementById('vlm-photo').src = previewUrl;
+    document.getElementById('photoUploadZone').style.display = 'none';
+    document.getElementById('photoPreviewArea').style.display = 'block';
+    
+    // 显示VLM可视化动画
+    showVLMVisualization();
+    
+    // 上传到后端进行 AI 识别
+    uploadAndParsePhoto(file);
+  };
+  reader.readAsDataURL(file);
+  
+  // 清空 input 值，允许重复选择同一文件
+  event.target.value = '';
+}
+
+// VLM注意力热力图可视化动画
+let vlmAnimationRunning = false;
+let vlmAnimationFrame = null;
+let vlmTokens = ['施工', '区域', '任务', '进度', '材料', '安全'];
+let currentTokenIndex = 0;
+let heatSpots = [];
+
+function showVLMVisualization() {
+  const vlmVis = document.getElementById('vlm-visualization');
+  const simplePreview = document.getElementById('simple-preview');
+  
+  vlmVis.style.display = 'block';
+  simplePreview.style.display = 'none';
+  
+  // 初始化网格
+  initAttentionGrid();
+  
+  // 初始化粒子流
+  initParticleFlow();
+  
+  // 开始动画
+  vlmAnimationRunning = true;
+  currentTokenIndex = 0;
+  startVLMAnimation();
+}
+
+function initAttentionGrid() {
+  const gridContainer = document.getElementById('attention-grid');
+  gridContainer.innerHTML = '';
+  
+  const gridSize = 4; // 4x4网格
+  const cellWidth = 100 / gridSize;
+  const cellHeight = 100 / gridSize;
+  
+  for (let row = 0; row < gridSize; row++) {
+    for (let col = 0; col < gridSize; col++) {
+      const cell = document.createElement('div');
+      cell.className = 'attention-grid-cell';
+      cell.style.left = `${col * cellWidth}%`;
+      cell.style.top = `${row * cellHeight}%`;
+      cell.style.width = `${cellWidth}%`;
+      cell.style.height = `${cellHeight}%`;
+      gridContainer.appendChild(cell);
+    }
+  }
+}
+
+function initParticleFlow() {
+  const flowContainer = document.getElementById('particle-flow');
+  flowContainer.innerHTML = '';
+  
+  // 添加数据流线条
+  const line = document.createElement('div');
+  line.className = 'flow-line';
+  line.style.width = '100%';
+  line.style.top = '50%';
+  line.style.transform = 'translateY(-50%)';
+  flowContainer.appendChild(line);
+  
+  // 添加粒子
+  for (let i = 0; i < 5; i++) {
+    const particle = document.createElement('div');
+    particle.className = 'particle';
+    particle.style.top = '50%';
+    particle.style.transform = 'translateY(-50%)';
+    particle.style.animationDelay = `${i * 0.4}s`;
+    flowContainer.appendChild(particle);
+  }
+}
+
+function startVLMAnimation() {
+  if (!vlmAnimationRunning) return;
+  
+  // 更新提问文本
+  const questionEl = document.getElementById('vlm-question');
+  questionEl.textContent = `识别: "${vlmTokens[currentTokenIndex]}"...`;
+  
+  // 更新热力图
+  updateHeatMap(currentTokenIndex);
+  
+  // 更新网格激活状态
+  updateGridActivation(currentTokenIndex);
+  
+  // 切换到下一个token
+  currentTokenIndex = (currentTokenIndex + 1) % vlmTokens.length;
+  
+  // 继续动画
+  vlmAnimationFrame = setTimeout(startVLMAnimation, 1500);
+}
+
+function updateHeatMap(tokenIndex) {
+  const heatContainer = document.getElementById('heat-spots');
+  
+  // 清除旧的热力点
+  while (heatContainer.firstChild) {
+    heatContainer.removeChild(heatContainer.firstChild);
+  }
+  
+  // 生成新的热力点（基于token位置）
+  const positions = [
+    { x: 25, y: 25 }, { x: 75, y: 25 },
+    { x: 25, y: 75 }, { x: 75, y: 75 },
+    { x: 50, y: 50 }
+  ];
+  
+  positions.forEach((pos, index) => {
+    // 根据注意力权重计算颜色（暖色高注意力，冷色低注意力）
+    const baseWeight = 0.3 + Math.sin(tokenIndex * 0.8 + index * 0.5) * 0.3;
+    const weight = Math.min(1, Math.max(0.1, baseWeight));
+    
+    const spot = document.createElement('div');
+    spot.className = 'heat-spot';
+    
+    // 暖色（红橙）= 高注意力，冷色（蓝紫）= 低注意力
+    const hue = weight > 0.6 ? 
+      (10 + (1 - weight) * 20) :  // 红橙色范围
+      (220 + (1 - weight) * 60);  // 蓝紫色范围
+    
+    spot.style.left = `${pos.x}%`;
+    spot.style.top = `${pos.y}%`;
+    spot.style.width = `${20 + weight * 30}%`;
+    spot.style.height = `${20 + weight * 30}%`;
+    spot.style.transform = 'translate(-50%, -50%)';
+    spot.style.background = `hsla(${hue}, 80%, ${50 + weight * 20}%, ${0.3 + weight * 0.3})`;
+    spot.style.boxShadow = `0 0 ${20 + weight * 20}px hsla(${hue}, 80%, 60%, ${0.3 + weight * 0.4})`;
+    
+    heatContainer.appendChild(spot);
+  });
+}
+
+function updateGridActivation(tokenIndex) {
+  const cells = document.querySelectorAll('.attention-grid-cell');
+  cells.forEach((cell, index) => {
+    // 根据token和cell位置计算激活状态
+    const activation = Math.sin(tokenIndex * 0.5 + index * 0.3) * 0.5 + 0.5;
+    cell.style.opacity = 0.3 + activation * 0.7;
+    cell.style.borderColor = activation > 0.5 ? 
+      'rgba(249, 115, 22, 0.4)' : 'rgba(0, 173, 239, 0.2)';
+    cell.style.background = activation > 0.5 ? 
+      'rgba(249, 115, 22, 0.08)' : 'rgba(0, 173, 239, 0.03)';
+  });
+}
+
+function hideVLMVisualization() {
+  vlmAnimationRunning = false;
+  if (vlmAnimationFrame) {
+    clearTimeout(vlmAnimationFrame);
+    vlmAnimationFrame = null;
+  }
+  
+  const vlmVis = document.getElementById('vlm-visualization');
+  const simplePreview = document.getElementById('simple-preview');
+  
+  vlmVis.style.display = 'none';
+  simplePreview.style.display = 'block';
+}
+
+async function uploadAndParsePhoto(file) {
+  const hint = document.getElementById('pp-hint');
+  if (hint) {
+    hint.textContent = '⏳ AI 正在识别...';
+  }
+  
+  try {
+    // 将文件转换为 base64
+    const base64Data = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    
+    // 获取语音辅助描述
+    const voiceText = document.getElementById('pp-voice-text').value.trim();
+    
+    const response = await fetch(API_BASE + '/parse-photo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: base64Data,
+        caption: voiceText,  // 将语音文本作为caption发送
+        projectId: currentProjectId,
+        areas: getProjectAreas() || [],
+        type: 'photo'
+      })
+    }).catch(error => {
+      throw new Error('网络错误: ' + error.message);
+    });
+    
+    if (!response.ok) {
+      throw new Error('HTTP ' + response.status);
+    }
+    
+    const result = await response.json();
+    
+    document.getElementById('pp-type').value = result.type || 'progress';
+    document.getElementById('pp-area').value = result.areaId || '';
+    document.getElementById('pp-task').value = result.taskHint || result.payload?.taskName || '';
+    document.getElementById('pp-owner').value = result.payload?.owner || '';
+    document.getElementById('pp-progress').value = result.payload?.progress || '';
+    document.getElementById('pp-headcount').value = result.payload?.headcount || '';
+    document.getElementById('pp-caption').value = result.caption || '';
+    document.getElementById('pp-confidence').textContent = `${(result.confidence * 100).toFixed(0)}%`;
+    if (hint) hint.textContent = result.source === 'llm' 
+      ? `🤖 LLM 真实识别 · ${(result.latencyMs || 0)}ms` 
+      : `⚙️ Mock 模式`;
+    
+    // 处理识别到的新区域
+    if (result.areaName && !result.areaId) {
+      showAreaConfirmDialog(result.areaName, 'pp-area');
+    }
+    
+  } catch (error) {
+    console.error('照片识别失败:', error);
+    // 降级到 mock
+    const voiceText = document.getElementById('pp-voice-text').value.trim();
+    const parsed = M.mockParsePhoto(voiceText, M.AREAS[currentProjectId] || []);
+    document.getElementById('pp-type').value = parsed.type || 'progress';
+    document.getElementById('pp-area').value = parsed.areaId || '';
+    document.getElementById('pp-task').value = parsed.taskHint || parsed.payload?.taskName || '';
+    document.getElementById('pp-owner').value = parsed.payload?.owner || '';
+    document.getElementById('pp-progress').value = parsed.payload?.progress || '';
+    document.getElementById('pp-headcount').value = parsed.payload?.headcount || '';
+    document.getElementById('pp-caption').value = parsed.caption || '';
+    document.getElementById('pp-confidence').textContent = `${(parsed.confidence * 100).toFixed(0)}%`;
+    if (hint) hint.textContent = `⚙️ Mock 模式（LLM 不可用）`;
+    
+    // 处理识别到的新区域
+    if (parsed.areaName && !parsed.areaId) {
+      showAreaConfirmDialog(parsed.areaName, 'pp-area');
+    }
+  }
+  
+  // 识别完成，隐藏VLM可视化动画
+  hideVLMVisualization();
+  
+  populateAreaSelects('pp-area');
+  document.getElementById('photoSaveBtn').disabled = false;
+}
+
+async function reparsePhoto() {
+  const previewImg = document.getElementById('photoPreviewImg');
+  if (!previewImg.src) {
+    showToast('请先上传照片', 'warning');
+    return;
+  }
+  
+  const hint = document.getElementById('pp-hint');
+  if (hint) hint.textContent = '⏳ AI 正在重新识别...';
+  
+  // 重新显示VLM可视化动画
+  showVLMVisualization();
+  
+  const base64Data = previewImg.src.split(',')[1];
+  
+  // 获取语音辅助描述
+  const voiceText = document.getElementById('pp-voice-text').value.trim();
+  
+  try {
+    const response = await fetch(API_BASE + '/parse-photo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: base64Data,
+        caption: voiceText,  // 将语音文本作为caption发送
+        projectId: currentProjectId,
+        areas: getProjectAreas() || [],
+        type: 'photo'
+      })
+    }).catch(error => {
+      throw new Error('网络错误: ' + error.message);
+    });
+    
+    if (!response.ok) {
+      throw new Error('HTTP ' + response.status);
+    }
+    
+    const result = await response.json();
+    
+    document.getElementById('pp-type').value = result.type || 'progress';
+    document.getElementById('pp-area').value = result.areaId || '';
+    document.getElementById('pp-task').value = result.taskHint || result.payload?.taskName || '';
+    document.getElementById('pp-owner').value = result.payload?.owner || '';
+    document.getElementById('pp-progress').value = result.payload?.progress || '';
+    document.getElementById('pp-headcount').value = result.payload?.headcount || '';
+    document.getElementById('pp-caption').value = result.caption || '';
+    document.getElementById('pp-confidence').textContent = `${(result.confidence * 100).toFixed(0)}%`;
+    if (hint) hint.textContent = result.source === 'llm' 
+      ? `🤖 LLM 重新识别成功 · ${(result.latencyMs || 0)}ms` 
+      : `⚙️ Mock 模式`;
+    showToast('重新识别完成', 'success');
+    
+    // 处理识别到的新区域
+    if (result.areaName && !result.areaId) {
+      showAreaConfirmDialog(result.areaName, 'pp-area');
+    }
+    
+  } catch (error) {
+    console.error('重新识别失败:', error);
+    // 降级到 mock
+    const parsed = M.mockParsePhoto();
+    document.getElementById('pp-type').value = parsed.type || 'progress';
+    document.getElementById('pp-area').value = parsed.areaId || '';
+    document.getElementById('pp-task').value = parsed.taskHint || '';
+    document.getElementById('pp-owner').value = '';
+    document.getElementById('pp-progress').value = '';
+    document.getElementById('pp-headcount').value = '';
+    document.getElementById('pp-caption').value = parsed.caption || '';
+    document.getElementById('pp-confidence').textContent = `${(parsed.confidence * 100).toFixed(0)}%`;
+    if (hint) hint.textContent = `⚙️ Mock 模式`;
+    showToast('重新识别失败，使用模拟数据', 'warning');
+  }
+  
+  // 识别完成，隐藏VLM可视化动画
+  hideVLMVisualization();
+  
+  populateAreaSelects('pp-area');
   document.getElementById('photoSaveBtn').disabled = false;
 }
 
 function savePhotoEvent() {
   const type = document.getElementById('pp-type').value;
-  const areaId = document.getElementById('pp-area-select').value;
+  const areaId = document.getElementById('pp-area').value;
   const note = document.getElementById('pp-note').value;
-  // 用选中日期而非固定 M.TODAY，这样新事件归到用户当前查看的日期
-  const eventDate = selectedDates.length > 0 ? selectedDates[0] : M.TODAY;
+  
+  if (!areaId) {
+    showToast('请选择区域', 'error');
+    return;
+  }
+  
+  // 获取日期：优先使用表单中的日期，否则使用选中日期，最后使用今天
+  const formDate = document.getElementById('pp-date').value;
+  const formTime = document.getElementById('pp-time').value;
+  const eventDate = formDate || (selectedDates.length > 0 ? selectedDates[0] : M.TODAY);
+  
+  // 获取表单字段
+  const taskName = document.getElementById('pp-task').value;
+  const owner = document.getElementById('pp-owner').value;
+  const progress = document.getElementById('pp-progress').value;
+  const headcount = parseInt(document.getElementById('pp-headcount').value) || 0;
+  const caption = document.getElementById('pp-caption').value;
 
   const event = {
     id: `E${String(Date.now()).slice(-3)}`,
     projectId: currentProjectId,
     date: eventDate,
-    time: new Date().toTimeString().slice(0, 5),
+    time: formTime || new Date().toTimeString().slice(0, 5),
     type,
     areaId,
     payload: {
-      checkType: type === 'safety' ? '日常巡检' : '进度记录',
+      taskName: taskName || caption || '拍照记录',
+      owner,
+      progress,
+      headcount,
+      description: caption,
       result: '正常'
     },
     submitter: '张明',
     source: 'photo',
-    confidence: 0.85,
+    confidence: parseFloat(document.getElementById('pp-confidence').textContent) / 100 || 0.85,
     status: 'draft',
-    photos: [{ id: `P${String(Date.now()).slice(-3)}`, caption: '现场照片', area: areaId }],
+    photos: [{ id: `P${String(Date.now()).slice(-3)}`, caption: caption || '现场照片', area: areaId }],
     note
   };
   
@@ -1428,8 +2400,8 @@ function savePhotoEvent() {
 
   closeModal('modalPhoto');
   renderFilteredEvents();
+  updateCalendar();
   renderStats();
-  if (typeof updateCalendar === 'function') updateCalendar();
   showToast('照片事件已保存', 'success');
 }
 
@@ -1437,8 +2409,83 @@ function savePhotoEvent() {
 // 手动录入
 // ============================================================
 function openManualInput() {
+  // 设置默认日期和时间：优先选中日期，否则今天；时间为当前时间
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const nowStr = `${String(today.getHours()).padStart(2, '0')}:${String(today.getMinutes()).padStart(2, '0')}`;
+  
+  const defaultDate = selectedDates.length > 0 ? selectedDates[0] : todayStr;
+  document.getElementById('m-date').value = defaultDate;
+  document.getElementById('m-time').value = nowStr;
+  
+  // 渲染当天的计划列表
+  renderPlanSelect(defaultDate);
+  
+  // 默认完成类型为计划内
+  document.getElementById('m-completion-type').value = 'planned';
+  
   renderManualForm();
+  populateAreaSelects('m-area');
   showModal('modalManual');
+}
+
+// 渲染计划选择列表
+function renderPlanSelect(dateStr) {
+  const projectPlans = M.PLANS[currentProjectId] || [];
+  
+  // 筛选出当天有效的计划
+  const dayPlans = projectPlans.filter(p => {
+    if (!p.startDate || !p.endDate || p.status === 'cancelled') return false;
+    return p.startDate <= dateStr && p.endDate >= dateStr;
+  });
+  
+  let html = '<option value="">无（计划外工作）</option>';
+  dayPlans.forEach(plan => {
+    html += `<option value="${plan.id}">📋 ${plan.process}${plan.buildingNo ? ' · ' + plan.buildingNo : ''}${plan.floorNo ? ' · ' + plan.floorNo : ''}</option>`;
+  });
+  
+  document.getElementById('m-plan').innerHTML = html;
+}
+
+// 选择计划后自动填充数据
+function onPlanSelect(planId) {
+  if (!planId) {
+    // 选择"无"，清空自动填充的数据，完成类型设为计划外
+    document.getElementById('m-completion-type').value = 'unplanned';
+    return;
+  }
+  
+  // 找到对应的计划
+  const projectPlans = M.PLANS[currentProjectId] || [];
+  const plan = projectPlans.find(p => p.id === planId);
+  
+  if (plan) {
+    // 自动填充计划数据到表单
+    if (plan.buildingNo) {
+      document.getElementById('m-building-no').value = plan.buildingNo;
+    }
+    if (plan.floorNo) {
+      document.getElementById('m-floor-no').value = plan.floorNo;
+    }
+    if (plan.area) {
+      document.getElementById('m-area').value = plan.area;
+    }
+    if (plan.process) {
+      document.getElementById('m-process').value = plan.process;
+    }
+    if (plan.owner) {
+      document.getElementById('m-owner').value = plan.owner;
+    }
+    if (plan.eventType) {
+      document.getElementById('m-type').value = plan.eventType;
+      renderManualForm(); // 重新渲染动态表单
+    }
+    
+    // 根据计划自动设置完成类型
+    document.getElementById('m-completion-type').value = 'planned';
+    
+    showToast('已自动填充计划数据', 'success');
+  }
 }
 
 function renderManualForm() {
@@ -1462,9 +2509,15 @@ function renderManualForm() {
             <input class="form-input" type="text" id="m-owner" placeholder="如：张师傅">
           </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">人数</label>
-          <input class="form-input" type="number" id="m-headcount" value="0" min="0">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">人数</label>
+            <input class="form-input" type="number" id="m-headcount" value="0" min="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">描述</label>
+            <input class="form-input" type="text" id="m-caption" placeholder="描述信息">
+          </div>
         </div>
       `;
       break;
@@ -1566,15 +2619,28 @@ function saveManualEvent() {
   const type = document.getElementById('m-type').value;
   const time = document.getElementById('m-time').value;
   const areaId = document.getElementById('m-area').value;
+  const planId = document.getElementById('m-plan').value;
+  const completionType = document.getElementById('m-completion-type').value;
+  
+  // 获取日期：优先使用表单中的日期，否则使用选中日期，最后使用今天
+  const formDate = document.getElementById('m-date').value;
+  const eventDate = formDate || (selectedDates.length > 0 ? selectedDates[0] : M.TODAY);
+  
+  // 获取新增字段
+  const buildingNo = document.getElementById('m-building-no').value;
+  const floorNo = document.getElementById('m-floor-no').value;
+  const process = document.getElementById('m-process').value;
+  const mainOwner = document.getElementById('m-owner').value;
   
   let payload = {};
   switch(type) {
     case 'progress':
       payload = {
         taskName: document.getElementById('m-task').value,
+        owner: mainOwner || document.getElementById('m-owner-field').value,
         progress: document.getElementById('m-progress').value,
-        owner: document.getElementById('m-owner').value,
-        headcount: parseInt(document.getElementById('m-headcount').value) || 0
+        headcount: parseInt(document.getElementById('m-headcount').value) || 0,
+        description: document.getElementById('m-caption').value
       };
       break;
     case 'material':
@@ -1613,10 +2679,16 @@ function saveManualEvent() {
   const event = {
     id: `E${String(Date.now()).slice(-3)}`,
     projectId: currentProjectId,
-    date: selectedDates.length > 0 ? selectedDates[0] : M.TODAY,
+    date: eventDate,
     time: time || new Date().toTimeString().slice(0, 5),
     type,
     areaId,
+    planId,
+    completionType,
+    buildingNo,
+    floorNo,
+    process,
+    owner: mainOwner,
     payload,
     submitter: '张明',
     source: 'manual',
@@ -1804,7 +2876,7 @@ function showToast(message, type = 'info') {
 // ============================================================
 // LLM 集成（追加 - 不影响原有逻辑）
 // ============================================================
-const API_BASE = 'http://localhost:3001/api';
+const API_BASE = 'http://192.168.2.105:3010/api';
 let lastSource = 'mock';
 let lastLatencyMs = 0;
 let backendOnline = false;
@@ -1835,7 +2907,7 @@ async function checkBackendHealth() {
     llmConfigured = false;
     dot.style.background = '#ef4444';
     label.textContent = '❌ 后端离线';
-    dot.title = '后端未启动（localhost:3001）';
+    dot.title = '后端未启动（localhost:3010）';
   }
 }
 

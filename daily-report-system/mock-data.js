@@ -496,7 +496,23 @@ function mockParseVoice(text, projectId) {
   const workerMatch = WORKERS.find(w => text.includes(w.name));
   if (workerMatch) {
     result.payload.owner = workerMatch.name;
-    result.payload.headcount = Math.max(1, Math.floor(Math.random() * 4) + 1);
+  }
+
+  // 提取人数（独立于负责人，支持多种表达方式）
+  const countMatch = text.match(/(\d+)\s*[人个名位]/);
+  if (countMatch) {
+    result.payload.headcount = parseInt(countMatch[1]);
+  } else if (text.includes('一人') || text.includes('一个人') || text.includes('一位')) {
+    result.payload.headcount = 1;
+  } else if (text.includes('两人') || text.includes('两个人') || text.includes('两位')) {
+    result.payload.headcount = 2;
+  } else if (text.includes('三人') || text.includes('三个人') || text.includes('三位')) {
+    result.payload.headcount = 3;
+  } else if (text.includes('几个人') || text.includes('几人')) {
+    result.payload.headcount = Math.floor(Math.random() * 3) + 2; // 2-4人
+  } else if (result.payload.owner) {
+    // 如果有负责人但没提取到人数，默认给1人
+    result.payload.headcount = 1;
   }
 
   // 提取进度百分比
@@ -518,10 +534,77 @@ function mockParseVoice(text, projectId) {
 }
 
 // 模拟"照片 → 元数据"
-function mockParsePhoto(areaHint) {
+function mockParsePhoto(caption, areas = AREAS[CURRENT_PROJECT_ID] || []) {
+  let taskHint = '施工任务';
+  let owner = '';
+  let progress = '';
+  let headcount = 0;
+  let areaId = '';
+  let areaName = '';
+  
+  if (caption) {
+    // 提取进度
+    const progressMatch = caption.match(/(\d+)\s*[%％]/);
+    if (progressMatch) {
+      progress = progressMatch[1] + '%';
+    }
+    
+    // 提取人数
+    const countMatch = caption.match(/(\d+)\s*[人个]/);
+    if (countMatch) {
+      headcount = parseInt(countMatch[1]);
+    }
+    
+    // 提取任务关键词
+    const taskKeywords = ['天花', '吊顶', '墙面', '地面', '电路', '水电', '木工', '油漆', '贴砖'];
+    for (const kw of taskKeywords) {
+      if (caption.includes(kw)) {
+        taskHint = kw + '施工';
+        break;
+      }
+    }
+    
+    // 智能匹配区域：从caption中查找区域名称
+    if (areas && areas.length > 0) {
+      for (const area of areas) {
+        if (caption.includes(area.name)) {
+          areaId = area.id;
+          break;
+        }
+      }
+    }
+    
+    // 如果没有匹配到已存在的区域，尝试提取新区域名
+    if (!areaId && caption) {
+      const areaKeywords = ['区域', '厅', '室', '区', '楼', '层', '车间', '仓库'];
+      for (const kw of areaKeywords) {
+        const regex = new RegExp(`([\\u4e00-\\u9fa5]+${kw})`);
+        const match = caption.match(regex);
+        if (match) {
+          areaName = match[1];
+          break;
+        }
+      }
+    }
+  }
+  
+  // 如果没有识别到区域，使用第一个区域作为默认
+  if (!areaId && areas && areas.length > 0) {
+    areaId = areas[0].id;
+  }
+  
   return {
-    caption: 'AI 自动生成描述：' + (areaHint || '施工现场'),
-    areaId: areaHint || (AREAS[CURRENT_PROJECT_ID]?.[0]?.id || 'A1'),
+    areaId: areaId || 'A1',
+    areaName,
+    caption: 'AI 自动生成描述：' + (caption || '施工现场'),
+    taskHint,
+    workType: '其他',
+    payload: {
+      taskName: taskHint,
+      owner,
+      progress,
+      headcount
+    },
     confidence: 0.80
   };
 }
