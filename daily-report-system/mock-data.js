@@ -145,7 +145,7 @@ const MILESTONE_PLANS = {
       nodeType: '次要节点',
       areaLabel: null,
       subItems: [
-        { seq: 1, label: '食堂',          text: '墙柱面基层封板（5.30）410评审后方案调整', targetMonth: 5 },
+        { seq: 1, label: '食堂',          text: '墙柱面基层封板（5.30）410评审后方案调整导致工期延后需与总包重新协调施工计划', targetMonth: 5 },
         { seq: 2, label: '高管',          text: '墙面基层施工（3.30）', targetMonth: 3 },
         { seq: 3, label: '健身房',        text: '墙柱面基层封板（5.30）410评审后方案调整', targetMonth: 5 },
         { seq: 4, label: '南塔咖啡厅',    text: '样板段评审（3.30）', targetMonth: 3 }
@@ -210,6 +210,44 @@ const MILESTONE_PLANS = {
       subItems: [
         { seq: 1, label: '北塔高管区', text: '北塔高管区（8.30）', targetMonth: 8 },
         { seq: 2, label: '北塔咖啡厅', text: '北塔咖啡厅：墙面木饰面（9.30）', targetMonth: 9 }
+      ]
+    },
+    {
+      id: 'MP009',
+      category: '精装',
+      nodeType: '关键节点',
+      areaLabel: null,
+      description: '天花吊顶完成',
+      targetMonth: 6, year: 2026
+    },
+    {
+      id: 'MP010',
+      category: '精装',
+      nodeType: '关键节点',
+      areaLabel: null,
+      description: '墙面基层完成',
+      targetMonth: 6, year: 2026
+    },
+    {
+      id: 'MP011',
+      category: '精装',
+      nodeType: '关键节点',
+      areaLabel: null,
+      description: '精装验收',
+      targetMonth: 7, year: 2026
+    },
+    {
+      id: 'MP012',
+      category: '精装',
+      nodeType: '次要节点',
+      areaLabel: null,
+      subItems: [
+        { seq: 1, label: '高管区',    text: '天花吊顶龙骨安装', targetMonth: 6 },
+        { seq: 2, label: '员工餐厅',  text: '墙面基层封板', targetMonth: 6 },
+        { seq: 3, label: '多功能厅',  text: '地面找平', targetMonth: 6 },
+        { seq: 4, label: '高管区',    text: '天花封板', targetMonth: 7 },
+        { seq: 5, label: '员工餐厅',  text: '墙面饰面板安装', targetMonth: 7 },
+        { seq: 6, label: '商业展示区', text: '地面石材铺贴', targetMonth: 7 }
       ]
     }
   ]
@@ -340,7 +378,7 @@ const EVENTS = [
     submitter: '李华',
     source: 'voice',
     confidence: 0.88,
-    status: 'draft',
+    status: 'confirmed',
     voiceText: '员工餐厅区天花吊顶龙骨安装，张师傅带了两个人在做，进度到 80% 了，今天接着搞',
     note: ''
   },
@@ -361,12 +399,172 @@ const EVENTS = [
     submitter: '张明',
     source: 'photo',
     confidence: 0.82,
-    status: 'draft',
+    status: 'confirmed',
     voiceText: '',
     photos: [
       { id: 'P001', caption: '高管区墙面基层处理现场', area: 'A1' }
     ],
     note: 'AI 自动识别为"墙面基层处理"，已确认'
+  },
+  {
+    id: 'E008',
+    projectId: 'baicaoyuan',
+    date: TODAY,
+    time: '11:00',
+    type: 'progress',
+    areaId: 'A1',
+    payload: {
+      taskName: '一层高管办公室龙骨吊顶',
+      progress: '100%',
+      status: '已完成',
+      owner: '鲍永春',
+      headcount: 4
+    },
+    submitter: '李华',
+    source: 'manual',
+    confidence: 1.0,
+    status: 'confirmed',
+    note: ''
+  },
+  {
+    id: 'E009',
+    projectId: 'baicaoyuan',
+    date: TODAY,
+    time: '11:30',
+    type: 'progress',
+    areaId: 'A1',
+    payload: {
+      taskName: '二层房间内地暖盘管',
+      progress: '100%',
+      status: '已完成',
+      owner: '鲍永春',
+      headcount: 3
+    },
+    submitter: '李华',
+    source: 'manual',
+    confidence: 1.0,
+    status: 'confirmed',
+    note: ''
+  },
+  {
+    id: 'E010',
+    projectId: 'baicaoyuan',
+    date: TODAY,
+    time: '13:00',
+    type: 'progress',
+    areaId: 'A1',
+    payload: {
+      taskName: '一层西侧走道龙骨吊顶',
+      progress: '80%',
+      status: '进行中',
+      owner: '鲍永春',
+      headcount: 2
+    },
+    submitter: '李华',
+    source: 'manual',
+    confidence: 1.0,
+    status: 'confirmed',
+    note: ''
+  },
+  {
+    id: 'E011',
+    projectId: 'baicaoyuan',
+    date: TODAY,
+    time: '13:30',
+    type: 'progress',
+    areaId: 'A1',
+    payload: {
+      taskName: '一层北侧走道龙骨吊顶',
+      progress: '80%',
+      status: '进行中',
+      owner: '鲍永春',
+      headcount: 2
+    },
+    submitter: '李华',
+    source: 'manual',
+    confidence: 1.0,
+    status: 'confirmed',
+    note: ''
+  },
+  {
+    id: 'E012',
+    projectId: 'baicaoyuan',
+    date: TODAY,
+    time: '14:30',
+    type: 'progress',
+    areaId: 'A1',
+    payload: {
+      taskName: '一二层墙面钢架及龙骨基层',
+      progress: '85%',
+      status: '进行中',
+      owner: '鲍永春',
+      headcount: 3
+    },
+    submitter: '李华',
+    source: 'manual',
+    confidence: 1.0,
+    status: 'confirmed',
+    note: ''
+  },
+  {
+    id: 'E013',
+    projectId: 'baicaoyuan',
+    date: TODAY,
+    time: '15:00',
+    type: 'progress',
+    areaId: 'A1',
+    payload: {
+      taskName: '首二层后勤区域地面砖铺贴',
+      progress: '90%',
+      status: '进行中',
+      owner: '鲍永春',
+      headcount: 4
+    },
+    submitter: '李华',
+    source: 'manual',
+    confidence: 1.0,
+    status: 'confirmed',
+    note: ''
+  },
+  {
+    id: 'E014',
+    projectId: 'baicaoyuan',
+    date: TODAY,
+    time: '15:30',
+    type: 'progress',
+    areaId: 'A1',
+    payload: {
+      taskName: '首二层地暖房间防水',
+      progress: '100%',
+      status: '已完成',
+      owner: '鲍永春',
+      headcount: 2
+    },
+    submitter: '李华',
+    source: 'manual',
+    confidence: 1.0,
+    status: 'confirmed',
+    note: ''
+  },
+  {
+    id: 'E015',
+    projectId: 'baicaoyuan',
+    date: TODAY,
+    time: '16:00',
+    type: 'progress',
+    areaId: 'A1',
+    payload: {
+      taskName: '首二层地暖房间回填',
+      progress: '100%',
+      status: '已完成',
+      owner: '鲍永春',
+      headcount: 3
+    },
+    submitter: '李华',
+    source: 'manual',
+    confidence: 1.0,
+    status: 'confirmed',
+    note: ''
   },
 
   // 中午 - 材料
@@ -1166,16 +1364,78 @@ function getPage03Data() {
   }));
 }
 
-// --- 页面 0301：重要节点 ---
+// --- 页面 0301：重要节点（可编辑） ---
+
+// 可编辑的里程碑数据（从 MILESTONE_PLANS 初始化）
+let MILESTONE_DATA = null;
+
+function initMilestoneData() {
+  if (MILESTONE_DATA) return;
+  const projectId = CURRENT_PROJECT_ID;
+  const plans = MILESTONE_PLANS[projectId] || [];
+  const monthSet = new Set();
+  plans.forEach(p => {
+    if (p.targetMonth) monthSet.add(p.targetMonth);
+    (p.subItems || []).forEach(s => { if (s.targetMonth) monthSet.add(s.targetMonth); });
+  });
+  const months = [...monthSet].sort((a, b) => a - b);
+  const year = (plans[0] && plans[0].year) || 2026;
+  const monthKeys = months.map(m => `${year}.${m}`);
+  const cats = {};
+  plans.forEach(p => {
+    if (!cats[p.category]) cats[p.category] = {};
+    if (p.nodeType === '关键节点') {
+      const val = (p.areaLabel || '') + ' ' + (p.description || '');
+      cats[p.category]['关键节点'] = { rowType: 'key', cells: { [`${year}.${p.targetMonth}`]: val.trim() } };
+    } else if (p.nodeType === '次要节点') {
+      const key = `${year}.${p.targetMonth}`;
+      const items = (p.subItems || []).map(s => `${s.label}：${s.text}`);
+      cats[p.category]['次要节点'] = cats[p.category]['次要节点'] || { rowType: 'sub', cells: {} };
+      cats[p.category]['次要节点'].cells[key] = (cats[p.category]['次要节点'].cells[key] || '') + items.join('\n');
+    }
+  });
+  const rows = [];
+  Object.keys(cats).forEach(major => {
+    Object.keys(cats[major]).forEach(row => {
+      const entry = { major, row, rowType: cats[major][row].rowType };
+      monthKeys.forEach(mk => { entry[mk] = cats[major][row].cells[mk] || ''; });
+      rows.push(entry);
+    });
+  });
+  MILESTONE_DATA = { months: monthKeys, rows };
+}
+
+function getMilestoneData() {
+  initMilestoneData();
+  return JSON.parse(JSON.stringify(MILESTONE_DATA));
+}
+
+function saveMilestoneData(data) {
+  MILESTONE_DATA = data;
+}
+
 function getPage0301Data(projectId) {
-  return (MILESTONE_PLANS[projectId] || []).map(mp => ({
-    category: mp.category,
-    nodeType: mp.nodeType,
-    areaLabel: mp.areaLabel,
-    description: mp.description,
-    targetMonth: mp.targetMonth,
-    subItems: mp.subItems || []
-  }));
+  initMilestoneData();
+  const { months, rows } = MILESTONE_DATA;
+  // 转成渲染器需要的格式
+  const cats = {};
+  rows.forEach(r => {
+    if (!cats[r.major]) cats[r.major] = { keyNodes: {}, subNodes: {} };
+    months.forEach(mk => {
+      const val = r[mk];
+      if (!val) return;
+      const mNum = parseInt(mk.split('.')[1], 10);
+      if (r.rowType === 'key') {
+        cats[r.major].keyNodes[mNum] = val;
+      } else {
+        if (!cats[r.major].subNodes[mNum]) cats[r.major].subNodes[mNum] = [];
+        cats[r.major].subNodes[mNum].push(val);
+      }
+    });
+  });
+  const year = parseInt(months[0]?.split('.')[0] || '2026', 10);
+  const monthNums = months.map(m => parseInt(m.split('.')[1], 10));
+  return { year, months: monthNums, categories: cats };
 }
 
 // --- 页面 06：人员统计 ---
@@ -1281,6 +1541,75 @@ function getPage12Data(projectId, onlyOpen = true) {
 }
 
 // ============================================================
+// 9a. 每日管理人员签到
+// ============================================================
+
+const DAILY_ATTENDANCE = {};
+
+function _formatDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function _getDateList(weekStart, weekEnd) {
+  const dates = [];
+  let d = new Date(weekStart);
+  const end = new Date(weekEnd);
+  while (d <= end) {
+    dates.push(_formatDate(d));
+    d.setDate(d.getDate() + 1);
+  }
+  return dates;
+}
+
+// 预生成过去两周的出勤数据（含缺勤模拟）
+(function _initMockAttendance() {
+  const today = new Date();
+  for (let i = -14; i <= 0; i++) {
+    const d = new Date(today);
+    d.setDate(d.getDate() + i);
+    const dateStr = _formatDate(d);
+    const rec = {};
+    MANAGEMENT_TEAM.forEach(m => { rec[m.id] = { present: true, reason: '' }; });
+    const dow = d.getDay();
+    if (dow === 3 || dow === 4) { // 周三/四：计划经理缺席
+      rec['MGR03'] = { present: false, reason: '事假' };
+    }
+    if (dow === 4 || dow === 5) { // 周四/五：预算员缺席
+      rec['MGR16'] = { present: false, reason: '病假' };
+    }
+    DAILY_ATTENDANCE[dateStr] = rec;
+  }
+})();
+
+function getAttendanceForDate(date) {
+  if (!DAILY_ATTENDANCE[date]) {
+    const rec = {};
+    MANAGEMENT_TEAM.forEach(m => { rec[m.id] = { present: true, reason: '' }; });
+    DAILY_ATTENDANCE[date] = rec;
+  }
+  return DAILY_ATTENDANCE[date];
+}
+
+function setAttendanceForDate(date, records) {
+  DAILY_ATTENDANCE[date] = records;
+}
+
+function getWeekAttendanceStats(weekStart, weekEnd) {
+  const dates = _getDateList(weekStart, weekEnd);
+  dates.forEach(d => getAttendanceForDate(d));
+  return MANAGEMENT_TEAM.map(m => {
+    const days = dates.map(d => DAILY_ATTENDANCE[d][m.id] || { present: false, reason: '' });
+    const presentDays = days.filter(d => d.present).length;
+    const reasons = days.filter(d => !d.present && d.reason).map(d => d.reason);
+    return {
+      id: m.id, position: m.position, name: m.name, phone: m.phone,
+      presentDays, totalDays: dates.length, fullAttendance: presentDays === dates.length,
+      absentReasons: [...new Set(reasons)]
+    };
+  });
+}
+
+// ============================================================
 // 10. 辅助函数
 // ============================================================
 
@@ -1315,5 +1644,7 @@ window.MockData = {
   TYPE_META, ISSUE_TYPE_META, PRIORITY_META, ISSUE_STATUS_META, MILESTONE_STATUS_META, SOURCE_META,
   mockParseVoice, mockParsePhoto, mockAggregateWeekly, getDailyEvents, getMonthlyStats,
   getPage01Data, getPage03Data, getPage0301Data, getPage04Data, getPage05Photos,
-  getPage06Data, getPage07Data, getPage08Data, getPage09Data, getPage10Data, getPage11Data, getPage12Data
+  getPage06Data, getPage07Data, getPage08Data, getPage09Data, getPage10Data, getPage11Data, getPage12Data,
+  DAILY_ATTENDANCE, getAttendanceForDate, setAttendanceForDate, getWeekAttendanceStats,
+  getMilestoneData, saveMilestoneData
 };

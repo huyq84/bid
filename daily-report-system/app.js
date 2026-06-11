@@ -2970,14 +2970,21 @@ function openWeeklyReportMapping() {
     input.value = M.TODAY;
     _updateWeekRangeDisplay();
   }
+  // 初始化区间选择器（默认当前周）
+  const rs = document.getElementById('reportRangeStart');
+  const re = document.getElementById('reportRangeEnd');
+  const wr = getWeekRange();
+  if (rs) { _reportRangeStart = wr.weekStart; rs.value = wr.weekStart; }
+  if (re) { _reportRangeEnd = wr.weekEnd; re.value = wr.weekEnd; }
+  _updateReportRangeDisplay();
   _applyTemplate();
-  switchMappingTab('04');
+  switchMappingTab('01');
 }
 
 const PAGE_HEADERS = {
   '02':   { title:'目录/Contents',        subtitle:'',                 pad:100 },
   '03':   { title:'一、组织架构',          subtitle:'到岗管理人员名单', pad:130 },
-  '0301': { title:'项目重要节点一览表',    subtitle:'项目重要节点',     pad:130 },
+  '0301': { title:'项目重要节点一览表',    subtitle:'项目重要节点',     pad:125 },
   '04':   { title:'二、上周工作完成情况',  subtitle:'2.1 上周重要工作完成', pad:130 },
   '05':   { title:'二、上周工作',          subtitle:'2.2 高管层现场工作', pad:130 },
   '06':   { title:'二、上周工作',          subtitle:'2.12 现场工作：人员统计', pad:130 },
@@ -2990,6 +2997,7 @@ const PAGE_HEADERS = {
 };
 
 function switchMappingTab(page) {
+  document.getElementById('pageFloatingControls').innerHTML = '';
   document.querySelectorAll('#reportPageNav button[data-page]').forEach(t => t.classList.remove('active'));
   const btn = document.querySelector(`#reportPageNav button[data-page="${page}"]`);
   if (btn) btn.classList.add('active');
@@ -3022,9 +3030,20 @@ function switchMappingTab(page) {
     const titleHtml = ph && ph.title
       ? `<div style="position:absolute;top:20px;left:72px;font-size:30px;font-weight:700;color:${hc};z-index:2;letter-spacing:2px;">${ph.title}</div>`
       : '';
+    // 0301 分页按钮嵌入副标题右侧（attendance-toggle-bar 使打印时隐藏）
+    const is0301Split = page === '0301' && _milestonePages.length > 1;
+    const totalP = _milestonePages.length;
+    const subBtnHtml = is0301Split
+      ? `<div class="attendance-toggle-bar" style="position:absolute;top:82px;left:365px;height:38px;line-height:38px;z-index:3;display:flex;align-items:center;gap:4px;">
+          ${_milestonePage > 0 ? `<button style="background:rgba(255,255,255,0.85);color:#374151;border:1px solid #d1d5db;border-radius:4px;padding:1px 10px;cursor:pointer;font-size:12px;font-weight:600;" onclick="_milestonePage=${_milestonePage-1};switchMappingTab('0301')">← 前页</button>` : ''}
+          <span style="color:#1f2937;font-size:12px;font-weight:600;">${_milestonePage+1}/${totalP}</span>
+          ${_milestonePage < totalP - 1 ? `<button style="background:rgba(255,255,255,0.85);color:#374151;border:1px solid #d1d5db;border-radius:4px;padding:1px 10px;cursor:pointer;font-size:12px;font-weight:600;" onclick="_milestonePage=${_milestonePage+1};switchMappingTab('0301')">后页 →</button>` : ''}
+        </div>`
+      : '';
     const subHtml = ph && ph.subtitle
       ? `<div style="position:absolute;top:82px;left:72px;width:285px;height:38px;background:linear-gradient(to right,#facc15,#f43f5e);z-index:2;border-radius:0 2px 2px 0;"></div>
-         <div style="position:absolute;top:82px;left:72px;height:38px;line-height:38px;padding-left:12px;color:#fff;font-size:16px;font-weight:700;z-index:3;letter-spacing:1px;">${ph.subtitle}</div>`
+         <div style="position:absolute;top:82px;left:72px;height:38px;line-height:38px;padding-left:12px;color:#fff;font-size:16px;font-weight:700;z-index:3;letter-spacing:1px;">${ph.subtitle}</div>
+         ${subBtnHtml}`
       : '';
     el.innerHTML = `<div class="report-page-frame${noBg}" style="width:1280px;height:720px;position:relative;overflow:hidden;${bgStyle}">
       <div class="report-page-header" style="position:absolute;top:0;left:0;right:0;height:75px;z-index:1;">
@@ -3039,6 +3058,9 @@ function switchMappingTab(page) {
 }
 
 function getWeekRange(dateStr) {
+  if (_reportRangeStart && _reportRangeEnd) {
+    return { weekStart: _reportRangeStart, weekEnd: _reportRangeEnd };
+  }
   const base = dateStr || _reportDate || M.TODAY;
   const today = new Date(base);
   const dayOfWeek = today.getDay();
@@ -3098,13 +3120,24 @@ function renderMappingPage01() {
 }
 
 function renderMappingPage02() {
+  const chapters = [
+    { num: '第一章', name: '组织架构' },
+    { num: '第二章', name: '上周工作' },
+    { num: '第三章', name: '下周计划' },
+    { num: '第四章', name: '工作计划' },
+    { num: '第五章', name: '协调事宜' }
+  ];
   document.getElementById('mappingContent').innerHTML = `
-    <div style="max-width:500px; margin:0 auto;">
-      <div style="display:flex; flex-direction:column; gap:12px;">
-        ${['第一章 组织架构','第二章 上周工作','第三章 下周计划','第四章 工作计划','第五章 协调事宜'].map((ch,i) => `
+    <div style="display:flex;flex-direction:column;align-items:center;padding-top:20px;">
+      <div style="font-size:48px;font-weight:700;color:#00a2ff;letter-spacing:8px;margin-bottom:32px;">目录</div>
+      <div style="display:flex; flex-direction:column; gap:14px; width:100%; max-width:520px;">
+        ${chapters.map((ch,i) => `
           <div style="display:flex; align-items:center;">
-            <div style="clip-path:polygon(25% 0%,75% 0%,100% 50%,75% 100%,25% 100%,0% 50%); width:44px; height:38px; background:#00adef; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:14px;">${i+1}</div>
-            <div style="flex:1; height:38px; background:#f1f5f9; margin-left:-10px; padding-left:24px; display:flex; align-items:center; border-radius:2px; font-size:15px; font-weight:600; color:#334155;">${ch}</div>
+            <div style="clip-path:polygon(17% 0%,83% 0%,100% 50%,83% 100%,17% 100%,0% 50%); width:80px; height:48px; background:#00a2ff; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:18px; z-index:10; box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);">${i+1}</div>
+            <div style="flex:1; height:44px; background:#f5f5f3; margin-left:-12px; padding-left:28px; display:flex; align-items:center; border-radius:2px; font-size:18px; font-weight:600; box-shadow:0 4px 15px rgba(0,0,0,0.15);">
+              <span style="color:#00a2ff;margin-right:12px;">${ch.num}</span>
+              <span style="color:#374151;">${ch.name}</span>
+            </div>
           </div>
         `).join('')}
       </div>
@@ -3112,91 +3145,444 @@ function renderMappingPage02() {
 }
 
 function renderMappingPage03() {
-  const rows = M.getPage03Data();
+  const fc = document.getElementById('pageFloatingControls');
+  const { weekStart, weekEnd } = getWeekRange();
+  const stats = M.getWeekAttendanceStats(weekStart, weekEnd);
+  const hasAbsent = stats.some(s => !s.fullAttendance);
+
+  fc.innerHTML = '';
+
+  const showReason = hasAbsent && _attendanceMode === 'actual';
+  const absentCount = stats.filter(s => !s.fullAttendance).length;
+  const toggleBtns = hasAbsent ? `
+    <span style="color:#f59e0b;font-size:11px;font-weight:500;">⚠️ ${absentCount}人未满勤</span>
+    <button style="background:${_attendanceMode==='full'?'#2563eb':'#fff'};color:${_attendanceMode==='full'?'#fff':'#374151'};border:1px solid ${_attendanceMode==='full'?'#2563eb':'#d1d5db'};border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;" onclick="_attendanceMode='full';renderMappingPage03()">按满勤统计</button>
+    <button style="background:${_attendanceMode==='actual'?'#2563eb':'#fff'};color:${_attendanceMode==='actual'?'#fff':'#374151'};border:1px solid ${_attendanceMode==='actual'?'#2563eb':'#d1d5db'};border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;" onclick="_attendanceMode='actual';renderMappingPage03()">按实际出勤</button>` : '';
+  const photoInner = _s03Photo
+    ? `<img src="${_s03Photo}" style="width:100%;height:100%;object-fit:contain;">`
+    : '<div style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;color:#94a3b8;font-size:13px;">🖼️ 项目现场</div>';
+
   document.getElementById('mappingContent').innerHTML = `
-    <div style="overflow-x:auto;">
-    <table style="width:100%; border-collapse:collapse; font-size:12px;">
-      <thead>
-        <tr style="background:#e2e8f0; color:#334155;">
-          <th style="padding:6px; border:1px solid #ccc; width:40px;">序号</th>
-          <th style="padding:6px; border:1px solid #ccc;">职务</th>
-          <th style="padding:6px; border:1px solid #ccc; width:70px;">姓名</th>
-          <th style="padding:6px; border:1px solid #ccc; width:110px;">联系电话</th>
-          <th style="padding:6px; border:1px solid #ccc; width:70px;">是否到岗</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rows.map((r,i) => `
-          <tr style="background:${i%2===0?'#fff':'#f8fafc'};">
-            <td style="padding:4px; border:1px solid #ccc; text-align:center;">${r.seq}</td>
-            <td style="padding:4px; border:1px solid #ccc;">${r.position}</td>
-            <td style="padding:4px; border:1px solid #ccc; text-align:center; font-weight:600;">${r.name}</td>
-            <td style="padding:4px; border:1px solid #ccc; text-align:center;">${r.phone}</td>
-            <td style="padding:4px; border:1px solid #ccc; text-align:center;">
-              <span style="background:#d1fae5; color:#065f46; padding:2px 8px; border-radius:4px; font-size:11px;">${r.attendance}</span>
-            </td>
-          </tr>
-        `).join('')}
-      </tbody>
-    </table></div>
-    <div style="margin-top:12px; text-align:center; font-size:12px; color:#94a3b8;">
-      📌 data source: M.MANAGEMENT_TEAM（23 人硬编码）· position 取代原有 role 字段
+    <div style="display:grid;grid-template-columns:7fr 5fr;gap:24px;height:100%;">
+      <div style="border:1px solid #d1d5db;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 10px;background:#f3f4f6;border-bottom:1px solid #d1d5db;">
+          <span style="font-weight:600;font-size:12px;">到岗管理人员名单</span>
+          <div class="attendance-toggle-bar" style="display:flex;align-items:center;gap:6px;">${toggleBtns}</div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:11px;">
+          <thead>
+            <tr style="background:#f3f4f6;">
+              <th style="padding:5px;border-right:1px solid #d1d5db;text-align:center;width:32px;">序号</th>
+              <th style="padding:5px;border-right:1px solid #d1d5db;text-align:center;">职务</th>
+              <th style="padding:5px;border-right:1px solid #d1d5db;text-align:center;width:60px;">姓名</th>
+              <th style="padding:5px;border-right:1px solid #d1d5db;text-align:center;width:95px;">联系电话</th>
+              <th style="padding:5px;border-right:1px solid #d1d5db;text-align:center;width:65px;">是否到岗</th>
+              <th style="padding:5px;text-align:center;width:80px;${showReason?'':'display:none'}">未到岗原因</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${stats.map((s, i) => {
+              const showPresent = _attendanceMode === 'full' || s.fullAttendance;
+              const absentDays = s.totalDays - s.presentDays;
+              const rowBg = i % 2 === 0 ? '#fff' : '#f9fafb';
+              return `
+              <tr style="background:${rowBg};">
+                <td style="padding:4px;border-right:1px solid #d1d5db;border-bottom:1px solid #e5e7eb;text-align:center;">${i+1}</td>
+                <td style="padding:4px;border-right:1px solid #d1d5db;border-bottom:1px solid #e5e7eb;">${s.position}</td>
+                <td style="padding:4px;border-right:1px solid #d1d5db;border-bottom:1px solid #e5e7eb;text-align:center;font-weight:600;">${s.name}</td>
+                <td style="padding:4px;border-right:1px solid #d1d5db;border-bottom:1px solid #e5e7eb;text-align:center;">${s.phone}</td>
+                <td style="padding:4px;border-right:1px solid #d1d5db;border-bottom:1px solid #e5e7eb;text-align:center;">
+                  <span style="background:${showPresent?'#d1fae5':'#fef3c7'};color:${showPresent?'#065f46':'#92400e'};padding:1px 6px;border-radius:3px;font-size:10px;">${showPresent?'已到岗':'未到岗'}</span>
+                </td>
+                <td style="padding:4px;border-bottom:1px solid #e5e7eb;text-align:center;font-size:10px;${showReason?'':'display:none'}">
+                  ${showPresent ? '<span style="color:#9ca3af;">—</span>' : `<span style="color:#92400e;">${s.absentReasons.length ? s.absentReasons.join('、') : '缺勤 '+absentDays+' 天'}</span>`}
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div style="flex:1;border-radius:12px;overflow:hidden;border:4px solid #fff;box-shadow:0 4px 16px rgba(0,0,0,0.15);background:#f1f5f9;display:flex;align-items:center;justify-content:center;overflow:hidden;">${photoInner}</div>
+        <div style="background:linear-gradient(90deg,#ffb84d,#ff4d4d);color:#fff;font-size:18px;font-weight:700;letter-spacing:2px;padding:6px 16px;border-radius:4px;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,0.1);">${_s03PhotoCaption}</div>
+      </div>
     </div>`;
 }
 
-function renderMappingPage0301() {
-  const items = M.getPage0301Data(currentProjectId);
-  const months = [3,4,5,6,7,8];
-  const keyNodes = items.filter(i => i.nodeType === '关键节点');
-  const subNodes = items.filter(i => i.nodeType === '次要节点');
-  // 按月份分组（关键节点）
-  const keyByMonth = {};
-  keyNodes.forEach(k => { keyByMonth[k.targetMonth] = k; });
-  // 次要节点按月份合并文本
-  const subByMonth = {};
-  subNodes.forEach(s => {
-    (s.subItems || []).forEach(si => {
-      if (!subByMonth[si.targetMonth]) subByMonth[si.targetMonth] = [];
-      subByMonth[si.targetMonth].push(`${si.label}：${si.text}`);
-    });
-  });
+// ============================================================
+// 重要节点编辑
+// ============================================================
 
-  let html = `
-    <div style="margin-bottom:10px; font-size:13px; color:#64748b;">
-      百草园项目重要节点时间线（软装·清尚）
-    </div>
-    <table style="width:100%; border-collapse:collapse; font-size:11px;">
+let _milestoneData = null;
+
+function openMilestoneEditor() {
+  _milestoneData = M.getMilestoneData();
+  _renderMilestoneEditor();
+  showModal('modalMilestone');
+}
+
+function _sanitize(str) {
+  return (str || '').replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function _renderMilestoneEditor() {
+  const { months, rows } = _milestoneData;
+  const body = document.getElementById('milestoneEditorBody');
+  body.querySelector('#cellZoomEditor').style.display = 'none';
+  body.querySelector('#cellTooltip').style.display = 'none';
+  let html = `<div style="font-size:11px;color:#64748b;margin-bottom:8px;">${months.length} 个月份列 · ${rows.length} 行</div>
+    <table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed;">
+      <colgroup><col style="width:80px"><col style="width:70px">${months.map(() => '<col>').join('')}</colgroup>
       <thead>
-        <tr style="background:#3b82f6; color:#fff;">
-          <th style="padding:6px; border:1px solid #999; width:50px;">专业</th>
-          <th style="padding:6px; border:1px solid #999; width:60px;">节点</th>
-          ${months.map(m => `<th style="padding:6px; border:1px solid #999;">2026.${m}</th>`).join('')}
+        <tr style="background:#3b82f6;color:#fff;">
+          <th style="padding:4px;border:1px solid #94a3b8;text-align:center;">专业</th>
+          <th style="padding:4px;border:1px solid #94a3b8;text-align:center;">节点</th>
+          ${months.map((m, mi) => `
+            <th style="padding:3px;border:1px solid #94a3b8;text-align:center;font-weight:400;position:relative;">
+              <span class="s0301-month-lbl" data-idx="${mi}" title="点击修改月份" style="cursor:pointer;">${m}</span>
+              <button onclick="s0301DelMonth(${mi})" style="position:absolute;top:1px;right:2px;background:none;border:none;color:rgba(255,255,255,0.7);cursor:pointer;font-size:10px;" title="删除该列">×</button>
+            </th>`).join('')}
         </tr>
       </thead>
-      <tbody>
-        <tr>
-          <td style="text-align:center; vertical-align:middle; background:#cbd5e1; font-weight:600; border:1px solid #999;" rowspan="2">
-            软装<br>(清尚)
+      <tbody>${rows.map((r, ri) => {
+        const catRows = rows.filter(rr => rr.major === r.major);
+        const firstIdx = rows.indexOf(catRows[0]);
+        const rowspan = catRows.length;
+        const majorEsc = _sanitize(r.major);
+        const rowEsc = _sanitize(r.row);
+        const majorCell = ri === firstIdx
+          ? `<td style="text-align:center;vertical-align:middle;background:#cbd5e1;font-weight:600;border:1px solid #94a3b8;" rowspan="${rowspan}">
+               <div style="display:flex;flex-direction:column;align-items:center;gap:2px;">
+                 <span class="s0301-major-lbl" data-major="${majorEsc}" title="点击修改专业名" style="cursor:pointer;">${r.major}</span>
+                 <button onclick="s0301DelMajor('${majorEsc}')" style="background:#ef4444;color:#fff;border:none;border-radius:3px;padding:1px 6px;cursor:pointer;font-size:10px;">×</button>
+               </div>
+             </td>`
+          : '';
+        const rowBg = r.rowType === 'key' ? '#f1f5f9' : '#fefce8';
+        return `<tr>${majorCell}
+          <td style="text-align:center;background:${rowBg};font-weight:600;border:1px solid #94a3b8;font-size:11px;">
+            <div style="display:flex;align-items:center;gap:2px;justify-content:center;">
+              <span class="s0301-row-lbl" data-major="${majorEsc}" data-row="${rowEsc}" title="点击修改行名" style="cursor:pointer;">${r.row}</span>
+              <button onclick="s0301DelRow('${majorEsc}','${rowEsc}')" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:12px;" title="删除该行">×</button>
+            </div>
           </td>
-          <td style="text-align:center; background:#f1f5f9; font-weight:600; border:1px solid #999;">关键节点</td>
-          ${months.map(m => {
-            const k = keyByMonth[m];
-            return `<td style="border:1px solid #999; padding:4px; vertical-align:top;">${k ? `${k.areaLabel} ${k.description}` : ''}</td>`;
+          ${months.map(mk => {
+            const val = r[mk] || '';
+            const escapedVal = _sanitize(val);
+            return `<td style="border:1px solid #94a3b8;padding:2px;background:rgba(255,255,255,0.8);">
+              <textarea class="s0301-cell-ta" data-ri="${ri}" data-mk="${mk}" style="width:100%;border:none;resize:none;font-size:10px;background:transparent;min-height:32px;overflow:hidden;" ondblclick="openCellZoom(${ri},'${mk}')" onfocus="showCellTooltip(this)" onblur="hideCellTooltip()" oninput="autoResizeTA(this);_milestoneData.rows[${ri}]['${mk}']=this.value">${escapedVal}</textarea>
+            </td>`;
           }).join('')}
-        </tr>
-        <tr>
-          <td style="text-align:center; background:#f1f5f9; font-weight:600; vertical-align:middle; border:1px solid #999;">次要节点</td>
-          ${months.map(m => {
-            const subs = subByMonth[m];
-            return `<td style="border:1px solid #999; padding:4px; vertical-align:top; font-size:10px; line-height:1.6;">${subs ? subs.join('<br>') : ''}</td>`;
-          }).join('')}
-        </tr>
-      </tbody>
-    </table>
-    <div style="margin-top:12px; text-align:center; font-size:12px; color:#94a3b8;">
-      📌 data source: M.MILESTONE_PLANS（Mock 数据，结构与周报完全对齐）
-    </div>`;
-  document.getElementById('mappingContent').innerHTML = html;
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+  body.innerHTML = html + body.querySelector('#cellZoomEditor').outerHTML + body.querySelector('#cellTooltip').outerHTML;
+
+  // 绑定修改月份标签
+  body.querySelectorAll('.s0301-month-lbl').forEach(el => {
+    el.onclick = async function() {
+      const idx = parseInt(this.dataset.idx, 10);
+      const newVal = await showPrompt('修改月份标签（如 2026.6）：', _milestoneData.months[idx]);
+      if (!newVal || !newVal.trim()) return;
+      const oldKey = _milestoneData.months[idx];
+      const newKey = newVal.trim();
+      if (oldKey === newKey) return;
+      _milestoneData.months[idx] = newKey;
+      _milestoneData.rows.forEach(r => { r[newKey] = r[oldKey]; delete r[oldKey]; });
+      _renderMilestoneEditor();
+    };
+  });
+  // 绑定修改专业名
+  body.querySelectorAll('.s0301-major-lbl').forEach(el => {
+    el.onclick = async function() {
+      const old = this.dataset.major;
+      const newVal = await showPrompt('修改专业名称：', old);
+      if (!newVal || !newVal.trim() || newVal.trim() === old) return;
+      _milestoneData.rows.forEach(r => { if (r.major === old) r.major = newVal.trim(); });
+      _renderMilestoneEditor();
+    };
+  });
+  // 绑定修改行名
+  body.querySelectorAll('.s0301-row-lbl').forEach(el => {
+    el.onclick = async function() {
+      const major = this.dataset.major;
+      const old = this.dataset.row;
+      const newVal = await showPrompt('修改行名称：', old);
+      if (!newVal || !newVal.trim() || newVal.trim() === old) return;
+      _milestoneData.rows.forEach(r => { if (r.major === major && r.row === old) r.row = newVal.trim(); });
+      _renderMilestoneEditor();
+    };
+  });
+}
+
+function autoResizeTA(el) {
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+}
+
+function showCellTooltip(el) {
+  if (el.scrollHeight <= el.clientHeight && el.value.length < 50) return;
+  const tooltip = document.getElementById('cellTooltip');
+  tooltip.textContent = el.value || '(空)';
+  const rect = el.getBoundingClientRect();
+  const bodyRect = document.getElementById('milestoneEditorBody').getBoundingClientRect();
+  tooltip.style.left = (rect.left - bodyRect.left) + 'px';
+  tooltip.style.top = (rect.bottom - bodyRect.top + 4) + 'px';
+  tooltip.style.display = 'block';
+}
+
+function hideCellTooltip() {
+  setTimeout(() => { document.getElementById('cellTooltip').style.display = 'none'; }, 200);
+}
+
+let _cellZoomCallback = null;
+
+function openCellZoom(ri, mk) {
+  const editor = document.getElementById('cellZoomEditor');
+  document.getElementById('cellZoomLabel').textContent = `编辑内容 - ${mk}`;
+  const ta = document.getElementById('cellZoomTextarea');
+  ta.value = _milestoneData.rows[ri][mk] || '';
+  ta.style.height = '120px';
+  _cellZoomCallback = function(val) { _milestoneData.rows[ri][mk] = val; };
+  editor.style.display = 'block';
+  ta.focus();
+}
+
+function closeCellZoom() {
+  document.getElementById('cellZoomEditor').style.display = 'none';
+  _cellZoomCallback = null;
+}
+
+function saveCellZoom() {
+  if (_cellZoomCallback) _cellZoomCallback(document.getElementById('cellZoomTextarea').value);
+  closeCellZoom();
+  _renderMilestoneEditor();
+}
+
+async function s0301AddMajor() {
+  const name = await showPrompt('输入新专业名称（如：精装）');
+  if (!name || !name.trim()) return;
+  _milestoneData.rows.push({ major: name.trim(), row: '关键节点', rowType: 'key' });
+  _milestoneData.rows.push({ major: name.trim(), row: '次要节点', rowType: 'sub' });
+  _milestoneData.months.forEach(mk => {
+    _milestoneData.rows[_milestoneData.rows.length-2][mk] = '';
+    _milestoneData.rows[_milestoneData.rows.length-1][mk] = '';
+  });
+  _renderMilestoneEditor();
+}
+
+async function s0301DelMajor(major) {
+  const ok = await showConfirm(`删除专业「${major}」及其所有行？`, '删除专业', '🗑️');
+  if (!ok) return;
+  _milestoneData.rows = _milestoneData.rows.filter(r => r.major !== major);
+  _renderMilestoneEditor();
+}
+
+function s0301AddMonth() {
+  const last = _milestoneData.months[_milestoneData.months.length - 1] || `${new Date().getFullYear()}.${new Date().getMonth()+1}`;
+  const parts = last.split('.');
+  let y = parseInt(parts[0], 10), m = parseInt(parts[1], 10) + 1;
+  if (m > 12) { m = 1; y++; }
+  const newMonth = `${y}.${m}`;
+  _milestoneData.months.push(newMonth);
+  _milestoneData.rows.forEach(r => { r[newMonth] = ''; });
+  _renderMilestoneEditor();
+}
+
+async function s0301DelMonth(idx) {
+  const mk = _milestoneData.months[idx];
+  const ok = await showConfirm(`删除月份列「${mk}」？`, '删除列', '🗑️');
+  if (!ok) return;
+  _milestoneData.months.splice(idx, 1);
+  _milestoneData.rows.forEach(r => delete r[mk]);
+  _renderMilestoneEditor();
+}
+
+async function s0301DelRow(major, row) {
+  const ok = await showConfirm(`删除行「${row}」？`, '删除行', '🗑️');
+  if (!ok) return;
+  _milestoneData.rows = _milestoneData.rows.filter(r => !(r.major === major && r.row === row));
+  _renderMilestoneEditor();
+}
+
+function s0301Save() {
+  M.saveMilestoneData(_milestoneData);
+  const activeBtn = document.querySelector('#reportPageNav button.active[data-page]');
+  if (activeBtn && activeBtn.dataset.page === '0301') switchMappingTab('0301');
+}
+
+function _smartWrap(text) {
+  if (!text) return '';
+  const lines = text.split('\n');
+  return lines.map(line => {
+    const raw = line.replace(/<[^>]+>/g, '').trim();
+    if (!raw) return line;
+    const len = raw.length;
+    if (len <= 35) return line;
+    // 找标点断点：从 28-34 字之间找 ，、；：。！？
+    let breakAt = -1;
+    for (let i = 34; i >= 28; i--) {
+      const ch = raw[i];
+      if (ch && '，、；：。！？；：'.includes(ch)) { breakAt = i + 1; break; }
+    }
+    if (breakAt < 0) {
+      // 没标点就找空格或数字后
+      for (let i = 34; i >= 28; i--) {
+        const ch = raw[i];
+        if (ch === ' ' || ch === '\t') { breakAt = i + 1; break; }
+        if (i < len - 1 && /\d/.test(ch) && !/\d/.test(raw[i+1])) { breakAt = i + 1; break; }
+      }
+    }
+    if (breakAt > 0 && breakAt < len) {
+      const head = raw.slice(0, breakAt);
+      const tail = raw.slice(breakAt);
+      return head + '\n' + tail;
+    }
+    return line;
+  }).join('\n');
+}
+
+let _milestonePage = 0;
+let _milestonePages = []; // [{html, months}]
+
+function _estimateTextWidth(text, fontSize) {
+  if (!text) return 0;
+  let w = 0;
+  for (const ch of text) {
+    w += ch.charCodeAt(0) > 127 ? fontSize * 1.15 : fontSize * 0.65;
+  }
+  return w + 12;
+}
+
+function _calcColWidths(monthList, categories, catNames) {
+  const availWidth = 1280 - 60 - 70 - 65;
+  const colWidths = {};
+  monthList.forEach(m => {
+    let maxW = 0;
+    catNames.forEach(cat => {
+      const c = categories[cat];
+      if (c.keyNodes && c.keyNodes[m]) maxW = Math.max(maxW, _estimateTextWidth(c.keyNodes[m], 11));
+      if (c.subNodes && c.subNodes[m]) {
+        c.subNodes[m].forEach(t => maxW = Math.max(maxW, _estimateTextWidth(t, 10)));
+      }
+    });
+    colWidths[m] = Math.min(Math.max(maxW, 60), availWidth / monthList.length * 2.0);
+  });
+  const totalEst = Object.values(colWidths).reduce((a, b) => a + b, 0);
+  if (totalEst > 0) {
+    monthList.forEach(m => { colWidths[m] = Math.round(colWidths[m] / totalEst * availWidth); });
+  }
+  return colWidths;
+}
+
+function _estimateTableHeight(monthList, categories, catNames, colWidths) {
+  let h = 32;
+  catNames.forEach(cat => {
+    const c = categories[cat];
+    const hasSub = Object.keys(c.subNodes || {}).length > 0;
+
+    let maxKeyLines = 0;
+    monthList.forEach(m => {
+      const val = (c.keyNodes && c.keyNodes[m]) || '';
+      if (val) {
+        const tw = _estimateTextWidth(val, 11);
+        const cw = colWidths[m] || 100;
+        maxKeyLines = Math.max(maxKeyLines, Math.ceil(tw / cw));
+      }
+    });
+    h += Math.max(maxKeyLines * 19 + 8, 28);
+
+    if (hasSub) {
+      let maxSubLines = 0;
+      monthList.forEach(m => {
+        const items = (c.subNodes && c.subNodes[m]) || [];
+        if (items.length === 0) return;
+        const cw = colWidths[m] || 100;
+        let lines = 0;
+        items.forEach(t => {
+          const tw = _estimateTextWidth(t, 10);
+          lines += Math.ceil(tw / cw);
+        });
+        maxSubLines = Math.max(maxSubLines, lines);
+      });
+      h += Math.max(maxSubLines * 19 + 8, 25);
+    }
+  });
+  return Math.round(h * 1.2);
+}
+
+function _gen0301Table(year, monthList, categories, catNames, colWidths) {
+  const monthLabels = monthList.map(m => `\u2009${year}. ${m}\u2009`);
+  const colgroup = `<colgroup><col style="width:70px"><col style="width:65px">${monthList.map(m => `<col style="width:${colWidths[m]}px">`).join('')}</colgroup>`;
+  const thead = `<thead><tr style="background:#3b82f6;color:#fff;">
+    <th style="padding:6px;border:1px solid #94a3b8;width:70px;text-align:center;">专业</th>
+    <th style="padding:6px;border:1px solid #94a3b8;width:65px;text-align:center;">节点</th>
+    ${monthLabels.map(l => `<th style="padding:6px;border:1px solid #94a3b8;text-align:center;font-weight:400;padding-left:10px;padding-right:10px;">${l}</th>`).join('')}
+  </tr></thead>`;
+  const tbody = catNames.map(cat => {
+    const c = categories[cat];
+    const keyMonths = c.keyNodes || {};
+    const subMonths = c.subNodes || {};
+    const hasSub = Object.keys(subMonths).length > 0;
+    const rowspan = hasSub ? 2 : 1;
+    const catCell = `<td style="text-align:center;vertical-align:middle;background:#cbd5e1;font-weight:600;border:1px solid #94a3b8;font-size:12px;" rowspan="${rowspan}">${cat}</td>`;
+    const keyCells = monthList.map(m => {
+      const val = keyMonths[m];
+      return `<td style="border:1px solid #94a3b8;padding:4px;vertical-align:top;background:rgba(255,255,255,0.8);font-size:11px;white-space:pre-wrap;">${val || '\u00A0'}</td>`;
+    }).join('');
+    const keyRow = `<tr>${catCell}<td style="text-align:center;background:#f1f5f9;font-weight:600;border:1px solid #94a3b8;font-size:11px;">关键节点</td>${keyCells}</tr>`;
+    if (!hasSub) return keyRow;
+    const subCells = monthList.map(m => {
+      const items = subMonths[m];
+      return `<td style="border:1px solid #94a3b8;padding:4px;vertical-align:top;background:rgba(255,255,255,0.8);font-size:10px;line-height:1.7;white-space:pre-wrap;">${items ? items.join('<br>') : '\u00A0'}</td>`;
+    }).join('');
+    return keyRow + `<tr><td style="text-align:center;background:#f1f5f9;font-weight:600;border:1px solid #94a3b8;font-size:11px;">次要节点</td>${subCells}</tr>`;
+  }).join('');
+  return `<table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed;">${colgroup}${thead}<tbody>${tbody}</tbody></table>`;
+}
+
+function renderMappingPage0301() {
+  const data = M.getPage0301Data(currentProjectId);
+  const el = document.getElementById('mappingContent');
+  if (!data || !data.categories) { el.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8;">暂无节点数据</div>'; _milestonePages = []; return; }
+
+  const { year, months, categories } = data;
+  const catNames = Object.keys(categories);
+  const availHeight = 720 - 125 - 20;
+
+  _milestonePages = [];
+
+  // 辅助：将 (月份子集, 专业子集) 拆成不超高的一组页面
+  function addPages(monthList, cats, catKeys) {
+    const cw = _calcColWidths(monthList, cats, catKeys);
+    const h = _estimateTableHeight(monthList, cats, catKeys, cw);
+    if (h <= availHeight) {
+      _milestonePages.push({ html: _gen0301Table(year, monthList, cats, catKeys, cw) });
+      return;
+    }
+    // 先高度（切专业）
+    if (catKeys.length > 1) {
+      catKeys.forEach(k => {
+        const m = {}; m[k] = cats[k];
+        addPages(monthList, m, [k]);
+      });
+      return;
+    }
+    // 再宽度（切月份）
+    if (monthList.length > 1) {
+      const mid = Math.ceil(monthList.length / 2);
+      addPages(monthList.slice(0, mid), cats, catKeys);
+      addPages(monthList.slice(mid), cats, catKeys);
+      return;
+    }
+    // 最后兜底：1专业 × 1月份，不可能超高
+    _milestonePages.push({ html: _gen0301Table(year, monthList, cats, catKeys, cw) });
+  }
+
+  addPages(months, categories, catNames);
+
+  if (_milestonePage >= _milestonePages.length) _milestonePage = 0;
+  el.innerHTML = _milestonePages[_milestonePage] ? _milestonePages[_milestonePage].html : '<div style="padding:40px;text-align:center;color:#94a3b8;">暂无数据</div>';
 }
 
 function renderMappingPage04() {
@@ -3214,45 +3600,43 @@ function renderMappingPage04() {
   }
 
   let html = `
-    <div style="margin-bottom:12px; font-size:13px; color:#64748b;">
-      数据源：本周 ${weekStart} ~ ${weekEnd} 已确认的进度事件
-      <span style="margin-left:12px; font-weight:600; color:#0f172a;">共 ${rows.length} 行</span>
-    </div>
-    <table class="mapping-table" style="width:100%; border-collapse:collapse; font-size:13px;">
-      <thead>
-        <tr style="background:#00adef; color:#fff;">
-          <th style="padding:8px; border:1px solid #ccc; width:50px;">序号</th>
-          <th style="padding:8px; border:1px solid #ccc;">计划事项及完成情况</th>
-          <th style="padding:8px; border:1px solid #ccc; width:100px;">责任人</th>
-        </tr>
-      </thead>
-      <tbody>`;
+    <div style="background:rgba(255,255,255,0.9);border-radius:8px;overflow:hidden;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);border:1px solid #005e00;">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead>
+          <tr style="background:#00a2ff;color:#fff;">
+            <th style="padding:8px;border-right:1px solid #005e00;width:64px;">序号</th>
+            <th style="padding:8px 16px;border-right:1px solid #005e00;text-align:left;">计划事项及完成情况</th>
+            <th style="padding:8px;border-right:1px solid #005e00;width:144px;">责任人</th>
+          </tr>
+        </thead>
+        <tbody>`;
   rows.forEach(r => {
     if (r.type === 'header') {
       html += `
         <tr style="background:#e0f2fe;">
-          <td style="padding:6px 8px; border:1px solid #ccc; text-align:center; font-weight:600; color:#006494;"></td>
-          <td style="padding:6px 8px; border:1px solid #ccc; font-weight:600; color:#006494;" colspan="2">${r.text}</td>
+          <td style="padding:6px 8px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;text-align:center;font-weight:600;color:#006494;"></td>
+          <td style="padding:6px 16px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;font-weight:600;color:#006494;" colspan="2">${r.text}</td>
         </tr>`;
     } else {
-      const bg = r.seq % 2 === 0 ? '#f8fafc' : '#fff';
+      const bg = r.seq % 2 === 0 ? '#e7f0ff' : '#cbe0ff';
       html += `
         <tr style="background:${bg};">
-          <td style="padding:6px 8px; border:1px solid #ccc; text-align:center;">${r.seq}</td>
-          <td style="padding:6px 8px; border:1px solid #ccc;">${r.text}</td>
-          <td style="padding:6px 8px; border:1px solid #ccc; text-align:center;">${r.owner}</td>
+          <td style="padding:6px 8px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;text-align:center;">${r.seq}</td>
+          <td style="padding:6px 16px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;">${r.text}</td>
+          <td style="padding:6px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;text-align:center;">${r.owner}</td>
         </tr>`;
     }
   });
-  html += `</tbody></table>`;
+  html += `</tbody></table></div>`;
   document.getElementById('mappingContent').innerHTML = html;
 }
 
 function renderMappingPage05() {
   const { weekStart, weekEnd } = getWeekRange();
   const photos = M.getPage05Photos(currentProjectId, weekStart, weekEnd);
+  const count = Math.min(photos.length, 6);
 
-  if (photos.length === 0) {
+  if (count === 0) {
     document.getElementById('mappingContent').innerHTML = `
       <div style="text-align:center; padding:40px 0; color:#94a3b8;">
         <div style="font-size:40px;">📷</div>
@@ -3262,24 +3646,17 @@ function renderMappingPage05() {
     return;
   }
 
-  let html = `
-    <div style="margin-bottom:12px; font-size:13px; color:#64748b;">
-      数据源：本周 ${weekStart} ~ ${weekEnd} 事件中的照片
-      <span style="margin-left:12px; font-weight:600; color:#0f172a;">共 ${photos.length} 张</span>
-    </div>
-    <div style="display:grid; grid-template-columns:repeat(${Math.min(photos.length, 3)}, 1fr); gap:12px;">`;
-  photos.forEach(p => {
+  const cols = Math.min(count, 3);
+  let html = `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:12px;height:100%;">`;
+  for (let i = 0; i < count; i++) {
+    const p = photos[i];
     html += `
-      <div style="border:1px solid #e2e8f0; border-radius:6px; overflow:hidden;">
-        <div style="background:#f1f5f9; height:120px; display:flex; align-items:center; justify-content:center; color:#94a3b8; font-size:12px;">
-          📷 ${p.id}（Mock 图片占位）
-        </div>
-        <div style="padding:6px 10px; font-size:12px; color:#475569;">
-          <div style="font-weight:600;">${p.caption}</div>
-          <div style="color:#94a3b8;">区域：${p.area} | 类型：${M.TYPE_META[p.eventType]?.label || p.eventType}</div>
+      <div style="border:1px solid #ccc;overflow:hidden;background:#fff;">
+        <div style="height:100%;display:flex;align-items:center;justify-content:center;background:#f1f5f9;color:#94a3b8;font-size:12px;min-height:140px;">
+          🖼️ ${p.caption || '现场照片'}
         </div>
       </div>`;
-  });
+  }
   html += `</div>`;
   document.getElementById('mappingContent').innerHTML = html;
 }
@@ -3287,106 +3664,111 @@ function renderMappingPage05() {
 function renderMappingPage06() {
   const { weekStart, weekEnd } = getWeekRange();
   const rows = M.getPage06Data(currentProjectId, weekStart, weekEnd);
+  const s06photo = M.S06_PHOTO || { src: '', caption: '防高坠专项安全会' };
   document.getElementById('mappingContent').innerHTML = `
-    <div style="margin-bottom:10px; font-size:13px; color:#64748b;">
-      本周各工种人数统计
-      <span style="margin-left:12px; font-weight:600; color:#0f172a;">${rows.length} 行</span>
-      <span style="margin-left:8px; font-size:12px; color:#94a3b8;">数据源：日计划 laborRequirements</span>
-    </div>
-    <table style="width:100%; border-collapse:collapse; font-size:12px;">
-      <thead>
-        <tr style="background:#00a2ff; color:#fff;">
-          <th style="padding:6px; border:1px solid #005e00; width:40px;">序号</th>
-          <th style="padding:6px; border:1px solid #005e00;">工种</th>
-          <th style="padding:6px; border:1px solid #005e00; width:80px;">本周人数</th>
-          <th style="padding:6px; border:1px solid #005e00; width:80px;">下周人数</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rows.map((r,i) => {
-          const isTotal = r.trade === '合计';
-          const bg = isTotal ? 'rgba(0,162,255,0.1)' : (i%2===0?'#cbe0ff':'#e7f0ff');
-          const fw = isTotal ? '700' : '400';
-          return `<tr style="background:${bg};">
-            <td style="padding:4px; border:1px solid #005e00; text-align:center; font-weight:${fw};">${r.seq}</td>
-            <td style="padding:4px; border:1px solid #005e00; text-align:center; font-weight:${fw};">${r.trade}</td>
-            <td style="padding:4px; border:1px solid #005e00; text-align:center;">${r.thisWeek}</td>
-            <td style="padding:4px; border:1px solid #005e00; text-align:center;">${r.nextWeek}</td>
-          </tr>`;
-        }).join('')}
-      </tbody>
-    </table>
-    <div style="margin-top:12px; text-align:center; font-size:12px; color:#94a3b8;">
-      📌 日报 laborRequirements 仅覆盖部分工种，剩余行用占位符 "—" 显示
+    <div style="display:flex;gap:24px;height:100%;">
+      <div style="flex:1;display:flex;flex-direction:column;gap:16px;">
+        <div style="background:#fff;padding:8px;border:1px solid #d1d5db;border-radius:2px;flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;">
+          <div style="width:100%;aspect-ratio:4/3;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:13px;">
+            🖼️ ${s06photo.src || '施工现场'}
+          </div>
+        </div>
+        <div style="background:#48a0f8;color:#fff;padding:8px 24px;text-align:center;font-size:14px;font-weight:700;width:fit-content;margin:0 auto;border-radius:0;">
+          ${s06photo.caption}
+        </div>
+      </div>
+      <div style="flex:1;display:flex;flex-direction:column;gap:12px;">
+        <div style="background:#fff;border:1px solid #005e00;border-radius:4px;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.06);flex:1;">
+          <table style="width:100%;border-collapse:collapse;font-size:12px;">
+            <thead>
+              <tr style="background:#00a2ff;color:#fff;">
+                <th style="padding:6px;border-right:1px solid #005e00;border-bottom:2px solid #005e00;width:36px;">序号</th>
+                <th style="padding:6px;border-right:1px solid #005e00;border-bottom:2px solid #005e00;">工种</th>
+                <th style="padding:6px;border-right:1px solid #005e00;border-bottom:2px solid #005e00;width:72px;">本周人数</th>
+                <th style="padding:6px;border-bottom:2px solid #005e00;width:72px;">下周人数</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map((r,i) => {
+                const isTotal = r.trade === '合计';
+                const bg = isTotal ? 'rgba(0,162,255,0.1)' : (i%2===0?'#cbe0ff':'#e7f0ff');
+                const fw = isTotal ? '700' : '400';
+                return `<tr style="background:${bg};">
+                  <td style="padding:4px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;text-align:center;font-weight:${fw};">${r.seq}</td>
+                  <td style="padding:4px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;text-align:center;font-weight:${fw};">${r.trade}</td>
+                  <td style="padding:4px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;text-align:center;">${r.thisWeek}</td>
+                  <td style="padding:4px;border-bottom:1px solid #005e00;text-align:center;">${r.nextWeek}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div style="background:#48a0f8;color:#fff;padding:6px 20px;text-align:center;font-size:13px;font-weight:700;width:fit-content;margin:0 auto;border-radius:0;">
+          全部人员在场情况
+        </div>
+      </div>
     </div>`;
 }
 
 function renderMappingPage07() {
   const stats = M.getPage07Data(currentProjectId);
   document.getElementById('mappingContent').innerHTML = `
-    <div style="margin-bottom:10px; font-size:13px; color:#64748b;">
-      ECC 质量整改统计（北京清尚）
-    </div>
-    <div style="max-width:600px; margin:0 auto;">
-      <table style="width:100%; border-collapse:collapse; font-size:14px;">
+    <div style="font-size:18px;font-weight:700;color:#000;text-align:center;margin-bottom:16px;">北京清尚ECC质量整改统计表</div>
+    <div style="background:#fff;border:1px solid #005e00;border-radius:4px;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.06);margin-bottom:12px;">
+      <table style="width:100%;border-collapse:collapse;font-size:14px;">
         <thead>
-          <tr style="background:#fff; color:#000;">
-            <th style="padding:8px; border:2px solid #005e00; text-align:center; font-weight:700;">序号</th>
-            <th style="padding:8px; border:2px solid #005e00; text-align:center; font-weight:700;">问题总数</th>
-            <th style="padding:8px; border:2px solid #005e00; text-align:center; font-weight:700;">已关闭</th>
-            <th style="padding:8px; border:2px solid #005e00; text-align:center; font-weight:700;">流程关闭中</th>
-            <th style="padding:8px; border:2px solid #005e00; text-align:center; font-weight:700;">未关闭</th>
-            <th style="padding:8px; border:2px solid #005e00; text-align:center; font-weight:700;">关闭率</th>
+          <tr style="background:#fff;">
+            <th style="padding:8px 4px;border-right:1px solid #005e00;border-bottom:2px solid #005e00;text-align:center;font-weight:700;">序号</th>
+            <th style="padding:8px 4px;border-right:1px solid #005e00;border-bottom:2px solid #005e00;text-align:center;font-weight:700;">问题总数</th>
+            <th style="padding:8px 4px;border-right:1px solid #005e00;border-bottom:2px solid #005e00;text-align:center;font-weight:700;">已关闭</th>
+            <th style="padding:8px 4px;border-right:1px solid #005e00;border-bottom:2px solid #005e00;text-align:center;font-weight:700;">流程关闭中</th>
+            <th style="padding:8px 4px;border-right:1px solid #005e00;border-bottom:2px solid #005e00;text-align:center;font-weight:700;">未关闭</th>
+            <th style="padding:8px 4px;border-bottom:2px solid #005e00;text-align:center;font-weight:700;">关闭率</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td style="padding:8px; border:1px solid #005e00; text-align:center;">1</td>
-            <td style="padding:8px; border:1px solid #005e00; text-align:center; font-weight:700;">${stats.total}</td>
-            <td style="padding:8px; border:1px solid #005e00; text-align:center; font-weight:700;">${stats.closed}</td>
-            <td style="padding:8px; border:1px solid #005e00; text-align:center; font-weight:700;">${stats.closing}</td>
-            <td style="padding:8px; border:1px solid #005e00; text-align:center; font-weight:700;">${stats.open}</td>
-            <td style="padding:8px; border:1px solid #005e00; text-align:center; font-weight:700; color:#059669;">${stats.rate}</td>
+            <td style="padding:8px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;text-align:center;">1</td>
+            <td style="padding:8px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;text-align:center;font-weight:700;">${stats.total}</td>
+            <td style="padding:8px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;text-align:center;font-weight:700;">${stats.closed}</td>
+            <td style="padding:8px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;text-align:center;font-weight:700;">${stats.closing}</td>
+            <td style="padding:8px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;text-align:center;font-weight:700;">${stats.open}</td>
+            <td style="padding:8px;border-bottom:1px solid #005e00;text-align:center;font-weight:700;color:#059669;">${stats.rate}</td>
           </tr>
         </tbody>
       </table>
     </div>
-    <div style="margin-top:16px; text-align:center; font-size:12px; color:#94a3b8;">
-      📌 data source: M.ECC_ITEMS（${stats.total} 条记录）· 与周报实际数据（110/101/91.82%）为不同周次
+    <div style="background:#fff;border:1px solid #005e00;border-radius:4px;height:320px;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:13px;overflow:hidden;">
+      🖼️ ECC 销项截图（../../07上周工作ECC.png）
     </div>`;
 }
 
 function renderMappingPage08() {
   const rows = M.getPage08Data(currentProjectId);
   document.getElementById('mappingContent').innerHTML = `
-    <div style="margin-bottom:10px; font-size:13px; color:#64748b;">
-      图纸深化情况
-      <span style="margin-left:12px; font-weight:600; color:#0f172a;">${rows.length} 项</span>
-    </div>
-    <table style="width:100%; border-collapse:collapse; font-size:12px;">
-      <thead>
-        <tr style="background:#00a2ff; color:#fff;">
-          <th style="padding:6px; border:1px solid #005e00; width:40px;">序号</th>
-          <th style="padding:6px; border:1px solid #005e00;">计划事项</th>
-          <th style="padding:6px; border:1px solid #005e00; width:70px;">责任人</th>
-          <th style="padding:6px; border:1px solid #005e00; width:70px;">完成情况</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rows.map((r,i) => {
-          const bg = i%2===0?'#cbe0ff':'#e7f0ff';
-          const statusColor = r.status === '已完成' ? '#059669' : '#d97706';
-          return `<tr style="background:${bg};">
-            <td style="padding:6px; border:1px solid #005e00; text-align:center;">${r.seq}</td>
-            <td style="padding:6px; border:1px solid #005e00;">${r.task}</td>
-            <td style="padding:6px; border:1px solid #005e00; text-align:center;">${r.owner}</td>
-            <td style="padding:6px; border:1px solid #005e00; text-align:center; font-weight:600; color:${statusColor};">${r.status}</td>
-          </tr>`;
-        }).join('')}
-      </tbody>
-    </table>
-    <div style="margin-top:12px; text-align:center; font-size:12px; color:#94a3b8;">
-      📌 data source: M.DRAWING_DEEPENINGS（Mock 数据，日报无此模块）
+    <div style="background:#fff;border:1px solid #005e00;border-radius:4px;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.06);">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead>
+          <tr style="background:#00a2ff;color:#fff;">
+            <th style="padding:6px;border-right:1px solid #005e00;border-bottom:2px solid #005e00;width:10%;">序号</th>
+            <th style="padding:6px;border-right:1px solid #005e00;border-bottom:2px solid #005e00;width:60%;">计划事项</th>
+            <th style="padding:6px;border-right:1px solid #005e00;border-bottom:2px solid #005e00;width:15%;">责任人</th>
+            <th style="padding:6px;border-bottom:2px solid #005e00;width:15%;">完成情况</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((r,i) => {
+            const bg = i%2===0?'#cbe0ff':'#e7f0ff';
+            const statusColor = r.status === '已完成' ? '#059669' : '#d97706';
+            return `<tr style="background:${bg};">
+              <td style="padding:6px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;text-align:center;">${r.seq}</td>
+              <td style="padding:6px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;">${r.task}</td>
+              <td style="padding:6px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;text-align:center;">${r.owner}</td>
+              <td style="padding:6px;border-bottom:1px solid #005e00;text-align:center;font-weight:600;color:${statusColor};">${r.status}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
     </div>`;
 }
 
@@ -3394,28 +3776,31 @@ function renderMappingPage09() {
   const items = M.getPage09Data();
   const areas = [...new Set(items.map(i => i.area))];
   const dayLabels = ['周一','周二','周三','周四','周五','周六','周日'];
+  const wr = getWeekRange();
+  const monday = new Date(wr.weekStart);
+  const dateLabels = dayLabels.map((_, i) => {
+    const d = new Date(monday);
+    d.setDate(d.getDate() + i);
+    return (d.getMonth() + 1) + '月' + d.getDate() + '日';
+  });
   let html = `
-    <div style="margin-bottom:10px; font-size:13px; color:#64748b;">
-      周工作计划甘特图
-      <span style="margin-left:12px; font-weight:600; color:#0f172a;">${items.length} 项</span>
-    </div>
     <div style="overflow-x:auto;">
-    <table style="width:100%; border-collapse:collapse; font-size:10px; border:1px solid #005e00;">
+    <table style="width:100%;border-collapse:collapse;font-size:10px;border:1px solid #005e00;background:#fff;">
       <thead>
         <tr>
-          <th colspan="13" style="font-size:12px; background:#fff; border:1px solid #005e00; padding:4px;">北京清尚—精装周工作计划</th>
+          <th colspan="13" style="font-size:13px;background:#fff;border:1px solid #005e00;padding:4px;color:#000;">北京清尚—食堂/南北塔健身房/北塔高管层/南北塔咖啡厅精装周工作计划</th>
         </tr>
         <tr>
-          <th rowspan="2" style="border:1px solid #005e00; padding:4px; background:#fff; width:26px; font-weight:700;">序</th>
-          <th rowspan="2" style="border:1px solid #005e00; padding:4px; background:#fff; width:45px; font-weight:700;">区域</th>
-          <th rowspan="2" style="border:1px solid #005e00; padding:4px; background:#fff; font-weight:700;">工作内容</th>
-          <th rowspan="2" style="border:1px solid #005e00; padding:4px; background:#fff; width:32px; font-weight:700;">天数</th>
-          ${dayLabels.map(d => `<th style="border:1px solid #005e00; padding:2px; background:#fff; width:22px; font-weight:700; font-size:9px;">${d}</th>`).join('')}
-          <th rowspan="2" style="border:1px solid #005e00; padding:4px; background:#fff; width:45px; font-weight:700;">劳动力</th>
-          <th rowspan="2" style="border:1px solid #005e00; padding:4px; background:#fff; width:40px; font-weight:700;">材料</th>
+          <th rowspan="2" style="border:1px solid #005e00;padding:2px;background:#fff;width:26px;font-weight:700;font-size:10px;">序<br/>号</th>
+          <th rowspan="2" style="border:1px solid #005e00;padding:2px;background:#fff;width:45px;font-weight:700;font-size:10px;">区域</th>
+          <th rowspan="2" style="border:1px solid #005e00;padding:2px;background:#fff;font-weight:700;font-size:10px;">工作内容</th>
+          <th rowspan="2" style="border:1px solid #005e00;padding:2px;background:#fff;width:32px;font-weight:700;font-size:9px;writing-mode:vertical-rl;text-orientation:mixed;">工作天数</th>
+          ${dayLabels.map(d => `<th style="border:1px solid #005e00;padding:2px;background:#fff;width:22px;font-weight:700;font-size:9px;">${d}</th>`).join('')}
+          <th rowspan="2" style="border:1px solid #005e00;padding:2px;background:#fff;width:45px;font-weight:700;font-size:9px;writing-mode:vertical-rl;text-orientation:mixed;">劳动力需求</th>
+          <th rowspan="2" style="border:1px solid #005e00;padding:2px;background:#fff;width:40px;font-weight:700;font-size:9px;writing-mode:vertical-rl;text-orientation:mixed;">材料准备</th>
         </tr>
         <tr>
-          ${dayLabels.map((_,i) => `<th style="border:1px solid #005e00; padding:2px; background:#fff; font-weight:700; font-size:8px;">${i+1}</th>`).join('')}
+          ${dateLabels.map(d => `<th style="border:1px solid #005e00;padding:2px;background:#fff;font-weight:700;font-size:9px;">${d}</th>`).join('')}
         </tr>
       </thead>
       <tbody>`;
@@ -3424,22 +3809,19 @@ function renderMappingPage09() {
     areaItems.forEach((item, idx) => {
       const isFirst = idx === 0;
       html += `<tr>
-        <td style="border:1px solid #005e00; padding:2px; text-align:center;">${item.seq}</td>
-        ${isFirst ? `<td style="border:1px solid #005e00; padding:2px; text-align:center; background:#00a2ff; color:#fff; font-weight:700; font-size:10px;" rowspan="${areaItems.length}">${area}</td>` : ''}
-        <td style="border:1px solid #005e00; padding:2px;">${item.task}</td>
-        <td style="border:1px solid #005e00; padding:2px; text-align:center;">${item.durationDays}</td>
+        <td style="border:1px solid #005e00;padding:2px;text-align:center;">${item.seq}</td>
+        ${isFirst ? `<td style="border:1px solid #005e00;padding:2px;text-align:center;background:#00a2ff;color:#fff;font-weight:700;font-size:10px;" rowspan="${areaItems.length}">${area}</td>` : ''}
+        <td style="border:1px solid #005e00;padding:2px;">${item.task}</td>
+        <td style="border:1px solid #005e00;padding:2px;text-align:center;">${item.durationDays}</td>
         ${(item.schedule || []).map(active =>
-          `<td style="border:1px solid #005e00; padding:0; width:22px; height:18px; background:${active ? '#00b0f0' : '#fff'};"></td>`
+          `<td style="border:1px solid #005e00;padding:0;width:22px;height:18px;background:${active ? '#00b0f0' : '#fff'};"></td>`
         ).join('')}
-        <td style="border:1px solid #005e00; padding:2px; text-align:center;">${item.labor}</td>
-        <td style="border:1px solid #005e00; padding:2px; text-align:center;">${item.material}</td>
+        <td style="border:1px solid #005e00;padding:2px;text-align:center;">${item.labor}</td>
+        <td style="border:1px solid #005e00;padding:2px;text-align:center;">${item.material}</td>
       </tr>`;
     });
   });
-  html += `</tbody></table></div>
-    <div style="margin-top:12px; text-align:center; font-size:12px; color:#94a3b8;">
-      📌 data source: M.WEEKLY_GANTT_ITEMS（Mock，日报无周级别甘特图）
-    </div>`;
+  html += `</tbody></table></div>`;
   document.getElementById('mappingContent').innerHTML = html;
 }
 
@@ -3447,67 +3829,60 @@ function renderMappingPage10() {
   const items = M.getPage10Data();
   const cols = Math.min(items.length, 3);
   document.getElementById('mappingContent').innerHTML = `
-    <div style="margin-bottom:10px; font-size:13px; color:#64748b;">
-      食堂区施工段划分图
-    </div>
-    <div style="display:grid; grid-template-columns:repeat(${cols},1fr); gap:16px;">
+    <div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:20px;height:100%;padding-top:12px;">
       ${items.map(item => `
-        <div style="text-align:center;">
-          <div style="border:1px solid #d1d5db; border-radius:8px; padding:8px; background:#f9fafb; height:180px; display:flex; align-items:center; justify-content:center; font-size:13px; color:#9ca3af;">
-            🖼️ ${item.image}<br><span style="font-size:11px;">（引用 PNG）</span>
+        <div style="display:flex;flex-direction:column;align-items:center;">
+          <div style="width:100%;flex:1;background:#fff;border:1px solid #d1d5db;display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:13px;color:#9ca3af;min-height:220px;">
+            🖼️ ${item.image}
           </div>
-          <div style="margin-top:8px; font-size:14px; font-weight:700;">${item.label}</div>
+          <div style="margin-top:12px;font-size:18px;font-weight:700;color:#000;">${item.label}</div>
         </div>
       `).join('')}
-    </div>
-    <div style="margin-top:12px; text-align:center; font-size:12px; color:#94a3b8;">
-      📌 实际使用时替换为真实楼层平面图 PNG
     </div>`;
 }
 
 function renderMappingPage11() {
   const items = M.getPage11Data();
-  const floorHeaders = ['一层', '二层', 'B1层（1）', 'B1层（2）'];
+  const floorHeaders = [
+    { name: '一层', color: '#f4b084' },
+    { name: '二层', color: '#a9d08e' },
+    { name: 'B1层（1）', color: '#9dc3e6' },
+    { name: 'B1层（2）', color: '#9dc3e6' }
+  ];
   document.getElementById('mappingContent').innerHTML = `
-    <div style="margin-bottom:10px; font-size:13px; color:#64748b;">
-      5月施工进度计划跟踪表
-      <span style="margin-left:12px; font-weight:600; color:#0f172a;">${items.length} 个工序</span>
-    </div>
     <div style="overflow-x:auto;">
-    <table style="width:100%; border-collapse:collapse; font-size:10px;">
+    <table style="width:100%;border-collapse:collapse;font-size:10px;border:1px solid #999;">
       <thead>
         <tr>
-          <th colspan="4" style="border:1px solid #999; padding:4px; background:#f2f2f2; font-size:12px; text-align:center;">26年5月施工进度计划跟踪表</th>
-          ${floorHeaders.map(f => `<th colspan="3" style="border:1px solid #999; padding:4px; text-align:center; font-size:10px;">${f}</th>`).join('')}
+          <th colspan="4" style="border:1px solid #999;padding:4px;background:#f2f2f2;font-size:14px;text-align:center;">26年5月施工进度计划跟踪表</th>
+          ${floorHeaders.map(f => `<th colspan="3" style="border:1px solid #999;padding:4px;text-align:center;font-size:10px;background:${f.color};color:#000;">${f.name}</th>`).join('')}
         </tr>
         <tr>
-          <th style="border:1px solid #999; padding:3px; width:30px;">序号</th>
-          <th style="border:1px solid #999; padding:3px; width:35px;">楼栋</th>
-          <th style="border:1px solid #999; padding:3px; width:35px;">部位</th>
-          <th style="border:1px solid #999; padding:3px;">工序</th>
-          ${[0,0,0,0].flatMap(() => ['开始','完成','天数']).map(h => `<th style="border:1px solid #999; padding:3px; width:40px;">${h}</th>`).join('')}
+          <th style="border:1px solid #999;padding:2px;width:28px;">序号</th>
+          <th style="border:1px solid #999;padding:2px;width:36px;">楼栋</th>
+          <th style="border:1px solid #999;padding:2px;width:36px;">部位</th>
+          <th style="border:1px solid #999;padding:2px;">工序</th>
+          ${floorHeaders.flatMap(() => ['开始时间','完成时间','日历天']).map(h => `<th style="border:1px solid #999;padding:2px;width:42px;">${h}</th>`).join('')}
         </tr>
       </thead>
       <tbody>
         ${items.map((item, i) => {
           const bg = i % 2 === 0 ? '#f8fafc' : '#fff';
+          const highlight = (i === 4 || i === 8) ? 'background:#ffff00;font-weight:700;' : '';
           return `<tr style="background:${bg};">
-            <td style="border:1px solid #999; padding:3px; text-align:center;">${i+1}</td>
-            <td style="border:1px solid #999; padding:3px; text-align:center;">${item.building}</td>
-            <td style="border:1px solid #999; padding:3px; text-align:center;">${item.location}</td>
-            <td style="border:1px solid #999; padding:3px; ${i===4||i===8?'background:#ffff00;font-weight:700;':''}">${item.process}</td>
+            <td style="border:1px solid #999;padding:2px;text-align:center;">${i+1}</td>
+            <td style="border:1px solid #999;padding:2px;text-align:center;">${item.building}</td>
+            <td style="border:1px solid #999;padding:2px;text-align:center;">${item.location}</td>
+            <td style="border:1px solid #999;padding:2px;${highlight}">${item.process}</td>
             ${item.floors.flatMap(f => [
-              `<td style="border:1px solid #999; padding:3px; text-align:center;">${f.startDate}</td>`,
-              `<td style="border:1px solid #999; padding:3px; text-align:center;">${f.endDate}</td>`,
-              `<td style="border:1px solid #999; padding:3px; text-align:center;">${f.days}</td>`
+              `<td style="border:1px solid #999;padding:2px;text-align:center;">${f.startDate}</td>`,
+              `<td style="border:1px solid #999;padding:2px;text-align:center;">${f.endDate}</td>`,
+              `<td style="border:1px solid #999;padding:2px;text-align:center;">${f.days}</td>`
             ]).join('')}
           </tr>`;
         }).join('')}
       </tbody>
-    </table></div>
-    <div style="margin-top:12px; text-align:center; font-size:12px; color:#94a3b8;">
-      📌 data source: M.CONSTRUCTION_ZONE_SCHEDULES（Mock，日报无此模块）
-    </div>`;
+    </table></div>`;
 }
 
 function renderMappingPage12() {
@@ -3520,13 +3895,13 @@ function renderMappingPage12() {
       <span style="margin-left:12px; font-weight:600; color:#0f172a;">${items.length} 项未闭环</span>
       <span style="margin-left:8px; font-size:12px; color:#94a3b8;">（共 ${M.ISSUES.filter(i => i.projectId === currentProjectId && i.type === 'coordination').length} 项）</span>
     </div>
-    <table class="mapping-table" style="width:100%; border-collapse:collapse; font-size:13px;">
+    <table style="width:100%; border-collapse:collapse; border:1px solid #166534;">
       <thead>
         <tr style="background:#0ea5e9; color:#fff;">
-          <th style="padding:8px; border:1px solid #166534; width:50px;">序号</th>
-          <th style="padding:8px; border:1px solid #166534;">需协调事宜</th>
-          <th style="padding:8px; border:1px solid #166534; width:100px;">提出部门</th>
-          <th style="padding:8px; border:1px solid #166534; width:100px;">配合部门</th>
+          <th style="padding:0; border:1px solid #166534; width:65px; height:85px; text-align:center; font-size:18px; font-weight:700; letter-spacing:1px;">序号</th>
+          <th style="padding:0; border:1px solid #166534; height:85px; text-align:center; font-size:18px; font-weight:700; letter-spacing:1px;">需协调事宜</th>
+          <th style="padding:0; border:1px solid #166534; width:130px; height:85px; text-align:center; font-size:18px; font-weight:700; letter-spacing:1px;">提出部门</th>
+          <th style="padding:0; border:1px solid #166534; width:130px; height:85px; text-align:center; font-size:18px; font-weight:700; letter-spacing:1px;">配合部门</th>
         </tr>
       </thead>
       <tbody>`;
@@ -3541,11 +3916,11 @@ function renderMappingPage12() {
     items.forEach((item, i) => {
       const bg = i % 2 === 0 ? '#dbeafe' : '#eff6ff';
       html += `
-        <tr style="background:${bg};">
-          <td style="padding:8px; border:1px solid #166534; text-align:center;">${item.seq}</td>
-          <td style="padding:8px; border:1px solid #166534;">${item.issue}</td>
-          <td style="padding:8px; border:1px solid #166534; text-align:center;">${item.proposeDept}</td>
-          <td style="padding:8px; border:1px solid #166534; text-align:center;">${item.cooperateDept}</td>
+        <tr style="background:${bg}; height:40px;">
+          <td style="padding:6px; border:1px solid #166534; text-align:center;">${item.seq}</td>
+          <td style="padding:6px; border:1px solid #166534;">${item.issue}</td>
+          <td style="padding:6px; border:1px solid #166534; text-align:center;">${item.proposeDept}</td>
+          <td style="padding:6px; border:1px solid #166534; text-align:center;">${item.cooperateDept}</td>
         </tr>`;
     });
   }
@@ -3729,6 +4104,11 @@ let currentTemplate = 'cscec';
 let showBackground = true;
 let customBgUrl = '';       // 用户上传的自定义背景图 URL
 let _reportDate = '';       // 用户设定的周报日期（空=使用当天）
+let _reportRangeStart = ''; // 周报数据区间起始（空=使用周范围）
+let _reportRangeEnd = '';   // 周报数据区间结束
+let _attendanceMode = 'full'; // 'full'=按满勤 'actual'=按实际出勤
+let _s03Photo = '';   // 管理人员合影照片 dataURL
+let _s03PhotoCaption = '管理人员合影';
 
 function _pageFn(page) {
   const m = {
@@ -3769,7 +4149,6 @@ function _buildAllPagesHTML() {
     if (!fn) return;
     fn();
     if (p === '01') {
-      // 封面页自带完整布局，不套 report-page-frame
       html += `<div class="report-page-frame${noBg}" style="background:none;page-break-after:always;">${el.innerHTML}</div>`;
     } else {
       html += `<div class="report-page-frame${noBg}">
@@ -3779,6 +4158,18 @@ function _buildAllPagesHTML() {
         </div>
         <div class="report-page-content">${el.innerHTML}</div>
       </div>`;
+    }
+    // 0301 续页（多组月份/专业）
+    if (p === '0301' && _milestonePages.length > 1) {
+      for (let pi = 1; pi < _milestonePages.length; pi++) {
+        html += `<div class="report-page-frame${noBg}">
+          <div class="report-page-header">
+            <div class="trapezoid" style="background:${hc};"></div>
+            <div class="header-line" style="background:${hc};"></div>
+          </div>
+          <div class="report-page-content">${_milestonePages[pi].html}</div>
+        </div>`;
+      }
     }
   });
   if (cur) cur.click();
@@ -3807,7 +4198,6 @@ function printReport() {
   w.document.write(`<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>中建三局集团周报</title>
 <base href="${baseUrl}">
-<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"><\/script>
 <style>${styles}
   @page { size:1280px 720px; margin:0; }
   body { margin:0; padding:0; background:#fff; }
@@ -3820,7 +4210,7 @@ function printReport() {
   .report-page-header .header-line { position:absolute; top:75px; left:72px; right:0; height:3px;
     background:${hc}; }
   .report-page-content { width:1280px; height:720px; padding:80px 30px 20px; box-sizing:border-box; overflow:hidden; }
-  .modal-header,.modal-footer,.mapping-tab,.page-nav,.export-bar,#weeklyMappingTabs,#toast{display:none!important}
+  .modal-header,.modal-footer,.mapping-tab,.page-nav,.export-bar,#weeklyMappingTabs,#toast,.floating-control{display:none!important}
 <\/style></head><body>${pages}
 <script>window.onload=function(){setTimeout(function(){window.print();window.close();},500)};<\/script>
 </body></html>`);
@@ -3828,76 +4218,111 @@ function printReport() {
 }
 
 function exportReportPDF() {
-  const overlay = document.getElementById('progressOverlay');
-  const bar = document.getElementById('pdfProgressBar');
-  const pct = document.getElementById('pdfProgressPercent');
-  const txt = document.getElementById('pdfProgressText');
-  overlay.style.display = 'flex';
+  printReport();
+}
 
-  const container = document.getElementById('mappingContent');
-  const curTab = document.querySelector('#reportPageNav button.active[data-page]');
-  const captureDiv = document.createElement('div');
-  captureDiv.style.cssText = 'position:absolute;left:-9999px;top:0;width:1280px;';
-  document.body.appendChild(captureDiv);
+// ============================================================
+// 每日签到
+// ============================================================
 
-  const total = _REPORT_PAGES.length;
+function openAttendanceInput() {
+  const dateInput = document.getElementById('attendanceDate');
+  dateInput.value = M.TODAY;
 
-  function prog(pctVal, msg) {
-    bar.style.width = pctVal + '%';
-    pct.textContent = pctVal + '%';
-    txt.textContent = msg;
+  const list = document.getElementById('attendanceList');
+  const records = M.getAttendanceForDate(M.TODAY);
+  const mgrs = M.MANAGEMENT_TEAM;
+
+  list.innerHTML = mgrs.map((m, i) => {
+    const r = records[m.id] || { present: true, reason: '' };
+    return `<div style="display:flex;align-items:center;gap:6px;padding:4px 10px;${i%2===0?'background:#f9fafb;':''}">
+      <input type="checkbox" class="attendance-cb" value="${m.id}" ${r.present?'checked':''} onchange="toggleAttendanceReason(this)">
+      <span style="font-size:13px;min-width:140px;font-weight:500;">${m.name}</span>
+      <span style="font-size:11px;color:#64748b;flex:1;">${m.position}</span>
+      <input type="text" class="attendance-reason" data-id="${m.id}" value="${r.reason}" placeholder="缺勤原因" style="display:${r.present?'none':'inline'};width:130px;font-size:11px;border:1px solid #d1d5db;border-radius:3px;padding:2px 6px;">
+    </div>`;
+  }).join('');
+
+  _refreshAttendancePhotoUI();
+  showModal('modalAttendance');
+}
+
+function _refreshAttendancePhotoUI() {
+  const preview = document.getElementById('attPhotoPreview');
+  const caption = document.getElementById('attPhotoCaption');
+  const enlargeBtn = document.getElementById('attPhotoEnlargeBtn');
+  const clearBtn = document.getElementById('attPhotoClearBtn');
+  if (!preview) return;
+
+  if (_s03Photo) {
+    preview.innerHTML = `<img src="${_s03Photo}" style="width:100%;height:100%;object-fit:contain;cursor:pointer;" onclick="enlargeAttendancePhoto()">`;
+    preview.style.border = '2px solid #2563eb';
+    caption.value = _s03PhotoCaption || '管理人员合影';
+    caption.style.display = '';
+    enlargeBtn.style.display = '';
+    clearBtn.style.display = '';
+  } else {
+    preview.innerHTML = '暂无照片';
+    preview.style.border = '2px dashed #d1d5db';
+    caption.style.display = 'none';
+    enlargeBtn.style.display = 'none';
+    clearBtn.style.display = 'none';
   }
+}
 
-  function loadScript(src) {
-    return new Promise((ok, no) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = no; document.head.appendChild(s); });
+function uploadAttendancePhoto(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    _s03Photo = e.target.result;
+    _s03PhotoCaption = document.getElementById('attPhotoCaption').value || '管理人员合影';
+    _refreshAttendancePhotoUI();
+    renderMappingPage03();
+  };
+  reader.readAsDataURL(file);
+  input.value = '';
+}
+
+function clearAttendancePhoto() {
+  _s03Photo = '';
+  _s03PhotoCaption = '管理人员合影';
+  _refreshAttendancePhotoUI();
+  renderMappingPage03();
+}
+
+function enlargeAttendancePhoto() {
+  if (!_s03Photo) return;
+  const img = document.getElementById('photoEnlargeImg');
+  const overlay = document.getElementById('photoEnlargeOverlay');
+  if (img && overlay) {
+    img.src = _s03Photo;
+    overlay.style.display = 'flex';
   }
+}
 
-  (async () => {
-    try {
-      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
-      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({ orientation:'landscape', unit:'px', format:[1280,720], hotfixes:['px_scaling'] });
+function toggleAttendanceReason(cb) {
+  const reasonInput = cb.closest('div').querySelector('.attendance-reason');
+  if (reasonInput) reasonInput.style.display = cb.checked ? 'none' : 'inline';
+}
 
-      for (let i = 0; i < total; i++) {
-        const p = _REPORT_PAGES[i];
-        prog(Math.round(i / total * 100), `正在导出第 ${p} 页（${_pageTitle(p)}）…`);
-        const fn = _pageFn(p);
-        if (!fn) continue;
-        fn();
-        const hc = _getHeaderColor();
-        const bg = _getBgCss();
-        const noBg = bg === 'none' ? ' no-bg' : '';
-        if (p === '01') {
-          // 封面页自带完整布局，不加页眉
-          captureDiv.innerHTML = `<div class="report-page-frame${noBg}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:none;">${container.innerHTML}</div>`;
-        } else {
-          captureDiv.innerHTML = `<div class="report-page-frame${noBg}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:${bg};">
-            <div class="report-page-header" style="position:absolute;top:0;left:0;right:0;height:75px;z-index:1;">
-              <div style="position:absolute;top:23px;left:0;width:58px;height:52px;background:${hc};clip-path:polygon(0 0,60% 0,100% 100%,0 100%);"></div>
-              <div style="position:absolute;top:75px;left:72px;right:0;height:3px;background:${hc};"></div>
-            </div>
-            <div style="width:1280px;height:720px;padding:80px 30px 20px;box-sizing:border-box;overflow:hidden;">${container.innerHTML}</div>
-          </div>`;
-        }
-        await new Promise(r => setTimeout(r, 300));
-        const canvas = await html2canvas(captureDiv.firstElementChild, { width:1280, height:720, scale:1.5, useCORS:true, logging:false });
-        const imgData = canvas.toDataURL('image/jpeg', 0.95);
-        if (i > 0) doc.addPage([1280, 720], 'landscape');
-        doc.addImage(imgData, 'JPEG', 0, 0, 1280, 720);
-      }
-      prog(100, '正在生成 PDF 文件…');
-      doc.save('中建三局集团周报.pdf');
-      showToast('✅ PDF 导出成功', 'success');
-    } catch (e) {
-      console.error('PDF export error:', e);
-      showToast('❌ PDF 导出失败：' + e.message + '。请尝试使用打印功能。', 'error');
-    } finally {
-      document.body.removeChild(captureDiv);
-      overlay.style.display = 'none';
-      if (curTab) curTab.click();
-    }
-  })();
+function setAllAttendance(checked) {
+  document.querySelectorAll('#attendanceList .attendance-cb').forEach(cb => {
+    cb.checked = checked;
+    toggleAttendanceReason(cb);
+  });
+}
+
+function saveAttendance() {
+  const date = document.getElementById('attendanceDate').value;
+  const records = {};
+  document.querySelectorAll('#attendanceList .attendance-cb').forEach(cb => {
+    const reasonInput = cb.closest('div').querySelector('.attendance-reason');
+    records[cb.value] = { present: cb.checked, reason: reasonInput ? reasonInput.value : '' };
+  });
+  M.setAttendanceForDate(date, records);
+  closeModal('modalAttendance');
+  showToast(`📅 ${date} 签到记录已保存`, 'success');
 }
 
 // ============================================================
@@ -3921,7 +4346,9 @@ function switchTemplate(id) {
 }
 
 function toggleBackground() {
-  showBackground = document.getElementById('showBgCheckbox').checked;
+  showBackground = !showBackground;
+  const cb = document.getElementById('showBgCheckbox');
+  if (cb) cb.checked = showBackground;
   _applyTemplate();
   const cur = document.querySelector('#reportPageNav button.active[data-page]');
   if (cur) switchMappingTab(cur.dataset.page);
@@ -3954,6 +4381,26 @@ function _updateWeekRangeDisplay() {
 function setReportDate(dateStr) {
   _reportDate = dateStr;
   _updateWeekRangeDisplay();
+  const cur = document.querySelector('#reportPageNav button.active[data-page]');
+  if (cur) switchMappingTab(cur.dataset.page);
+}
+
+function _updateReportRangeDisplay() {
+  const span = document.getElementById('reportRangeDisplay');
+  if (!span) return;
+  if (_reportRangeStart && _reportRangeEnd) {
+    span.textContent = `${_reportRangeStart} ~ ${_reportRangeEnd}`;
+  } else {
+    span.textContent = '（使用本周范围）';
+  }
+}
+
+function setReportRange() {
+  const rs = document.getElementById('reportRangeStart');
+  const re = document.getElementById('reportRangeEnd');
+  _reportRangeStart = rs ? rs.value : '';
+  _reportRangeEnd = re ? re.value : '';
+  _updateReportRangeDisplay();
   const cur = document.querySelector('#reportPageNav button.active[data-page]');
   if (cur) switchMappingTab(cur.dataset.page);
 }
