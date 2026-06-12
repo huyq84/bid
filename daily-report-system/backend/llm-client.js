@@ -137,9 +137,7 @@ export class MinMaxClient {
   }
 
   // 业务封装 1: 语音文本解析
-  // 输入: { text, projectId, areas, workers }
-  // 输出: { type, areaId, payload: { taskName, progress, owner, headcount, status }, confidence }
-  async parseVoice({ text, projectId, areas = [], workers = [] }) {
+  async parseVoice({ text, projectId, areas = [], workers = [], plans = [] }) {
     const system = `你是一个施工现场日报系统的结构化解析助手。
 你的任务：把施工人员口述的日报内容解析成结构化数据。
 
@@ -152,32 +150,52 @@ export class MinMaxClient {
    - 同时输出 \`areaName\`，把识别出的新区域名填进去
 3. 如果完全没提到区域，areaId 和 areaName 都留空
 
+【计划匹配规则】从【计划列表】中匹配最符合的计划：
+1. 根据口述中的任务名、区域、施工位置等与计划的任务名/区域进行匹配
+2. 如果找到高度匹配的计划，输出对应的 \`planId\`
+3. 如果无法匹配（计划外工作、描述不清晰等），\`planId\` 留空字符串
+4. 绝不允许"凑数"：不确定时不要随便挑一个 ID
+
 【输出格式】
 {
-  "type": "progress" | "material" | "safety" | "coordination" | "attendance",
+  "type": "progress" | "material" | "safety" | "coordination" | "attendance" | "issue",
   "areaId": "区域ID（从列表选，找不到则空字符串）",
   "areaName": "如果识别到列表外的区域名，填这里；否则空字符串",
+  "planId": "匹配的计划ID（从计划列表选，无法匹配则空字符串）",
+  "completionType": "planned" | "unplanned",
+  "buildingNo": "楼栋编号（如1号楼、2栋），无法提取留空",
+  "floorNo": "楼层（如3层、5F），无法提取留空",
+  "laborRequirements": [
+    { "trade": "工种名称（如木工、电工）", "count": 人数（整数） }
+  ],
   "payload": {
     "taskName": "任务名称（简洁，3-12 字）",
-    "owner": "负责人姓名（必须从工人列表里选，无法确定留空）",
+    "owner": "负责人姓名（优先从工人列表里选；如果口述中出现"负责人刘""张师傅负责"等明确姓名但不在列表中，也直接提取，不要留空）",
     "progress": "进度百分比（格式：80%），无法提取留空",
-    "headcount": 人数（整数，无法提取填 0）,
+    "headcount": 总人数（整数，无法提取填 0）,
     "status": "进行中" | "已完成" | "未开始" | "暂停"
   },
   "confidence": 0~1 之间的数字
 }
 
 【注意事项】
-- 工人名字用全名（如 "张师傅" → 直接保留 "张师傅"）
+- 工人名字用全名
 - 进度只取整数百分比
-- 不要捏造区域或工人`;
+- 不要捏造区域、工人或计划
+- completionType：提到"计划内"或未说明 → "planned"；提到"计划外""新增""临时""突发" → "unplanned"
+- laborRequirements：当 type 为 progress 时，尽可能提取工种×人数；无法提取则留空数组
+- planId：只在明确匹配到计划列表中的某项时填写，不确定就留空
+- owner：口述中常见"负责人XXX"或"XXX负责"句式，"负责人刘"中"刘"就是负责人姓名，提取"刘"即可`;
 
-    const userMsg = `【项目】${projectId}
+    let userMsg = `【项目】${projectId}
 【区域列表】
 ${areas.map(a => `- ${a.id}: ${a.name} (${a.floor || ''}, 负责人 ${a.manager || ''})`).join('\n')}
 
 【工人列表】
 ${workers.map(w => `- ${w.id}: ${w.name} (${w.role}, ${w.team})`).join('\n')}
+
+【计划列表】
+${plans.map(p => `- ${p.id}: ${p.taskName || p.process}（区域: ${p.areaId || p.area || '-'}, 楼栋: ${p.buildingNo || '-'}, 楼层: ${p.floorNo || '-'}, 进度: ${p.progress || '0%'}）`).join('\n')}
 
 【口述内容】
 ${text}
@@ -190,9 +208,7 @@ ${text}
   }
 
   // 业务封装 2: 照片解析
-  // 输入: { imageBase64, caption, projectId, areas, type }
-  // 输出: { areaId, areaName, caption, taskHint, confidence, payload }
-  async parsePhoto({ imageBase64, caption, projectId, areas = [], type = 'progress' }) {
+  async parsePhoto({ imageBase64, caption, projectId, areas = [], type = 'progress', plans = [] }) {
     const system = `你是施工现场照片识别助手。
 根据照片内容和用户提供的语音/文字描述，判断照片所属区域、推测施工任务、负责人、进度等信息。
 
@@ -206,28 +222,41 @@ ${text}
 3. 如果完全无法判断区域，areaId 和 areaName 都留空
 4. 绝不允许"凑数"：找不到匹配时不要随便挑一个 ID 充数
 
+【计划匹配规则】从【计划列表】中匹配最符合的计划：
+1. 根据任务名、区域、施工位置等与计划匹配
+2. 如果找到高度匹配的计划，输出对应的 \`planId\`
+3. 如果无法匹配，\`planId\` 留空字符串
+4. 绝不允许"凑数"
+
 【输出格式】
 {
   "areaId": "区域ID（从列表选，找不到则空字符串）",
   "areaName": "如果识别到列表外的区域名，填这里；否则空字符串",
+  "planId": "匹配的计划ID（无法匹配则空字符串）",
   "caption": "照片描述（10-30 字，说明看到什么）",
   "taskHint": "推测的施工任务（如天花吊顶龙骨安装）",
   "workType": "木工" | "电工" | "瓦工" | "油漆工" | "焊工" | "其他",
+  "completionType": "planned" | "unplanned",
+  "buildingNo": "楼栋编号（如1号楼），无法提取留空",
+  "floorNo": "楼层（如3层），无法提取留空",
+  "laborRequirements": [
+    { "trade": "工种名称", "count": 人数 }
+  ],
   "payload": {
     "taskName": "任务名称",
-    "owner": "负责人姓名（从描述中提取）",
+    "owner": "负责人姓名（从描述中提取，如"负责人刘"则提取"刘"）",
     "progress": "进度百分比（如50%）",
     "headcount": 人数（整数）
   },
   "confidence": 0~1
 }`;
 
-    // 构建消息内容：包含图片（如果有）和文字描述
+    // 构建消息内容
     const userContent = [];
     
-    // 添加文字提示
     let textMsg = `【项目】${projectId}\n`;
     textMsg += `【区域列表】\n${areas.map(a => `- ${a.id}: ${a.name}`).join('\n')}\n\n`;
+    textMsg += `【计划列表】\n${plans.map(p => `- ${p.id}: ${p.taskName || p.process}（区域: ${p.areaId || p.area || '-'}, 楼栋: ${p.buildingNo || '-'}, 楼层: ${p.floorNo || '-'}, 进度: ${p.progress || '0%'}）`).join('\n')}\n\n`;
     if (caption) {
       textMsg += `【用户语音/文字描述】\n${caption}\n\n`;
     } else {
@@ -327,20 +356,55 @@ ${JSON.stringify(issuesCompact, null, 2)}
     return this._parseJsonSafe(raw, '', '', areas, [], 'weekly');
   }
 
-  // 文本优化
-  async optimizeText({ text, projectId }) {
-    const system = `你是一个专业的施工日报文本优化助手。请对用户输入的文本进行专业优化处理：
+  // 文本优化（结构化补全）
+  async optimizeText({ text, projectId, areas = [], plans = [] }) {
+    const areaList = areas.map(a => a.name).join('、') || '无';
+    const planList = plans.map(p => (p.taskName || p.process)).filter(Boolean).join('、') || '无';
 
-优化规则：
-1. 语言专业化：将口语化表达转换为专业施工术语
-2. 表达规范化：统一用词，确保语法正确
-3. 结构清晰化：优化句子结构，增强逻辑连贯性
-4. 删除冗余：移除不必要的语气词和重复内容
-5. 添加专业术语：适当添加施工领域专业词汇
+    const system = `你是一个施工现场日报的文本结构化助手。
+你的任务：把用户输入的杂乱日报内容，按以下维度整理成清晰的结构化文本，补全缺失的信息。
+
+【结构化维度】
+1. 施工位置：楼栋号（如1号楼）、楼层（如F1）、区域名称
+2. 工序/任务：具体施工内容（如钢筋绑扎、天花吊顶安装）
+3. 负责人：谁负责这项作业
+4. 当前进度：百分比
+5. 劳动力：工种×人数（如木工2人、电工1人）
+6. 完成类型：计划内/计划外
+7. 其他补充：照片描述、备注等
+
+【优化规则】
+1. 从输入中提取上述维度的信息，按固定格式输出
+2. 输入中**缺失**的维度，用【待补充】明确标出
+3. 输入中**有歧义**的信息，用【需确认】标出并说明问题
+4. 语言专业化：口语→专业术语（搞→进行，弄好→完成）
+5. 删除冗余：去掉语气词和重复内容
+6. 格式统一：每个维度占一行，保持一致的顺序
+
+【输出格式示例】
+施工位置：1号楼 F1 东区住宅
+工序：钢筋绑扎
+负责人：刘
+进度：90%
+劳动力：木工2人、电工1人
+完成类型：计划内
+【待补充】无
+
+如果缺失信息：
+施工位置：【待补充】请填写楼栋和区域
+工序：钢筋绑扎
+负责人：【待补充】请填写负责人姓名
+进度：90%
+劳动力：木工2人
+完成类型：【待补充】请确认是计划内还是计划外
+
+【参考信息】
+项目可用区域：${areaList}
+项目可用计划：${planList}
 
 请直接输出优化后的文本，不要输出其他内容。`;
 
-    const userMsg = `请优化以下文本，使其更专业、规范：
+    const userMsg = `请整理并补全以下日报内容：
 
 ${text}`;
 

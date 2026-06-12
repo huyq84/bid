@@ -14,6 +14,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { MinMaxClient } from './llm-client.js';
 import { mockParseVoice, mockParsePhoto, mockAggregateWeekly } from './mock-fallback.js';
+import apiRoutes from './routes.js';
 import os from 'os';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -124,23 +125,23 @@ app.post('/api/llm/test', async (req, res) => {
 
 // 语音解析
 app.post('/api/parse-voice', async (req, res) => {
-  const { text, projectId, areas, workers } = req.body;
+  const { text, projectId, areas, workers, plans } = req.body;
   if (!text) return res.status(400).json({ error: 'text 不能为空' });
 
   const start = Date.now();
   try {
-    const result = await llm.parseVoice({ text, projectId, areas, workers });
+    const result = await llm.parseVoice({ text, projectId, areas: areas || [], workers: workers || [], plans: plans || [] });
     res.json({ source: 'llm', latencyMs: Date.now() - start, ...result });
   } catch (e) {
     console.warn('[降级] LLM 语音解析失败，回退 mock:', e.message);
-    const result = mockParseVoice(text, projectId, areas, workers);
+    const result = mockParseVoice(text, projectId, areas || [], workers || [], plans || []);
     res.json({ source: 'mock', latencyMs: Date.now() - start, fallbackReason: e.message, ...result });
   }
 });
 
 // 照片解析
 app.post('/api/parse-photo', async (req, res) => {
-  const { imageBase64, caption, projectId, areas, type } = req.body;
+  const { imageBase64, caption, projectId, areas, type, plans } = req.body;
   const start = Date.now();
   
   // 调试日志
@@ -151,12 +152,12 @@ app.post('/api/parse-photo', async (req, res) => {
   console.log('  type:', type);
   
   try {
-    const result = await llm.parsePhoto({ imageBase64, caption, projectId, areas, type });
+    const result = await llm.parsePhoto({ imageBase64, caption, projectId, areas: areas || [], type, plans: plans || [] });
     console.log('[照片解析结果]', JSON.stringify(result));
     res.json({ source: 'llm', latencyMs: Date.now() - start, ...result });
   } catch (e) {
     console.warn('[降级] LLM 照片解析失败，回退 mock:', e.message);
-    const result = mockParsePhoto(caption, projectId, areas, type);
+    const result = mockParsePhoto(caption, projectId, areas || [], type, plans || []);
     console.log('[Mock解析结果]', JSON.stringify(result));
     res.json({ source: 'mock', latencyMs: Date.now() - start, fallbackReason: e.message, ...result });
   }
@@ -164,12 +165,12 @@ app.post('/api/parse-photo', async (req, res) => {
 
 // 文本优化
 app.post('/api/optimize-text', async (req, res) => {
-  const { text, projectId } = req.body;
+  const { text, projectId, areas, plans } = req.body;
   if (!text) return res.status(400).json({ error: 'text 不能为空' });
 
   const start = Date.now();
   try {
-    const result = await llm.optimizeText({ text, projectId });
+    const result = await llm.optimizeText({ text, projectId, areas: areas || [], plans: plans || [] });
     res.json({ source: 'llm', latencyMs: Date.now() - start, ...result });
   } catch (e) {
     console.warn('[降级] LLM 文本优化失败，回退 mock:', e.message);
@@ -194,11 +195,23 @@ app.post('/api/aggregate-weekly', async (req, res) => {
   }
 });
 
+// ==================== 数据库 API 路由 ====================
+app.use(apiRoutes);
+
 // ============================================================
 // 启动
 // ============================================================
 const PORT = process.env.BACKEND_PORT || 3010;
 app.listen(PORT, '0.0.0.0', async () => {
+  // 初始化数据库
+  try {
+    const { initDatabase } = await import('./db.js');
+    await initDatabase();
+    console.log('  [数据库] 表已就绪');
+  } catch (dbErr) {
+    console.warn('  [数据库] 初始化失败 (不影响 LLM 路由):', dbErr.message);
+  }
+
   // 收集局域网IPv4地址
   const networkInterfaces = os.networkInterfaces();
   const lanIps = [];

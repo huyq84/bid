@@ -3,6 +3,57 @@
 // ============================================================
 
 let M = window.MockData;
+
+// 从后端 API 加载真实数据，失败时静默回退到 MockData
+async function loadDataFromAPI() {
+  try {
+    const res = await fetch('http://localhost:3010/api/data/all');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data || !data.PROJECTS) return;
+
+    // 覆盖 MockData 的各属性
+    M.PROJECTS = data.PROJECTS;
+    M.AREAS = data.AREAS;
+    M.WORKERS = data.WORKERS;
+    M.MANAGEMENT_TEAM = data.MANAGEMENT_TEAM;
+    M.EVENTS = data.EVENTS;
+    M.HISTORY_EVENTS = data.HISTORY_EVENTS;
+    M.ISSUES = data.ISSUES;
+
+    // 深度合并 PLANS（保留已有）
+    if (data.PLANS && Object.keys(data.PLANS).length > 0) M.PLANS = data.PLANS;
+
+    // ECC / 图纸深化 / 甘特 / 施工段
+    M.ECC_ITEMS = data.ECC_ITEMS || [];
+    M.DRAWING_DEEPENINGS = data.DRAWING_DEEPENINGS || [];
+    M.WEEKLY_GANTT_ITEMS = data.WEEKLY_GANTT_ITEMS || [];
+    M.CONSTRUCTION_ZONE_SCHEDULES = data.CONSTRUCTION_ZONE_SCHEDULES || [];
+
+    // 里程碑
+    M.MILESTONES = data.MILESTONES || {};
+    M.MILESTONE_PLANS = data.MILESTONE_PLANS || {};
+
+    // 签到
+    M.DAILY_ATTENDANCE = data.DAILY_ATTENDANCE || {};
+
+    // 重写保存方法使其同步到后端 API
+    M.saveEventsToStorage = async function() {
+      for (const ev of M.EVENTS) {
+        try {
+          await fetch('http://localhost:3010/api/events', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(ev)
+          });
+        } catch {}
+      }
+    };
+
+    console.log('[数据] 已从 PostgreSQL 加载', data.PROJECTS.map(p => p.name).join(', '));
+  } catch (e) {
+    console.log('[数据] 后端 API 不可达，使用 MockData');
+  }
+}
 function fixProgress(v) { if (!v) return v; v = String(v); return v.includes('%') ? v : v + '%'; }
 let currentProjectId = localStorage.getItem('current_project_id') || 'baicaoyuan';
 let currentFilter = 'all';
@@ -89,8 +140,9 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // 页面加载完成后初始化
-document.addEventListener('DOMContentLoaded', () => {
-  initCustomAreas();  // 先加载用户自定义区域
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadDataFromAPI();  // 先拉取后端真实数据（失败静默回退 MockData）
+  initCustomAreas();  // 再加载用户自定义区域
   initProject();
   initCalendarWithToday();
   renderProjectInfo();
@@ -143,22 +195,37 @@ function updateHeaderDate() {
 }
 
 function openProjectSwitcher() {
-  const html = M.PROJECTS.map(p => `
-    <div style="padding:12px; border-bottom:1px solid #e2e8f0; cursor:pointer; transition:background 0.15s;" 
-         onclick="switchProject('${p.id}')" 
-         ${p.id === currentProjectId ? 'style="background:#f0f9ff; border-left:3px solid #00adef;"' : ''}>
-      <div style="font-weight:600; color:#0f172a;">${p.name}</div>
-      <div style="font-size:12px; color:#64748b; margin-top:2px;">${p.client} · ${p.location}</div>
-    </div>
-  `).join('');
-  document.getElementById('projectSwitcherBody').innerHTML = html;
-  showModal('modalProject');
+  const el = document.getElementById('projectDropdown');
+  if (el.style.display !== 'none') { el.style.display = 'none'; return; }
+  const pill = document.getElementById('projectPill');
+  const rect = pill.getBoundingClientRect();
+  el.innerHTML = M.PROJECTS.map(p => {
+    const active = p.id === currentProjectId;
+    return '<div style="padding:14px 16px;border-bottom:1px solid #e2e8f0;cursor:pointer;transition:background 0.12s;' +
+      (active ? 'background:#eff8ff;border-left:3px solid #00adef;' : '') + '" ' +
+      'onclick="switchProject(\'' + p.id + '\')" ' +
+      'onmouseenter="this.style.background=\'#f8fafc\'" onmouseleave="this.style.background=\'' + (active ? '#eff8ff' : '') + '\'">' +
+      '<div style="font-weight:600;color:#0f172a;">' + p.name + '</div>' +
+      '<div style="font-size:12px;color:#64748b;margin-top:2px;">' + p.client + ' · ' + p.location + '</div>' +
+      '</div>';
+  }).join('');
+  el.style.display = 'block';
+  el.style.top = (rect.bottom + 6) + 'px';
+  el.style.left = Math.max(8, rect.right - 340) + 'px';
 }
+
+document.addEventListener('click', function(e) {
+  const dd = document.getElementById('projectDropdown');
+  if (dd.style.display === 'none') return;
+  const pill = document.getElementById('projectPill');
+  if (pill.contains(e.target) || dd.contains(e.target)) return;
+  dd.style.display = 'none';
+});
 
 function switchProject(projectId) {
   currentProjectId = projectId;
   localStorage.setItem('current_project_id', projectId);
-  closeModal('modalProject');
+  document.getElementById('projectDropdown').style.display = 'none';
   initProject();
   renderProjectInfo();
   renderIssues();
@@ -260,10 +327,12 @@ function renderFilteredEvents() {
     if (e.planId) { if (!planGroups[e.planId]) planGroups[e.planId] = []; planGroups[e.planId].push(e); }
     else standalone.push(e);
   });
+  // 合并后的渲染顺序：取每组最早事件的时间排序
   const merged = [];
   Object.values(planGroups).forEach(group => {
     group.sort((a, b) => a.time.localeCompare(b.time));
     const first = group[0]; const last = group[group.length - 1];
+    const planName = group[0].payload.taskName || '进度更新';
     merged.push({
       _isGroup: true, _events: group,
       id: first.id, date: first.date, time: first.time,
@@ -283,6 +352,7 @@ function renderFilteredEvents() {
     ${allItems.map(item => {
       if (item._isGroup) {
         const group = item._events;
+        const plan = (M.PLANS[currentProjectId] || []).find(p => p.id === item.planId);
         return `
       <div class="event-row">
         <div class="event-dot"></div>
@@ -393,6 +463,14 @@ function getAreaName(areaId) {
   return areas.find(a => a.id === areaId)?.name || areaId;
 }
 
+function confirmAllPlanEvents(planId) {
+  M.EVENTS.forEach(e => { if (e.planId === planId && e.status === 'draft') e.status = 'confirmed'; });
+  if (M.saveEventsToStorage) M.saveEventsToStorage();
+  renderFilteredEvents();
+  renderStats();
+  showToast('已全部确认', 'success');
+}
+
 // ============================================================
 // 统计渲染
 // ============================================================
@@ -458,14 +536,6 @@ function renderIssues() {
 // ============================================================
 // 事件操作
 // ============================================================
-function confirmAllPlanEvents(planId) {
-  M.EVENTS.forEach(e => { if (e.planId === planId && e.status === 'draft') e.status = 'confirmed'; });
-  if (M.saveEventsToStorage) M.saveEventsToStorage();
-  renderFilteredEvents();
-  renderStats();
-  showToast('已全部确认', 'success');
-}
-
 function confirmEvent(eventId) {
   const event = M.EVENTS.find(e => e.id === eventId);
   if (event) {
@@ -857,20 +927,23 @@ function renderDailyPlanCard() {
     const typeMeta = M.TYPE_META[plan.type || plan.eventType] || { icon: '📋', label: '计划', color: '#64748b' };
     const displayProcess = plan.taskName || plan.process || plan.description || '施工计划';
     const location = [plan.buildingNo, plan.floorNo].filter(Boolean).join(' · ');
+    // 获取关联完成记录
     const planEvents = M.EVENTS.filter(e => e.planId === plan.id);
 
     html += `
       <div style="background:#f8fafc; border-radius:6px; padding:10px; margin-bottom:8px; border-left:3px solid ${typeMeta.color};">
+        <!-- 标题行：始终可见 -->
         <div style="display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none;" onclick="togglePlanCard('${plan.id}')">
           <span style="font-size:10px; color:#94a3b8; transition:transform .2s;">${collapsed ? '▶' : '▼'}</span>
           <span style="font-size:12px; font-weight:600; color:#334155; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${typeMeta.icon} ${displayProcess}</span>
           ${location ? `<span style="font-size:10px; color:#64748b; white-space:nowrap;"> 🏗️ ${location}</span>` : ''}
           ${plan.progress ? `<span style="font-size:10px; color:#00adef; white-space:nowrap;"> 📊 ${plan.progress}</span>` : ''}
           <div style="flex:1;"></div>
-          <span style="font-size:10px; padding:1px 6px; background:${typeMeta.color}; color:#fff; border-radius:4px; white-space:nowrap;">${plan.status === 'completed' ? '已完成' : '进行中'}</span>
+          ${(()=>{const p=parseInt(String(plan.progress||'0').replace('%',''));if(p>100)return '<span style="font-size:10px;padding:1px 6px;background:#f59e0b;color:#fff;border-radius:4px;white-space:nowrap;">🏆 超额完成</span>';if(plan.status==='completed'||p>=100)return '<span style="font-size:10px;padding:1px 6px;background:'+typeMeta.color+';color:#fff;border-radius:4px;white-space:nowrap;">已完成</span>';return '<span style="font-size:10px;padding:1px 6px;background:'+typeMeta.color+';color:#fff;border-radius:4px;white-space:nowrap;">进行中</span>';})()}
         </div>
         
         ${!collapsed ? `
+        <!-- 展开详情 -->
         <div style="margin-top:8px; padding-top:8px; border-top:1px solid #e2e8f0;">
           ${plan.owner ? `<div style="font-size:11px; color:#64748b; margin-bottom:4px;">👤 负责人：${plan.owner}</div>` : ''}
           ${totalWorkers > 0 ? `
@@ -889,6 +962,7 @@ function renderDailyPlanCard() {
           ` : ''}
         </div>
         
+        <!-- 填报记录 -->
         ${planEvents.length > 0 ? `
           <div style="margin-top:6px; padding-top:6px; border-top:1px dashed #d1d5db;">
             <div style="font-size:10px; color:#94a3b8; margin-bottom:4px;">📋 今日填报（${planEvents.length}次）</div>
@@ -901,6 +975,7 @@ function renderDailyPlanCard() {
           </div>
         ` : ''}
         
+        <!-- 操作按钮 -->
         <div style="display:flex; gap:4px; margin-top:6px; padding-top:6px; border-top:1px solid #e2e8f0;">
           <button class="btn btn-ghost btn-sm" onclick="editDailyPlan('${plan.id}')" style="font-size:10px; padding:2px 8px;">✏️ 编辑</button>
           <button class="btn btn-ghost btn-sm" onclick="deleteDailyPlan('${plan.id}')" style="font-size:10px; padding:2px 8px; color:#ef4444;">🗑 删除</button>
@@ -1108,6 +1183,7 @@ function saveDailyPlan() {
     taskName: process,
     owner,
     progress: fixProgress(progress) || '0%',
+    status: parseInt(String(fixProgress(progress)).replace('%','')) >= 100 ? 'completed' : status,
     laborRequirements,
     materials: materials ? materials.split('\n').filter(m => m.trim()) : [],
     machinery: machinery ? machinery.split('\n').filter(m => m.trim()) : [],
@@ -2699,8 +2775,9 @@ function renderPlanSelect(dateStr) {
 // 选择计划后自动填充数据
 function onPlanSelect(planId) {
   if (!planId) {
-    // 选择"无"，清空自动填充的数据，完成类型设为计划外
     document.getElementById('m-completion-type').value = 'unplanned';
+    document.getElementById('m-labor-warning').style.display = 'none';
+    window._mPlanLabor = null;
     return;
   }
   
@@ -2725,13 +2802,102 @@ function onPlanSelect(planId) {
     if (taskName) document.getElementById('m-task').value = taskName;
     if (plan.progress) document.getElementById('m-progress').value = plan.progress;
     const laborList = plan.laborRequirements || plan.laborSchedule || [];
-    const totalWorkers = laborList.reduce((sum, l) => sum + (l.count || 0), 0);
-    if (totalWorkers > 0 && document.getElementById('m-headcount')) {
-      document.getElementById('m-headcount').value = totalWorkers;
-    }
+    window._mPlanLabor = laborList;
+    renderManualLaborRows(laborList, plan);
     document.getElementById('m-completion-type').value = 'planned';
     showToast('已自动填充计划数据', 'success');
   }
+}
+
+function renderManualLaborRows(laborList, plan) {
+  const container = document.getElementById('m-labor-rows');
+  if (!container) return;
+  if (!laborList || laborList.length === 0) {
+    container.innerHTML = `<div class="form-row labor-row">
+      <div class="form-group"><label class="form-label">工种</label><input class="form-input" type="text" id="m-labor-type-0" placeholder="如：木工" oninput="checkManualLaborDiff()"></div>
+      <div class="form-group"><label class="form-label">人数</label><input class="form-input" type="number" id="m-labor-count-0" value="0" min="0" oninput="checkManualLaborDiff()"></div>
+    </div>`;
+    return;
+  }
+  container.innerHTML = laborList.map((l, i) => `<div class="form-row labor-row">
+    <div class="form-group"><label class="form-label">工种</label><input class="form-input" type="text" id="m-labor-type-${i}" value="${(l.trade||l.laborType||'')}" placeholder="如：木工" oninput="checkManualLaborDiff()"></div>
+    <div class="form-group"><label class="form-label">人数</label><input class="form-input" type="number" id="m-labor-count-${i}" value="${l.count || 0}" min="0" oninput="checkManualLaborDiff()"></div>
+  </div>`).join('');
+  window._mlr = laborList.length;
+  checkManualLaborDiff();
+}
+
+function addManualLaborRow() {
+  const container = document.getElementById('m-labor-rows');
+  if (!container) return;
+  const idx = window._mlr || container.querySelectorAll('.labor-row').length;
+  container.insertAdjacentHTML('beforeend', `<div class="form-row labor-row">
+    <div class="form-group"><label class="form-label">工种</label><input class="form-input" type="text" id="m-labor-type-${idx}" placeholder="如：木工" oninput="checkManualLaborDiff()"></div>
+    <div class="form-group"><label class="form-label">人数</label><input class="form-input" type="number" id="m-labor-count-${idx}" value="0" min="0" oninput="checkManualLaborDiff()"></div>
+    <button class="btn btn-danger btn-sm" onclick="this.closest('.labor-row').remove();checkManualLaborDiff()" style="margin-top:24px;">✕</button>
+  </div>`);
+  window._mlr = idx + 1;
+  checkManualLaborDiff();
+}
+
+function checkManualLaborDiff() {
+  const warn = document.getElementById('m-labor-warning');
+  const planId = document.getElementById('m-plan').value;
+  if (!warn || !planId) { if (warn) warn.style.display = 'none'; return; }
+  const plan = window._mPlanLabor;
+  const rows = document.querySelectorAll('#m-labor-rows .labor-row');
+  let diff = false;
+  const currentMap = {};
+  rows.forEach((r, i) => {
+    const t = document.getElementById('m-labor-type-' + i);
+    const c = document.getElementById('m-labor-count-' + i);
+    if (t && c && t.value.trim()) currentMap[t.value.trim()] = parseInt(c.value) || 0;
+  });
+  // 检查计划内的工种是否有变动
+  for (const item of plan) {
+    const trade = item.trade || item.laborType;
+    if (!trade) continue;
+    if (currentMap[trade] !== (item.count || 0)) { diff = true; break; }
+  }
+  // 检查是否有计划外新增的工种
+  if (!diff) {
+    for (const trade of Object.keys(currentMap)) {
+      if (!plan.some(l => (l.trade||l.laborType) === trade)) { diff = true; break; }
+    }
+  }
+  if (diff) {
+    const details = plan.map(l => `${l.trade||l.laborType||''}${l.count}人`).filter(Boolean).join('、');
+    warn.innerHTML = `⚠ 计划要求：${details}`;
+    warn.style.display = 'inline-flex';
+  } else {
+    warn.style.display = 'none';
+  }
+}
+
+function checkManualProgressOver100() {
+  const tag = document.getElementById('m-progress-tag');
+  if (!tag) return;
+  const v = document.getElementById('m-progress').value.replace('%','');
+  const num = parseInt(v);
+  if (num > 100) {
+    tag.innerHTML = '<span style="font-size:12px;">⚠️</span> 超过100%，将标为超额完成';
+    tag.style.background = 'linear-gradient(135deg,#fef2f2,#fee2e2)';
+    tag.style.borderColor = '#fecaca';
+    tag.style.color = '#dc2626';
+  } else {
+    tag.innerHTML = '<span style="font-size:12px;">📌</span> 填总计划进度';
+    tag.style.background = 'linear-gradient(135deg,#fef9c3,#fef3c7)';
+    tag.style.borderColor = '#fde68a';
+    tag.style.color = '#92400e';
+  }
+}
+
+function checkDpProgressOver100() {
+  const warn = document.getElementById('dp-progress-warn');
+  if (!warn) return;
+  const v = document.getElementById('dp-progress').value.replace('%','');
+  const num = parseInt(v);
+  warn.style.display = num > 100 ? 'inline' : 'none';
 }
 
 function renderManualForm() {
@@ -2747,23 +2913,32 @@ function renderManualForm() {
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label class="form-label">进度 <span class="req">*</span></label>
-            <input class="form-input" type="text" id="m-progress" placeholder="如：80%">
+            <label class="form-label">进度 <span class="req">*</span>
+              <span id="m-progress-tag" style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:2px 8px;font-size:10px;font-weight:400;color:#92400e;background:linear-gradient(135deg,#fef9c3,#fef3c7);border:1px solid #fde68a;border-radius:3px;transform:rotate(-1deg);box-shadow:1px 1px 3px rgba(0,0,0,0.08);">
+                <span style="font-size:12px;">📌</span> 填总计划进度
+              </span>
+            </label>
+            <input class="form-input" type="text" id="m-progress" placeholder="如：80%" oninput="checkManualProgressOver100()">
           </div>
           <div class="form-group">
             <label class="form-label">负责人</label>
             <input class="form-input" type="text" id="m-owner" placeholder="如：张师傅">
           </div>
         </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">人数</label>
-            <input class="form-input" type="number" id="m-headcount" value="0" min="0">
+        <div style="margin:8px 0 4px;font-size:12px;font-weight:600;color:#334155;display:flex;align-items:center;gap:8px;">
+          <span>🧑‍🏭 劳动力</span>
+          <span id="m-labor-warning" style="display:none;font-size:10px;padding:2px 8px;border-radius:4px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca;"></span>
+        </div>
+        <div id="m-labor-rows">
+          <div class="form-row labor-row">
+            <div class="form-group"><label class="form-label">工种</label><input class="form-input" type="text" id="m-labor-type-0" placeholder="如：木工" oninput="checkManualLaborDiff()"></div>
+            <div class="form-group"><label class="form-label">人数</label><input class="form-input" type="number" id="m-labor-count-0" value="0" min="0" oninput="checkManualLaborDiff()"></div>
           </div>
-          <div class="form-group">
-            <label class="form-label">描述</label>
-            <input class="form-input" type="text" id="m-caption" placeholder="描述信息">
-          </div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="addManualLaborRow()" style="margin:4px 0 8px;font-size:11px;padding:2px 10px;">+ 添加工种</button>
+        <div class="form-group">
+          <label class="form-label">描述</label>
+          <input class="form-input" type="text" id="m-caption" placeholder="描述信息">
         </div>
       `;
       break;
@@ -2880,11 +3055,24 @@ function saveManualEvent() {
   let payload = {};
   switch(type) {
     case 'progress':
+      // 收集劳动力数据
+      const laborRows = document.querySelectorAll('#m-labor-rows .labor-row');
+      const laborStats = {};
+      let totalHeadcount = 0;
+      laborRows.forEach((r, i) => {
+        const t = document.getElementById('m-labor-type-' + i);
+        const c = document.getElementById('m-labor-count-' + i);
+        if (t && c && t.value.trim()) {
+          laborStats[t.value.trim()] = parseInt(c.value) || 0;
+          totalHeadcount += parseInt(c.value) || 0;
+        }
+      });
       payload = {
         taskName: document.getElementById('m-task').value,
-        owner: mainOwner || document.getElementById('m-owner-field').value,
+        owner: mainOwner || (document.getElementById('m-owner-field') ? document.getElementById('m-owner-field').value : ''),
         progress: fixProgress(document.getElementById('m-progress').value),
-        headcount: parseInt(document.getElementById('m-headcount').value) || 0,
+        headcount: totalHeadcount,
+        laborStats: Object.keys(laborStats).length > 0 ? laborStats : undefined,
         description: document.getElementById('m-caption').value
       };
       break;

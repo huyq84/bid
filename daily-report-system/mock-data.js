@@ -262,7 +262,12 @@ const DEFAULT_PLANS = {
       id: 'PLAN001',
       projectId: 'baicaoyuan',
       date: '2026-06-05',
+      startDate: '2026-06-05',
+      endDate: '2026-06-12',
       description: '今日继续推进各区域精装施工',
+      taskName: '各区域精装施工',
+      progress: '60%',
+      status: 'active',
       laborSchedule: [
         { laborType: '木工', count: 5 },
         { laborType: '电工', count: 3 },
@@ -280,7 +285,12 @@ const DEFAULT_PLANS = {
       id: 'PLAN002',
       projectId: 'baicaoyuan',
       date: '2026-06-04',
+      startDate: '2026-06-04',
+      endDate: '2026-06-12',
       description: '推进天花吊顶和墙面施工',
+      taskName: '天花吊顶和墙面施工',
+      progress: '50%',
+      status: 'active',
       laborSchedule: [
         { laborType: '木工', count: 4 },
         { laborType: '电工', count: 2 },
@@ -296,7 +306,12 @@ const DEFAULT_PLANS = {
       id: 'PLAN003',
       projectId: 'baicaoyuan',
       date: '2026-06-03',
+      startDate: '2026-06-03',
+      endDate: '2026-06-12',
       description: '各区域正常施工',
+      taskName: '各区域正常施工',
+      progress: '30%',
+      status: 'active',
       laborSchedule: [
         { laborType: '木工', count: 6 },
         { laborType: '电工', count: 3 },
@@ -1054,10 +1069,15 @@ const SOURCE_META = {
 // ============================================================
 
 // 模拟"语音 → 结构化"
-function mockParseVoice(text, projectId) {
+function mockParseVoice(text, projectId, areas, workers, plans) {
   const result = {
     type: 'progress',
-    areaId: AREAS[projectId]?.[0]?.id || 'A1',
+    areaId: (AREAS[projectId] || [])?.[0]?.id || 'A1',
+    completionType: 'planned',
+    planId: '',
+    buildingNo: '',
+    floorNo: '',
+    laborRequirements: [],
     payload: {
       taskName: '',
       progress: '',
@@ -1068,11 +1088,21 @@ function mockParseVoice(text, projectId) {
     confidence: 0.85
   };
 
-  // 简单规则化解析
   // 提取区域
   for (const area of (AREAS[projectId] || [])) {
     if (text.includes(area.name) || text.includes(area.id)) {
       result.areaId = area.id;
+      break;
+    }
+  }
+
+  // 匹配计划
+  const projectPlans = plans || PLANS[projectId] || [];
+  for (const plan of projectPlans) {
+    const planTask = (plan.taskName || plan.process || '').toLowerCase();
+    const textLower = text.toLowerCase();
+    if (planTask && textLower.includes(planTask.slice(0, 4))) {
+      result.planId = plan.id;
       break;
     }
   }
@@ -1083,22 +1113,24 @@ function mockParseVoice(text, projectId) {
     result.payload.owner = workerMatch.name;
   }
 
-  // 提取人数（独立于负责人，支持多种表达方式）
+  // 提取人数
   const countMatch = text.match(/(\d+)\s*[人个名位]/);
+  let headcount = 0;
   if (countMatch) {
-    result.payload.headcount = parseInt(countMatch[1]);
+    headcount = parseInt(countMatch[1]);
+    result.payload.headcount = headcount;
   } else if (text.includes('一人') || text.includes('一个人') || text.includes('一位')) {
-    result.payload.headcount = 1;
+    headcount = 1;
   } else if (text.includes('两人') || text.includes('两个人') || text.includes('两位')) {
-    result.payload.headcount = 2;
+    headcount = 2;
   } else if (text.includes('三人') || text.includes('三个人') || text.includes('三位')) {
-    result.payload.headcount = 3;
+    headcount = 3;
   } else if (text.includes('几个人') || text.includes('几人')) {
-    result.payload.headcount = Math.floor(Math.random() * 3) + 2; // 2-4人
+    headcount = Math.floor(Math.random() * 3) + 2;
   } else if (result.payload.owner) {
-    // 如果有负责人但没提取到人数，默认给1人
-    result.payload.headcount = 1;
+    headcount = 1;
   }
+  result.payload.headcount = headcount;
 
   // 提取进度百分比
   const progressMatch = text.match(/(\d+)\s*[%％]/);
@@ -1106,26 +1138,50 @@ function mockParseVoice(text, projectId) {
     result.payload.progress = progressMatch[1] + '%';
   }
 
-  // 提取任务名（简化：取第一个"做"字后面的名词短语）
+  // 提取任务名
   const taskMatch = text.match(/(?:做|搞|完成|施工|进行)([\u4e00-\u9fa5]{3,12})/);
   if (taskMatch) {
     result.payload.taskName = taskMatch[1];
   } else {
-    // 默认任务名
     result.payload.taskName = '常规施工任务';
+  }
+
+  // 提取楼栋/楼层
+  const buildingMatch = text.match(/(\d+[#栋号楼])/);
+  if (buildingMatch) result.buildingNo = buildingMatch[1];
+  const floorMatch = text.match(/(\d+[Ff层])/);
+  if (floorMatch) result.floorNo = floorMatch[1];
+
+  // 提取工种信息构建 laborRequirements
+  const trades = ['木工', '泥工', '电工', '焊工', '油漆工', '水暖工', '钢筋工', '架子工'];
+  const foundTrades = trades.filter(t => text.includes(t));
+  if (foundTrades.length > 0 && headcount > 0) {
+    result.laborRequirements = foundTrades.map(trade => ({
+      trade,
+      count: Math.max(1, Math.round(headcount / foundTrades.length))
+    }));
+  }
+
+  // completionType 判断
+  if (text.includes('计划外') || text.includes('新增') || text.includes('临时') || text.includes('突发')) {
+    result.completionType = 'unplanned';
+    result.planId = '';
   }
 
   return result;
 }
 
 // 模拟"照片 → 元数据"
-function mockParsePhoto(caption, areas = AREAS[CURRENT_PROJECT_ID] || []) {
+function mockParsePhoto(caption, areas = AREAS[CURRENT_PROJECT_ID] || [], plans = PLANS[CURRENT_PROJECT_ID] || []) {
   let taskHint = '施工任务';
   let owner = '';
   let progress = '';
   let headcount = 0;
   let areaId = '';
   let areaName = '';
+  let buildingNo = '';
+  let floorNo = '';
+  let planId = '';
   
   if (caption) {
     // 提取进度
@@ -1149,7 +1205,17 @@ function mockParsePhoto(caption, areas = AREAS[CURRENT_PROJECT_ID] || []) {
       }
     }
     
-    // 智能匹配区域：从caption中查找区域名称
+    // 匹配计划
+    for (const plan of plans) {
+      const planTask = (plan.taskName || plan.process || '').toLowerCase();
+      const capLower = caption.toLowerCase();
+      if (planTask && capLower.includes(planTask.slice(0, 4))) {
+        planId = plan.id;
+        break;
+      }
+    }
+    
+    // 智能匹配区域
     if (areas && areas.length > 0) {
       for (const area of areas) {
         if (caption.includes(area.name)) {
@@ -1159,7 +1225,6 @@ function mockParsePhoto(caption, areas = AREAS[CURRENT_PROJECT_ID] || []) {
       }
     }
     
-    // 如果没有匹配到已存在的区域，尝试提取新区域名
     if (!areaId && caption) {
       const areaKeywords = ['区域', '厅', '室', '区', '楼', '层', '车间', '仓库'];
       for (const kw of areaKeywords) {
@@ -1171,9 +1236,13 @@ function mockParsePhoto(caption, areas = AREAS[CURRENT_PROJECT_ID] || []) {
         }
       }
     }
+
+    const buildingMatch = caption.match(/(\d+[#栋号楼])/);
+    if (buildingMatch) buildingNo = buildingMatch[1];
+    const floorMatch = caption.match(/(\d+[Ff层])/);
+    if (floorMatch) floorNo = floorMatch[1];
   }
   
-  // 如果没有识别到区域，使用第一个区域作为默认
   if (!areaId && areas && areas.length > 0) {
     areaId = areas[0].id;
   }
@@ -1184,6 +1253,11 @@ function mockParsePhoto(caption, areas = AREAS[CURRENT_PROJECT_ID] || []) {
     caption: 'AI 自动生成描述：' + (caption || '施工现场'),
     taskHint,
     workType: '其他',
+    completionType: 'planned',
+    planId,
+    buildingNo,
+    floorNo,
+    laborRequirements: headcount > 0 ? [{ trade: taskHint.replace('施工', ''), count: headcount }] : [],
     payload: {
       taskName: taskHint,
       owner,
@@ -1279,12 +1353,25 @@ function getMonthlyStats(year, month, projectId) {
 // 从 EVENTS（progress 类型）聚合周报"工作完成"表格数据
 function getPage04Data(projectId, weekStart, weekEnd) {
   const allEvents = [...EVENTS, ...HISTORY_EVENTS];
-  const weekEvents = allEvents.filter(e =>
+  let weekEvents = allEvents.filter(e =>
     e.projectId === projectId &&
     e.type === 'progress' &&
     e.date >= weekStart && e.date <= weekEnd &&
     e.status === 'confirmed'
   );
+
+  // 同一计划同一天多次填报 → 只保留最新一条
+  const dedup = new Map();
+  const noPlan = [];
+  weekEvents.forEach(e => {
+    if (e.planId) {
+      const key = e.planId + '|' + e.date;
+      dedup.set(key, e); // 后面覆盖前面，自然保留最新
+    } else {
+      noPlan.push(e);
+    }
+  });
+  weekEvents = [...noPlan, ...dedup.values()];
 
   // 按区域分组
   const groups = {};

@@ -262,7 +262,12 @@ const DEFAULT_PLANS = {
       id: 'PLAN001',
       projectId: 'baicaoyuan',
       date: '2026-06-05',
+      startDate: '2026-06-05',
+      endDate: '2026-06-12',
       description: '今日继续推进各区域精装施工',
+      taskName: '各区域精装施工',
+      progress: '60%',
+      status: 'active',
       laborSchedule: [
         { laborType: '木工', count: 5 },
         { laborType: '电工', count: 3 },
@@ -280,7 +285,12 @@ const DEFAULT_PLANS = {
       id: 'PLAN002',
       projectId: 'baicaoyuan',
       date: '2026-06-04',
+      startDate: '2026-06-04',
+      endDate: '2026-06-12',
       description: '推进天花吊顶和墙面施工',
+      taskName: '天花吊顶和墙面施工',
+      progress: '50%',
+      status: 'active',
       laborSchedule: [
         { laborType: '木工', count: 4 },
         { laborType: '电工', count: 2 },
@@ -296,7 +306,12 @@ const DEFAULT_PLANS = {
       id: 'PLAN003',
       projectId: 'baicaoyuan',
       date: '2026-06-03',
+      startDate: '2026-06-03',
+      endDate: '2026-06-12',
       description: '各区域正常施工',
+      taskName: '各区域正常施工',
+      progress: '30%',
+      status: 'active',
       laborSchedule: [
         { laborType: '木工', count: 6 },
         { laborType: '电工', count: 3 },
@@ -1279,12 +1294,25 @@ function getMonthlyStats(year, month, projectId) {
 // 从 EVENTS（progress 类型）聚合周报"工作完成"表格数据
 function getPage04Data(projectId, weekStart, weekEnd) {
   const allEvents = [...EVENTS, ...HISTORY_EVENTS];
-  const weekEvents = allEvents.filter(e =>
+  let weekEvents = allEvents.filter(e =>
     e.projectId === projectId &&
     e.type === 'progress' &&
     e.date >= weekStart && e.date <= weekEnd &&
     e.status === 'confirmed'
   );
+
+  // 同一计划同一天多次填报 → 只保留最新一条
+  const dedup = new Map();
+  const noPlan = [];
+  weekEvents.forEach(e => {
+    if (e.planId) {
+      const key = e.planId + '|' + e.date;
+      dedup.set(key, e);
+    } else {
+      noPlan.push(e);
+    }
+  });
+  weekEvents = [...noPlan, ...dedup.values()];
 
   // 按区域分组
   const groups = {};
@@ -1299,9 +1327,7 @@ function getPage04Data(projectId, weekStart, weekEnd) {
   Object.entries(groups).forEach(([areaId, events]) => {
     const area = (AREAS[projectId] || []).find(a => a.id === areaId);
     const areaName = area ? area.name : areaId;
-    // 区域 header 行
     rows.push({ type: 'header', text: `${areaName}：` });
-    // 具体事项行
     events.forEach(e => {
       seq++;
       const task = e.payload?.taskName || e.payload?.topic || '(未命名)';

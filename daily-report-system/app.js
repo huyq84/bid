@@ -3,6 +3,89 @@
 // ============================================================
 
 let M = window.MockData;
+
+// 从后端 API 加载真实数据，失败时静默回退到 MockData
+async function loadDataFromAPI() {
+  try {
+    const res = await fetch('http://localhost:3010/api/data/all');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data || !data.PROJECTS) return;
+
+    // 覆盖 MockData 的各属性
+    M.PROJECTS = data.PROJECTS;
+    M.AREAS = data.AREAS;
+    M.WORKERS = data.WORKERS;
+    M.MANAGEMENT_TEAM = data.MANAGEMENT_TEAM;
+    M.EVENTS = data.EVENTS;
+    M.HISTORY_EVENTS = data.HISTORY_EVENTS;
+    M.ISSUES = data.ISSUES;
+
+    // 深度合并 PLANS（保留已有）
+    if (data.PLANS && Object.keys(data.PLANS).length > 0) M.PLANS = data.PLANS;
+
+    // ECC / 图纸深化 / 甘特 / 施工段
+    M.ECC_ITEMS = data.ECC_ITEMS || [];
+    M.DRAWING_DEEPENINGS = data.DRAWING_DEEPENINGS || [];
+    M.WEEKLY_GANTT_ITEMS = data.WEEKLY_GANTT_ITEMS || [];
+    M.CONSTRUCTION_ZONE_SCHEDULES = data.CONSTRUCTION_ZONE_SCHEDULES || [];
+
+    // 里程碑
+    M.MILESTONES = data.MILESTONES || {};
+    M.MILESTONE_PLANS = data.MILESTONE_PLANS || {};
+
+    // 签到
+    M.DAILY_ATTENDANCE = data.DAILY_ATTENDANCE || {};
+
+    // 重写保存方法使其同步到后端 API
+    M.saveEventsToStorage = async function() {
+      for (const ev of M.EVENTS) {
+        try {
+          await fetch('http://localhost:3010/api/events', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(ev)
+          });
+        } catch {}
+      }
+    };
+
+    M.savePlansToStorage = async function() {
+      // 定义标准字段（数据库有对应列），其余归入 extra
+      const STD_FIELDS = new Set(['id','projectId','date','startDate','endDate','description','taskName','progress','status','laborSchedule','laborRequirements','areaTargets','createdAt','updatedAt']);
+      for (const projectId of Object.keys(M.PLANS)) {
+        for (const p of M.PLANS[projectId]) {
+          const extra = {};
+          for (const k of Object.keys(p)) { if (!STD_FIELDS.has(k)) extra[k] = p[k]; }
+          try {
+            await fetch('http://localhost:3010/api/plans', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                id: p.id,
+                projectId: p.projectId || projectId,
+                date: p.date || p.startDate || null,
+                startDate: p.startDate,
+                endDate: p.endDate,
+                description: p.description || p.taskName || '',
+                taskName: p.taskName,
+                progress: p.progress || '0%',
+                status: p.status || 'active',
+                laborSchedule: p.laborRequirements || [],
+                areaTargets: p.areaTargets || [],
+                extra,
+                createdAt: p.createdAt,
+                updatedAt: new Date().toISOString()
+              })
+            });
+          } catch {}
+        }
+      }
+    };
+
+    console.log('[数据] 已从 PostgreSQL 加载', data.PROJECTS.map(p => p.name).join(', '));
+  } catch (e) {
+    console.log('[数据] 后端 API 不可达，使用 MockData');
+  }
+}
 function fixProgress(v) { if (!v) return v; v = String(v); return v.includes('%') ? v : v + '%'; }
 let currentProjectId = localStorage.getItem('current_project_id') || 'baicaoyuan';
 let currentFilter = 'all';
@@ -89,8 +172,9 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // 页面加载完成后初始化
-document.addEventListener('DOMContentLoaded', () => {
-  initCustomAreas();  // 先加载用户自定义区域
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadDataFromAPI();  // 先拉取后端真实数据（失败静默回退 MockData）
+  initCustomAreas();  // 再加载用户自定义区域
   initProject();
   initCalendarWithToday();
   renderProjectInfo();
@@ -143,22 +227,37 @@ function updateHeaderDate() {
 }
 
 function openProjectSwitcher() {
-  const html = M.PROJECTS.map(p => `
-    <div style="padding:12px; border-bottom:1px solid #e2e8f0; cursor:pointer; transition:background 0.15s;" 
-         onclick="switchProject('${p.id}')" 
-         ${p.id === currentProjectId ? 'style="background:#f0f9ff; border-left:3px solid #00adef;"' : ''}>
-      <div style="font-weight:600; color:#0f172a;">${p.name}</div>
-      <div style="font-size:12px; color:#64748b; margin-top:2px;">${p.client} · ${p.location}</div>
-    </div>
-  `).join('');
-  document.getElementById('projectSwitcherBody').innerHTML = html;
-  showModal('modalProject');
+  const el = document.getElementById('projectDropdown');
+  if (el.style.display !== 'none') { el.style.display = 'none'; return; }
+  const pill = document.getElementById('projectPill');
+  const rect = pill.getBoundingClientRect();
+  el.innerHTML = M.PROJECTS.map(p => {
+    const active = p.id === currentProjectId;
+    return '<div style="padding:14px 16px;border-bottom:1px solid #e2e8f0;cursor:pointer;transition:background 0.12s;' +
+      (active ? 'background:#eff8ff;border-left:3px solid #00adef;' : '') + '" ' +
+      'onclick="switchProject(\'' + p.id + '\')" ' +
+      'onmouseenter="this.style.background=\'#f8fafc\'" onmouseleave="this.style.background=\'' + (active ? '#eff8ff' : '') + '\'">' +
+      '<div style="font-weight:600;color:#0f172a;">' + p.name + '</div>' +
+      '<div style="font-size:12px;color:#64748b;margin-top:2px;">' + p.client + ' · ' + p.location + '</div>' +
+      '</div>';
+  }).join('');
+  el.style.display = 'block';
+  el.style.top = (rect.bottom + 6) + 'px';
+  el.style.left = Math.max(8, rect.right - 340) + 'px';
 }
+
+document.addEventListener('click', function(e) {
+  const dd = document.getElementById('projectDropdown');
+  if (dd.style.display === 'none') return;
+  const pill = document.getElementById('projectPill');
+  if (pill.contains(e.target) || dd.contains(e.target)) return;
+  dd.style.display = 'none';
+});
 
 function switchProject(projectId) {
   currentProjectId = projectId;
   localStorage.setItem('current_project_id', projectId);
-  closeModal('modalProject');
+  document.getElementById('projectDropdown').style.display = 'none';
   initProject();
   renderProjectInfo();
   renderIssues();
@@ -309,16 +408,18 @@ function renderFilteredEvents() {
                   ${e.payload.owner ? `<span style="font-size:10px; color:#64748b; margin-left:4px;">${e.payload.owner}</span>` : ''}
                 </div>
                 <span style="font-size:9px; padding:1px 4px; border-radius:3px; background:${e.status === 'draft' ? '#fef3c7' : '#d1fae5'}; color:${e.status === 'draft' ? '#92400e' : '#065f46'};">${e.status === 'draft' ? '草稿' : '已确认'}</span>
-                <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); confirmEvent('${e.id}')" style="font-size:9px; padding:1px 6px;">${e.status === 'draft' ? '✅ 确认' : '🔄 撤回'}</button>
-                <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); editEventDirect('${e.id}')" style="font-size:9px; padding:1px 6px;">✏️ 编辑</button>
-                <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); openEventDetail('${e.id}')" style="font-size:9px; padding:1px 6px;">查看详情</button>
-                <button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteEvent('${e.id}')" style="font-size:9px; padding:1px 6px;">删除</button>
               </div>`;
             }).join('')}
           </div>
           <div class="event-actions">
             <button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); openManualInput('${item.planId}')" style="font-size:10px; padding:2px 8px;">+ 继续填报</button>
             ${group.some(e => e.status === 'draft') ? `<button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); confirmAllPlanEvents('${item.planId}')" style="font-size:10px; padding:2px 8px;">✅ 全部确认</button>` : ''}
+            ${group.map(e => `
+              <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); confirmEvent('${e.id}')" style="font-size:9px; padding:1px 6px;">${e.status === 'draft' ? '✅ 确认' : '🔄 撤回'}</button>
+              <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); editEventDirect('${e.id}')" style="font-size:9px; padding:1px 6px;">✏️ 编辑</button>
+              <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); openEventDetail('${e.id}')" style="font-size:9px; padding:1px 6px;">查看详情</button>
+              <button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteEvent('${e.id}')" style="font-size:9px; padding:1px 6px;">删除</button>
+            `).join('')}
           </div>
         </div>
       </div>`;
@@ -507,14 +608,17 @@ async function deleteEvent(eventId) {
   const confirmed = await showConfirm('确定要删除这个事件吗？', '删除事件', '🗑️');
   if (!confirmed) return;
   const index = M.EVENTS.findIndex(e => e.id === eventId);
-  if (index > -1) {
-    M.EVENTS.splice(index, 1);
-    if (M.saveEventsToStorage) M.saveEventsToStorage();
-    renderFilteredEvents();
-    renderStats();
-    if (typeof updateCalendar === 'function') updateCalendar();
-    showToast('已删除事件', 'info');
-  }
+  if (index === -1) return;
+  M.EVENTS.splice(index, 1);
+  // 同步到后端（如连接可用）
+  try {
+    await fetch('http://localhost:3010/api/events/' + eventId, { method: 'DELETE' });
+  } catch { /* 后端不可达时只删本地 */ }
+  if (M.saveEventsToStorage) M.saveEventsToStorage();
+  renderFilteredEvents();
+  renderStats();
+  if (typeof updateCalendar === 'function') updateCalendar();
+  showToast('已删除事件', 'info');
 }
 
 function openEventDetail(eventId) {
@@ -616,6 +720,7 @@ function saveEventEdit() {
       if (event.payload.progress) plan.progress = event.payload.progress;
     }
   }
+  M.savePlansToStorage();
   if (M.saveEventsToStorage) M.saveEventsToStorage();
   closeModal('modalEventEdit');
   renderDailyPlanCard();
@@ -872,7 +977,7 @@ function renderDailyPlanCard() {
           ${location ? `<span style="font-size:10px; color:#64748b; white-space:nowrap;"> 🏗️ ${location}</span>` : ''}
           ${plan.progress ? `<span style="font-size:10px; color:#00adef; white-space:nowrap;"> 📊 ${plan.progress}</span>` : ''}
           <div style="flex:1;"></div>
-          <span style="font-size:10px; padding:1px 6px; background:${typeMeta.color}; color:#fff; border-radius:4px; white-space:nowrap;">${plan.status === 'completed' ? '已完成' : '进行中'}</span>
+          ${(()=>{const p=parseInt(String(plan.progress||'0').replace('%',''));if(p>100)return '<span style="font-size:10px;padding:1px 6px;background:#f59e0b;color:#fff;border-radius:4px;white-space:nowrap;">🏆 超额完成</span>';if(plan.status==='completed'||p>=100)return '<span style="font-size:10px;padding:1px 6px;background:'+typeMeta.color+';color:#fff;border-radius:4px;white-space:nowrap;">已完成</span>';return '<span style="font-size:10px;padding:1px 6px;background:'+typeMeta.color+';color:#fff;border-radius:4px;white-space:nowrap;">进行中</span>';})()}
         </div>
         
         ${!collapsed ? `
@@ -1027,7 +1132,7 @@ function addLaborRow() {
       <button class="btn btn-danger btn-sm" onclick="removeLaborRow(${laborRowCount})" style="margin-top:24px;">✕</button>
     </div>
   `;
-  document.getElementById('laborRows').innerHTML += html;
+  document.getElementById('laborRows').insertAdjacentHTML('beforeend', html);
   laborRowCount++;
 }
 
@@ -1116,6 +1221,7 @@ function saveDailyPlan() {
     taskName: process,
     owner,
     progress: fixProgress(progress) || '0%',
+    status: parseInt(String(fixProgress(progress)).replace('%','')) >= 100 ? 'completed' : status,
     laborRequirements,
     materials: materials ? materials.split('\n').filter(m => m.trim()) : [],
     machinery: machinery ? machinery.split('\n').filter(m => m.trim()) : [],
@@ -1150,6 +1256,7 @@ function saveDailyPlan() {
         if (plan.areaId) e.areaId = plan.areaId;
       }
     });
+    M.savePlansToStorage();
     if (M.saveEventsToStorage) M.saveEventsToStorage();
     renderFilteredEvents();
     showToast('日计划已更新', 'success');
@@ -1163,6 +1270,7 @@ function saveDailyPlan() {
   
   console.log('[日计划] 保存后长度:', M.PLANS[currentProjectId].length, '计划ID:', plan.id);
   
+  M.savePlansToStorage();
   localStorage.setItem('daily_plans', JSON.stringify(M.PLANS));
   
   updateCalendarPlanMarks();
@@ -1402,14 +1510,13 @@ function refreshAreaSelectors() {
       areas.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
     sel.value = cur;
   }
-  // 手动录入
+  // 统一录入
   if (document.getElementById('m-area')) {
     const cur = document.getElementById('m-area').value;
-    const areas = getProjectAreas();
-    const sel = document.getElementById('m-area');
-    sel.innerHTML = '<option value="">请选择区域</option>' +
-      areas.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
-    sel.value = cur;
+    renderAreaOptions('m-area', cur);
+  }
+  if (document.getElementById('m-area-hint')) {
+    document.getElementById('m-area-hint').style.display = 'none';
   }
 }
 
@@ -1473,23 +1580,7 @@ function addAreaFromManager() {
 // 语音录入
 // ============================================================
 function openVoiceInput() {
-  const today = new Date();
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-  const nowStr = `${String(today.getHours()).padStart(2, '0')}:${String(today.getMinutes()).padStart(2, '0')}`;
-
-  const selectedDate = selectedDates.length > 0 ? selectedDates[0] : todayStr;
-  document.getElementById('voiceDate').value = selectedDate;
-  document.getElementById('voiceTime').value = nowStr;
-
-  document.getElementById('voiceText').value = '';
-  document.getElementById('voiceParsePreview').style.display = 'block';
-  document.getElementById('voiceSaveBtn').disabled = false;
-  document.getElementById('recordingBtn').classList.remove('recording');
-  document.getElementById('recordingHint').textContent = '点击麦克风开始录音';
-  document.getElementById('vp-area-hint').style.display = 'none';
-  showModal('modalVoice');
-  // 关键：填充区域选项
-  renderAreaOptions('vp-area', '');
+  openUnifiedInput('voice');
 }
 
 function toggleRecording() {
@@ -1534,11 +1625,13 @@ async function parseVoiceText(text) {
 
   const areas = getProjectAreas();
   const areasPayload = areas.map(a => ({ id: a.id, name: a.name }));
+  const plans = M.PLANS[currentProjectId] || [];
 
   const requestBody = {
     text: text,
     projectId: currentProjectId,
-    areas: areasPayload
+    areas: areasPayload,
+    plans: plans.map(p => ({ id: p.id, taskName: p.taskName, areaId: p.areaId, buildingNo: p.buildingNo, floorNo: p.floorNo, progress: p.progress }))
   };
 
   const t0 = Date.now();
@@ -1556,7 +1649,7 @@ async function parseVoiceText(text) {
     if (hint) hint.textContent = `🤖 LLM 真实 · ${parsed.latencyMs || 0}ms · 来源 ${parsed.source}`;
   } catch (e) {
     // 降级到本地 mock
-    const parsed = M.mockParseVoice(text, currentProjectId);
+    const parsed = M.mockParseVoice(text, currentProjectId, areas, M.WORKERS, plans);
     applyVoiceParseResult(parsed);
     if (hint) hint.textContent = `⚙️ Mock 模式（LLM 离线）· ${e.message}`;
   }
@@ -1651,7 +1744,8 @@ function confirmAddNewArea(name, selectId) {
   customAreas[currentProjectId].push(newArea);
   saveCustomAreas();
   renderAreaOptions(selectId, newId);
-  document.getElementById('vp-area-hint').style.display = 'none';
+  const hint = document.getElementById(`${selectId}-hint`);
+  if (hint) hint.style.display = 'none';
   showToast(`已新增区域：${name}（${newId}）`, 'success');
 }
 
@@ -1723,28 +1817,10 @@ function saveVoiceEvent() {
 }
 
 // ============================================================
-// 拍照录入
+// 拍照录入（旧版重定向到统一录入）
 // ============================================================
 function openPhotoInput() {
-  document.getElementById('photoPreviewArea').style.display = 'none';
-  document.getElementById('photoUploadZone').style.display = 'block';
-  document.getElementById('photoOptionsMenu').style.display = 'none';
-  document.getElementById('photoSaveBtn').disabled = true;
-  document.getElementById('photoFileInput').value = '';
-  document.getElementById('photoCaptureInput').value = '';
-  
-  // 初始化日期和时间字段：优先使用选中日期，否则使用今天和当前时间
-  const today = new Date();
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-  const nowStr = `${String(today.getHours()).padStart(2, '0')}:${String(today.getMinutes()).padStart(2, '0')}`;
-  const selectedDate = selectedDates.length > 0 ? selectedDates[0] : todayStr;
-  document.getElementById('pp-date').value = selectedDate;
-  document.getElementById('pp-time').value = nowStr;
-  
-  // 初始化区域选项
-  renderAreaOptions('pp-area', '');
-  
-  showModal('modalPhoto');
+  openUnifiedInput('photo');
 }
 
 function showPhotoOptions() {
@@ -1830,6 +1906,7 @@ async function parseVoiceTextForPhoto() {
     hint.textContent = '⏳ 正在解析语音内容...';
   }
   
+  const plans = M.PLANS[currentProjectId] || [];
   try {
     const response = await fetch(API_BASE + '/parse-photo', {
       method: 'POST',
@@ -1838,7 +1915,8 @@ async function parseVoiceTextForPhoto() {
         caption: voiceText,
         projectId: currentProjectId,
         areas: getProjectAreas() || [],
-        type: 'text_only'
+        type: 'text_only',
+        plans: plans.map(p => ({ id: p.id, taskName: p.taskName, areaId: p.areaId, buildingNo: p.buildingNo, floorNo: p.floorNo, progress: p.progress }))
       })
     }).catch(error => {
       throw new Error('网络错误: ' + error.message);
@@ -1874,7 +1952,7 @@ async function parseVoiceTextForPhoto() {
   } catch (error) {
     console.error('语音解析失败:', error);
     // 降级到 mock
-    const parsed = M.mockParsePhoto(voiceText, M.AREAS[currentProjectId] || []);
+    const parsed = M.mockParsePhoto(voiceText, M.AREAS[currentProjectId] || [], plans);
     document.getElementById('pp-type').value = parsed.type || 'progress';
     document.getElementById('pp-area').value = parsed.areaId || '';
     document.getElementById('pp-task').value = parsed.taskHint || parsed.payload?.taskName || '';
@@ -2655,33 +2733,1045 @@ function savePhotoEvent() {
 }
 
 // ============================================================
-// 手动录入
+// 统一录入（替换语音/拍照/手动三个独立模态）
 // ============================================================
-function openManualInput(planId) {
-  // 设置默认日期和时间：优先选中日期，否则今天；时间为当前时间
+
+let _unifiedMode = 'manual'; // 'manual' | 'voice' | 'photo'
+
+function openUnifiedInput(mode = 'manual', planId) {
+  _unifiedMode = mode;
+  _prevPlanId = '';
+
   const today = new Date();
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-  const nowStr = `${String(today.getHours()).padStart(2, '0')}:${String(today.getMinutes()).padStart(2, '0')}`;
-  
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+  const nowStr = `${String(today.getHours()).padStart(2,'0')}:${String(today.getMinutes()).padStart(2,'0')}`;
   const defaultDate = selectedDates.length > 0 ? selectedDates[0] : todayStr;
+
   document.getElementById('m-date').value = defaultDate;
   document.getElementById('m-time').value = nowStr;
-  
-  // 渲染当天的计划列表
+  document.getElementById('m-type').value = 'progress';
+  document.getElementById('m-note').value = '';
+
+  // 清空共享文本区
+  document.getElementById('uSharedText').value = '';
+  _originalSharedText = '';
+  document.getElementById('uOptimizeHint').style.display = 'none';
+  setSharedTextMode(mode);
+
+  // 重置语音/拍照区
+  document.getElementById('unifiedVoiceSection').style.display = 'none';
+  document.getElementById('unifiedPhotoSection').style.display = 'none';
+  document.getElementById('uConfidenceRow').style.display = 'none';
+  document.getElementById('uVoiceToggleBtn').classList.remove('btn-primary');
+  document.getElementById('uVoiceToggleBtn').classList.add('btn-outline');
+  document.getElementById('uPhotoToggleBtn').classList.remove('btn-primary');
+  document.getElementById('uPhotoToggleBtn').classList.add('btn-outline');
+
+  // 根据 mode 展开对应输入区
+  if (mode === 'voice') {
+    document.getElementById('unifiedVoiceSection').style.display = 'block';
+    document.getElementById('uVoiceToggleBtn').classList.remove('btn-outline');
+    document.getElementById('uVoiceToggleBtn').classList.add('btn-primary');
+  } else if (mode === 'photo') {
+    document.getElementById('unifiedPhotoSection').style.display = 'block';
+    document.getElementById('uPhotoToggleBtn').classList.remove('btn-outline');
+    document.getElementById('uPhotoToggleBtn').classList.add('btn-primary');
+  }
+
+  // 渲染计划列表和动态表单
   renderPlanSelect(defaultDate);
-  
-  // 默认完成类型为计划内
-  document.getElementById('m-completion-type').value = 'planned';
-  
   renderManualForm();
-  populateAreaSelects('m-area');
-  
+  renderAreaOptions('m-area', '');
+
   if (planId) {
     document.getElementById('m-plan').value = planId;
     onPlanSelect(planId);
+  } else {
+    document.getElementById('m-completion-type').value = 'unplanned';
   }
-  
+
   showModal('modalManual');
+}
+
+function toggleUnifiedVoiceSection() {
+  const section = document.getElementById('unifiedVoiceSection');
+  const btn = document.getElementById('uVoiceToggleBtn');
+  const photoSection = document.getElementById('unifiedPhotoSection');
+  const photoBtn = document.getElementById('uPhotoToggleBtn');
+  const isHidden = section.style.display === 'none';
+  section.style.display = isHidden ? 'block' : 'none';
+  btn.classList.toggle('btn-primary', isHidden);
+  btn.classList.toggle('btn-outline', !isHidden);
+  if (isHidden) {
+    photoSection.style.display = 'none';
+    photoBtn.classList.remove('btn-primary');
+    photoBtn.classList.add('btn-outline');
+    setSharedTextMode('voice');
+  } else {
+    setSharedTextMode('manual');
+  }
+}
+
+function toggleUnifiedPhotoSection() {
+  const section = document.getElementById('unifiedPhotoSection');
+  const btn = document.getElementById('uPhotoToggleBtn');
+  const voiceSection = document.getElementById('unifiedVoiceSection');
+  const voiceBtn = document.getElementById('uVoiceToggleBtn');
+  const isHidden = section.style.display === 'none';
+  section.style.display = isHidden ? 'block' : 'none';
+  btn.classList.toggle('btn-primary', isHidden);
+  btn.classList.toggle('btn-outline', !isHidden);
+  if (isHidden) {
+    voiceSection.style.display = 'none';
+    voiceBtn.classList.remove('btn-primary');
+    voiceBtn.classList.add('btn-outline');
+    setSharedTextMode('photo');
+  } else {
+    setSharedTextMode('manual');
+  }
+}
+
+function toggleUnifiedRecording() {
+  const btn = document.getElementById('uRecordingBtn');
+  const hint = document.getElementById('uRecordingHint');
+  if (btn.classList.contains('recording')) {
+    btn.classList.remove('recording');
+    hint.textContent = '点击麦克风开始录音';
+    mockUnifiedRecordingComplete();
+  } else {
+    btn.classList.add('recording');
+    hint.textContent = '录音中... 说"停止"或点击结束';
+    setTimeout(() => {
+      if (btn.classList.contains('recording')) toggleUnifiedRecording();
+    }, 2500);
+  }
+}
+
+function mockUnifiedRecordingComplete() {
+  const texts = [
+    '员工餐厅区天花吊顶龙骨安装，张师傅带了两个人在做，进度到 80%',
+    '高管办公区墙面基层处理完成 50%，王师傅负责',
+    '多功能厅日常安全巡检，一切正常',
+    '商业展示区临时用电有点问题，需要整改',
+    'VIP 接待室墙面找平开始施工，李师傅带一人'
+  ];
+  document.getElementById('uSharedText').value = texts[Math.floor(Math.random() * texts.length)];
+  setSharedTextMode('voice');
+}
+
+function setSharedTextMode(mode) {
+  const ta = document.getElementById('uSharedText');
+  if (mode === 'voice') {
+    ta.placeholder = '语音识别结果在此，可修改后点击「解析」结构化';
+  } else if (mode === 'photo') {
+    ta.placeholder = '图片识别结果在此，可修改后点击「解析」结构化';
+  } else {
+    ta.placeholder = '直接输入文字，点击「解析」结构化，或「优化」润色';
+  }
+}
+
+// 统一文本解析（调 LLM 语音解析接口，降级 mock）
+async function parseUnifiedSharedText() {
+  const text = document.getElementById('uSharedText').value.trim();
+  if (!text) { showToast('请输入文本内容', 'warning'); return; }
+
+  // 判断来源模式
+  const isPhoto = _unifiedMode === 'photo' || document.getElementById('unifiedPhotoSection').style.display === 'block';
+  const sourceMode = isPhoto ? 'photo' : 'voice';
+
+  const textarea = document.getElementById('uSharedText');
+  const parent = textarea.parentElement;
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;overflow:hidden;pointer-events:none;';
+  const scanLine = document.createElement('div');
+  scanLine.className = 'scan-line';
+  scanLine.style.height = textarea.offsetHeight + 'px';
+  parent.style.position = 'relative';
+  parent.appendChild(wrapper);
+  wrapper.appendChild(scanLine);
+
+  await new Promise(r => setTimeout(r, 800));
+  wrapper.remove();
+  textarea.classList.add('textarea-fading');
+
+  const areas = getProjectAreas();
+  const plans = M.PLANS[currentProjectId] || [];
+  const workers = M.WORKERS || [];
+  let parsed;
+  try {
+    const endpoint = isPhoto ? '/parse-photo' : '/parse-voice';
+    const body = isPhoto
+      ? { caption: text, projectId: currentProjectId, areas: areas.map(a => ({ id: a.id, name: a.name })), plans: plans.map(p => ({ id: p.id, taskName: p.taskName, areaId: p.areaId, buildingNo: p.buildingNo, floorNo: p.floorNo, progress: p.progress })), type: 'text_only' }
+      : { text, projectId: currentProjectId, areas: areas.map(a => ({ id: a.id, name: a.name })), plans: plans.map(p => ({ id: p.id, taskName: p.taskName, areaId: p.areaId, buildingNo: p.buildingNo, floorNo: p.floorNo, progress: p.progress })) };
+    const r = await fetch(API_BASE + endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    parsed = await r.json();
+  } catch (e) {
+    parsed = isPhoto
+      ? M.mockParsePhoto(text, M.AREAS[currentProjectId] || [], plans)
+      : M.mockParseVoice(text, currentProjectId, areas, workers, plans);
+  }
+
+  textarea.classList.remove('textarea-fading');
+  textarea.classList.add('textarea-optimized');
+  const summary = buildParseSummary(parsed);
+  if (summary) {
+    _originalSharedText = text;
+    await typeText(textarea, summary, 30);
+  }
+  applyUnifiedParseResult(parsed, sourceMode);
+  showToast('解析完成，已填充下方表单', 'success');
+}
+
+function buildParseSummary(parsed) {
+  const parts = [];
+  if (parsed.type) parts.push('类型:' + parsed.type);
+  if (parsed.areaName) parts.push('区域:' + parsed.areaName);
+  if (parsed.buildingNo) parts.push(parsed.buildingNo);
+  if (parsed.floorNo) parts.push(parsed.floorNo);
+  if (parsed.completionType === 'unplanned') parts.push('计划外');
+  if (parsed.payload?.taskName) parts.push(parsed.payload.taskName);
+  if (parsed.payload?.progress) parts.push('进度' + parsed.payload.progress);
+  if (parsed.payload?.owner) parts.push('负责人' + parsed.payload.owner);
+  if (parsed.laborRequirements && parsed.laborRequirements.length > 0) {
+    parts.push(parsed.laborRequirements.map(r => r.trade + r.count + '人').join('、'));
+  }
+  return parts.length > 0 ? parts.join('，') : '';
+}
+
+// 统一优化（带扫描线 + 逐字动画）
+let _originalSharedText = '';
+
+async function optimizeUnifiedSharedText() {
+  const textarea = document.getElementById('uSharedText');
+  const hint = document.getElementById('uOptimizeHint');
+  const optimizeBtn = document.getElementById('uOptimizeBtn');
+  const voiceText = textarea.value.trim();
+
+  if (!voiceText) { showToast('请先输入文本内容', 'warning'); return; }
+
+  if (_originalSharedText !== voiceText) _originalSharedText = voiceText;
+
+  optimizeBtn.disabled = true;
+  optimizeBtn.innerHTML = '⏳ 优化中...';
+  hint.textContent = '正在优化文本内容...';
+  hint.style.display = 'block';
+  textarea.classList.add('textarea-animating');
+
+  // 扫描线动画
+  const parent = textarea.parentElement;
+  const wrapper = document.createElement('div');
+  wrapper.className = 'animation-wrapper';
+  wrapper.style.width = textarea.offsetWidth + 'px';
+  wrapper.style.height = textarea.offsetHeight + 'px';
+  const scanLine = document.createElement('div');
+  scanLine.className = 'scan-line';
+  scanLine.style.height = textarea.offsetHeight + 'px';
+  parent.style.position = 'relative';
+  parent.appendChild(wrapper);
+  wrapper.appendChild(scanLine);
+
+  try {
+    await new Promise(r => setTimeout(r, 1000));
+    wrapper.remove();
+    textarea.classList.add('textarea-fading');
+    await new Promise(r => setTimeout(r, 400));
+
+    const areas = getProjectAreas();
+    const plans = M.PLANS[currentProjectId] || [];
+    const response = await fetch(API_BASE + '/optimize-text', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: voiceText,
+        projectId: currentProjectId,
+        areas: areas.map(a => ({ id: a.id, name: a.name })),
+        plans: plans.map(p => ({ id: p.id, taskName: p.taskName, process: p.process }))
+      })
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      if (result.optimizedText) {
+        textarea.classList.remove('textarea-fading');
+        textarea.classList.add('textarea-optimized');
+        await typeText(textarea, result.optimizedText, 35);
+        hint.innerHTML = `✨ 优化完成！<a href="#" onclick="restoreUnifiedOriginalText()" style="color:#00adef;text-decoration:underline;">点击恢复原文</a>`;
+        showToast('文本已优化', 'success');
+      } else {
+        textarea.classList.remove('textarea-fading');
+        hint.textContent = '优化失败，保持原内容';
+        setTimeout(() => { hint.style.display = 'none'; }, 3000);
+      }
+    } else {
+      throw new Error('HTTP ' + response.status);
+    }
+  } catch {
+    textarea.classList.remove('textarea-fading');
+    const optimized = mockOptimizeText(voiceText);
+    const optimizedText = optimized.optimizedText || optimized;
+    await typeText(textarea, optimizedText, 35);
+    hint.innerHTML = `✨ 本地优化完成！<a href="#" onclick="restoreUnifiedOriginalText()" style="color:#00adef;text-decoration:underline;">点击恢复原文</a>`;
+    showToast('文本优化完成（本地模式）', 'success');
+  }
+
+  textarea.classList.remove('textarea-animating', 'textarea-fading', 'textarea-optimized');
+  optimizeBtn.disabled = false;
+  optimizeBtn.innerHTML = '✨ 优化';
+  hint.style.display = 'block';
+
+  // 弹出信息补全窗
+  setTimeout(() => showOptimizationPopup(), 600);
+}
+
+function showOptimizationPopup() {
+  const type = document.getElementById('m-type').value;
+  const expected = getExpectedFields(type);
+  const plans = M.PLANS[currentProjectId] || [];
+  const hasPlanField = expected.includes('m-plan');
+  const planSelected = document.getElementById('m-plan')?.value;
+  const showPlanPicker = hasPlanField && !planSelected && plans.length > 0;
+
+  // 检查是否有任何字段缺失或可选计划，都没有则跳过
+  const anyMissing = expected.some(id => {
+    const el = document.getElementById(id);
+    if (!el) return false;
+    if (el.type === 'select-one') return !el.value || !el.querySelector('option:checked')?.value;
+    return !el.value;
+  });
+  if (!anyMissing && !showPlanPicker) return;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'opt-popup-overlay';
+  let html = `<div class="opt-popup">
+    <h3>📋 信息补全</h3>
+    <p style="font-size:13px;color:#64748b;margin:-8px 0 16px;">请确认或补充以下信息</p>`;
+
+  if (showPlanPicker) {
+    html += `<div class="opt-popup-row">
+      <label>关联今日计划（点击选择，自动填充下方字段）</label>
+      <div id="opt-plan-list">`;
+    plans.forEach((p, i) => {
+      const task = p.taskName || p.process || '未命名任务';
+      const area = p.areaId || p.area || '';
+      const loc = [p.buildingNo, p.floorNo].filter(Boolean).join(' ');
+      html += `<div class="opt-plan-card" data-plan-id="${p.id}" onclick="selectOptPlan(this,'${p.id}')">
+        <span class="checkmark">✓</span>
+        <div class="opt-plan-card-title">${task}</div>
+        <div class="opt-plan-card-detail">${[loc, area, '进度' + (p.progress || '0%')].filter(Boolean).join(' | ')}</div>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  // 渲染所有预期字段（包含已有值的，方便计划填充后看到）
+  expected.forEach(id => {
+    if (id === 'm-plan') return; // plan 用卡片选择
+    const el = document.getElementById(id);
+    if (!el) return;
+    const curVal = el.value;
+    const label = el?.previousElementSibling?.textContent || id.replace('m-', '').replace(/-/g, ' ');
+    const inputId = 'opt-fill-' + id;
+    const isEmpty = el.type === 'select-one' ? (!curVal || !el.querySelector('option:checked')?.value) : !curVal;
+    const borderStyle = isEmpty ? 'border-color:#ef4444;' : '';
+
+    if (id === 'm-area') {
+      const areas = getProjectAreas();
+      html += `<div class="opt-popup-row"><label>${label}${isEmpty ? ' <span style="color:#ef4444;">（未填）</span>' : ''}</label>
+        <select id="${inputId}" style="${borderStyle}"><option value="">— 请选择 —</option>
+        ${areas.map(a => `<option value="${a.id}" ${a.id === curVal ? 'selected' : ''}>${a.name}</option>`).join('')}</select></div>`;
+    } else if (id === 'm-owner' && M.WORKERS?.length) {
+      html += `<div class="opt-popup-row"><label>${label}${isEmpty ? ' <span style="color:#ef4444;">（未填）</span>' : ''}</label>
+        <input id="${inputId}" list="opt-worker-list" placeholder="输入或选择负责人" value="${curVal}" style="${borderStyle}">
+        <datalist id="opt-worker-list">${M.WORKERS.map(w => `<option value="${w.name}">`).join('')}</datalist></div>`;
+    } else {
+      html += `<div class="opt-popup-row"><label>${label}${isEmpty ? ' <span style="color:#ef4444;">（未填）</span>' : ''}</label>
+        <input id="${inputId}" placeholder="请输入${label}" value="${curVal}" style="${borderStyle}"></div>`;
+    }
+  });
+
+  // 劳动力预览（计划选中后显示）
+  html += `<div class="opt-popup-row" id="opt-labor-row" style="display:none;">
+    <label>劳动力</label>
+    <span id="opt-labor-preview" style="font-size:13px;color:#0f172a;"></span>
+  </div>`;
+
+  html += `<div class="opt-popup-actions">
+    <button class="btn btn-outline" onclick="this.closest('.opt-popup-overlay').remove()">跳过</button>
+    <button class="btn btn-primary" onclick="confirmOptFill(this)">✓ 确认补全</button>
+  </div></div>`;
+
+  overlay.innerHTML = html;
+  document.body.appendChild(overlay);
+}
+
+// 选择计划卡片 → 填充弹窗内的控件
+window.selectOptPlan = function(el, planId) {
+  document.querySelectorAll('.opt-plan-card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  const plans = M.PLANS[currentProjectId] || [];
+  const plan = plans.find(p => p.id === planId);
+  if (!plan) return;
+
+  // 存入选中的计划 ID，确认时再写入表单
+  el.closest('.opt-popup').dataset.selectedPlan = planId;
+
+  // 填充弹窗内的控件
+  const fill = (fieldId, val) => {
+    const input = document.getElementById('opt-fill-' + fieldId);
+    if (input && val) input.value = val;
+  };
+  fill('m-building-no', plan.buildingNo);
+  fill('m-floor-no', plan.floorNo);
+  fill('m-area', plan.areaId || plan.area);
+  fill('m-owner', plan.owner);
+  fill('m-task', plan.taskName || plan.process);
+  fill('m-progress', plan.progress);
+
+  // 劳动力：显示弹窗内劳动力预览
+  const laborList = plan.laborRequirements || plan.laborSchedule || [];
+  const laborRow = document.getElementById('opt-labor-row');
+  const laborPreview = document.getElementById('opt-labor-preview');
+  if (laborRow && laborPreview) {
+    if (laborList.length > 0) {
+      laborPreview.textContent = laborList.map(l => (l.trade || l.laborType || '') + (l.count || 0) + '人').filter(Boolean).join('、');
+      laborRow.style.display = 'block';
+    } else {
+      laborRow.style.display = 'none';
+    }
+  }
+};
+
+// 确认补全：把用户在弹窗中填写的内容同步到表单和文本框
+window.confirmOptFill = function(btn) {
+  const overlay = btn.closest('.opt-popup-overlay');
+  const popup = overlay.querySelector('.opt-popup');
+
+  // 1. 处理选中的计划
+  const planId = popup.dataset.selectedPlan;
+  if (planId) {
+    const plans = M.PLANS[currentProjectId] || [];
+    const plan = plans.find(p => p.id === planId);
+    if (plan) {
+      doPlanSelect(planId);
+      // 计划内的劳动力
+      const laborList = plan.laborRequirements || plan.laborSchedule || [];
+      if (laborList.length > 0) {
+        window._mPlanLabor = laborList;
+        renderManualLaborRows(laborList, plan);
+      }
+    }
+  }
+
+  // 2. 同步弹窗中所有字段到表单
+  overlay.querySelectorAll('[id^="opt-fill-"]').forEach(input => {
+    const fieldId = input.id.replace('opt-fill-', '');
+    const val = input.value.trim();
+    const target = document.getElementById(fieldId);
+    if (!target) return;
+    if (val) {
+      if (target.tagName === 'SELECT') {
+        const opt = target.querySelector(`option[value="${val}"]`);
+        if (opt) target.value = val;
+      } else {
+        target.value = val;
+      }
+      highlightField(fieldId);
+    }
+  });
+
+  // 3. 如果关联了计划，触发 diff 检测
+  if (planId) {
+    checkManualLaborDiff();
+    checkAllFieldDiffs();
+  }
+
+  // 4. 重新构建优化文本
+  rebuildOptimizedText();
+  overlay.remove();
+};
+
+function rebuildOptimizedText() {
+  const textarea = document.getElementById('uSharedText');
+  const parts = [];
+  const type = document.getElementById('m-type').value;
+  const fields = {
+    buildingNo: document.getElementById('m-building-no')?.value,
+    floorNo: document.getElementById('m-floor-no')?.value,
+    taskName: document.getElementById('m-task')?.value,
+    owner: document.getElementById('m-owner')?.value,
+    progress: document.getElementById('m-progress')?.value
+  };
+  if (fields.buildingNo) parts.push(fields.buildingNo);
+  if (fields.floorNo) parts.push(fields.floorNo);
+  if (fields.taskName) parts.push(fields.taskName);
+  if (fields.owner) parts.push('负责人' + fields.owner);
+  if (fields.progress) parts.push('进度' + fields.progress);
+  const laborRows = document.querySelectorAll('#m-labor-rows .labor-row');
+  const labor = [];
+  laborRows.forEach((r, i) => {
+    const t = document.getElementById('m-labor-type-' + i);
+    const c = document.getElementById('m-labor-count-' + i);
+    if (t && c && t.value.trim()) labor.push(t.value.trim() + c.value + '人');
+  });
+  if (labor.length > 0) parts.push(labor.join('、'));
+  const planId = document.getElementById('m-plan')?.value;
+  if (planId) parts.unshift('计划内');
+  textarea.value = parts.length > 0 ? parts.join('，') : textarea.value;
+}
+
+function restoreUnifiedOriginalText() {
+  const textarea = document.getElementById('uSharedText');
+  const hint = document.getElementById('uOptimizeHint');
+  if (_originalSharedText) {
+    textarea.value = _originalSharedText;
+    hint.textContent = '已恢复原文';
+    setTimeout(() => { hint.style.display = 'none'; }, 2000);
+  }
+}
+
+function clearUnifiedSharedText() {
+  document.getElementById('uSharedText').value = '';
+  _originalSharedText = '';
+}
+
+function highlightField(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.remove('field-highlight', 'field-unmatched');
+  void el.offsetWidth;
+  el.classList.add('field-highlight');
+  setTimeout(() => el.classList.remove('field-highlight'), 700);
+}
+
+function highlightFieldUnmatched(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.remove('field-highlight', 'field-unmatched');
+  void el.offsetWidth;
+  el.classList.add('field-unmatched');
+  setTimeout(() => el.classList.remove('field-unmatched'), 15000);
+}
+
+function getExpectedFields(type) {
+  const map = {
+    progress: ['m-task', 'm-owner', 'm-progress', 'm-building-no', 'm-floor-no', 'm-area', 'm-plan'],
+    material: ['m-material', 'm-spec', 'm-quantity', 'm-unit'],
+    safety: ['m-checktype', 'm-result'],
+    coordination: ['m-topic', 'm-parties', 'm-summary'],
+    attendance: ['m-att-count', 'm-att-status'],
+    issue: ['m-task', 'm-owner']
+  };
+  return map[type] || [];
+}
+
+function applyUnifiedParseResult(parsed, sourceMode) {
+  if (sourceMode) _unifiedMode = sourceMode;
+  document.getElementById('m-type').value = parsed.type || 'progress';
+  highlightField('m-type');
+  renderManualForm();
+
+  const delayed = [];
+
+  // --- 完成类型、施工位置、劳动力 ---
+  if (parsed.completionType && ['planned', 'unplanned'].includes(parsed.completionType)) {
+    document.getElementById('m-completion-type').value = parsed.completionType;
+    highlightField('m-completion-type');
+  }
+  if (parsed.buildingNo) {
+    document.getElementById('m-building-no').value = parsed.buildingNo;
+    highlightField('m-building-no');
+  }
+  if (parsed.floorNo) {
+    document.getElementById('m-floor-no').value = parsed.floorNo;
+    highlightField('m-floor-no');
+  }
+
+  // 劳动力列表
+  if (parsed.laborRequirements && Array.isArray(parsed.laborRequirements) && parsed.laborRequirements.length > 0) {
+    renderManualLaborRows(parsed.laborRequirements, null);
+  }
+
+  // --- 原有字段 ---
+  if (parsed.payload?.taskName) {
+    const el = document.getElementById('m-task');
+    if (el) { el.value = parsed.payload.taskName; highlightField('m-task'); }
+  }
+  if (parsed.payload?.owner) {
+    const el = document.getElementById('m-owner');
+    if (el) { el.value = parsed.payload.owner; highlightField('m-owner'); }
+  }
+  if (parsed.payload?.progress) {
+    const el = document.getElementById('m-progress');
+    if (el) { el.value = parsed.payload.progress; highlightField('m-progress'); }
+  }
+  if (parsed.payload?.headcount) {
+    const hc = parseInt(parsed.payload.headcount) || 0;
+    const el = document.getElementById('m-labor-count-0');
+    if (el && !parsed.laborRequirements) { el.value = hc; highlightField('m-labor-count-0'); }
+  }
+  if (parsed.caption || parsed.payload?.caption) {
+    const el = document.getElementById('m-caption');
+    if (el) { el.value = parsed.caption || parsed.payload?.caption; highlightField('m-caption'); }
+  }
+
+  // 显示置信度
+  const conf = document.getElementById('u-confidence');
+  const confRow = document.getElementById('uConfidenceRow');
+  if (conf && confRow) {
+    conf.textContent = `${((parsed.confidence || 0) * 100).toFixed(0)}%`;
+    confRow.style.display = 'flex';
+  }
+
+  // 处理区域
+  const areaRef = parsed.areaId || parsed.areaName || '';
+  if (areaRef) {
+    let area = findAreaById(areaRef) || findAreaByName(areaRef);
+    if (area) {
+      renderAreaOptions('m-area', area.id);
+      highlightField('m-area');
+    } else {
+      showAreaConfirmDialog(areaRef, 'm-area');
+    }
+  }
+
+  // 处理关联计划
+  if (parsed.planId) {
+    const el = document.getElementById('m-plan');
+    if (el) {
+      const option = el.querySelector(`option[value="${parsed.planId}"]`);
+      if (option) {
+        el.value = parsed.planId;
+        _prevPlanId = parsed.planId;
+        highlightField('m-plan');
+      }
+    }
+    // 设置计划劳动力数据，触发 diff 检测
+    const projectPlans = M.PLANS[currentProjectId] || [];
+    const plan = projectPlans.find(p => p.id === parsed.planId);
+    if (plan) {
+      const planLabor = plan.laborRequirements || plan.laborSchedule || [];
+      window._mPlanLabor = planLabor;
+    }
+  } else {
+    window._mPlanLabor = null;
+  }
+  checkManualLaborDiff();
+  checkAllFieldDiffs();
+
+  // 标记未匹配的字段（15秒红色脉冲提醒）
+  const expected = getExpectedFields(document.getElementById('m-type').value);
+  let firstUnmatched = null;
+  expected.forEach(id => {
+    const el = document.getElementById(id);
+    if (el && !el.value && el.type !== 'select-one') {
+      highlightFieldUnmatched(id);
+      if (!firstUnmatched) firstUnmatched = el;
+    } else if (el && !el.value && el.type === 'select-one' && !el.querySelector('option:checked')?.value) {
+      highlightFieldUnmatched(id);
+      if (!firstUnmatched) firstUnmatched = el;
+    }
+  });
+  // 劳动力行空值检测（动态生成的工种行）
+  const firstLaborType = document.getElementById('m-labor-type-0');
+  if (firstLaborType && !firstLaborType.value.trim()) {
+    highlightFieldUnmatched('m-labor-type-0');
+    if (!firstUnmatched) firstUnmatched = firstLaborType;
+  }
+  // 自动滚动到第一个未匹配字段
+  if (firstUnmatched) {
+    setTimeout(() => firstUnmatched.scrollIntoView({ behavior: 'smooth', block: 'center' }), 200);
+  }
+}
+
+// 字段与计划对比
+const _fieldPlanMap = {
+  'm-task': ['taskName', 'process'],
+  'm-progress': ['progress'],
+  'm-owner': ['owner'],
+  'm-building-no': ['buildingNo'],
+  'm-floor-no': ['floorNo'],
+  'm-area': ['areaId', 'area']
+};
+
+function clearFieldDiffWarnings() {
+  document.querySelectorAll('.field-diff-warning').forEach(el => el.remove());
+  for (const fieldId of Object.keys(_fieldPlanMap)) {
+    const el = document.getElementById(fieldId);
+    if (el) el.style.borderColor = '';
+  }
+}
+
+function showFieldDiffWarning(fieldId, planValue) {
+  const el = document.getElementById(fieldId);
+  if (!el) return;
+  let warn = el.parentElement.querySelector('.field-diff-warning');
+  if (!warn) {
+    warn = document.createElement('span');
+    warn.className = 'field-diff-warning';
+    el.parentNode.insertBefore(warn, el.nextSibling);
+  }
+  warn.textContent = '⚠ 计划要求：' + planValue;
+  el.style.borderColor = '#fca5a5';
+}
+
+function checkAllFieldDiffs() {
+  clearFieldDiffWarnings();
+  const planId = document.getElementById('m-plan').value;
+  if (!planId) return;
+  const plans = M.PLANS[currentProjectId] || [];
+  const plan = plans.find(p => p.id === planId);
+  if (!plan) return;
+  for (const [fieldId, planKeys] of Object.entries(_fieldPlanMap)) {
+    const el = document.getElementById(fieldId);
+    if (!el) continue;
+    const currentVal = el.value;
+    let planVal = '';
+    for (const key of planKeys) {
+      const v = plan[key];
+      if (v) { planVal = String(v); break; }
+    }
+    if (planVal && currentVal && currentVal !== planVal) {
+      showFieldDiffWarning(fieldId, planVal);
+    }
+  }
+}
+
+// 完成类型切换：有计划→无计划时询问清除
+async function onCompletionTypeChange() {
+  const newVal = document.getElementById('m-completion-type').value;
+  const planId = document.getElementById('m-plan').value;
+
+  if (newVal === 'unplanned' && planId) {
+    // 有计划→无计划：询问是否清空
+    const hasData = document.getElementById('m-building-no').value ||
+      document.getElementById('m-task')?.value ||
+      document.getElementById('m-owner')?.value ||
+      document.getElementById('m-progress')?.value;
+    if (hasData) {
+      const keep = await showConfirm('切换为「计划外」将清除已填充的计划数据，是否保留？', '切换完成类型', '🔄');
+      if (!keep) {
+        document.getElementById('m-building-no').value = '';
+        document.getElementById('m-floor-no').value = '';
+        document.getElementById('m-area').value = '';
+        document.getElementById('m-plan').value = '';
+        if (document.getElementById('m-task')) document.getElementById('m-task').value = '';
+        if (document.getElementById('m-owner')) document.getElementById('m-owner').value = '';
+        if (document.getElementById('m-progress')) document.getElementById('m-progress').value = '';
+        if (document.getElementById('m-caption')) document.getElementById('m-caption').value = '';
+        window._mPlanLabor = null;
+        const lr = document.getElementById('m-labor-rows');
+        if (lr) lr.innerHTML = `<div class="form-row labor-row"><div class="form-group"><label class="form-label">工种</label><input class="form-input" type="text" id="m-labor-type-0" placeholder="如：木工" oninput="checkManualLaborDiff()"></div><div class="form-group"><label class="form-label">人数</label><input class="form-input" type="number" id="m-labor-count-0" value="0" min="0" oninput="checkManualLaborDiff()"></div></div>`;
+        window._mlr = 1;
+        clearFieldDiffWarnings();
+      }
+    }
+    // 无论保留还是清空，选中的计划都要解除
+    document.getElementById('m-plan').value = '';
+    _prevPlanId = '';
+    window._mPlanLabor = null;
+    clearFieldDiffWarnings();
+  } else if (newVal === 'planned' && !planId) {
+    // 无计划→有计划：提示先选计划，回退到 unplanned
+    showToast('请先选择关联计划', 'warning');
+    document.getElementById('m-completion-type').value = 'unplanned';
+    return;
+  }
+}
+
+// 统一拍照处理
+function fillSharedTextFromParseResult(parsed) {
+  const parts = [];
+  if (parsed.completionType === 'unplanned') parts.push('计划外');
+  if (parsed.buildingNo) parts.push(parsed.buildingNo);
+  if (parsed.floorNo) parts.push(parsed.floorNo);
+  if (parsed.payload?.taskName) parts.push(parsed.payload.taskName);
+  if (parsed.payload?.progress) parts.push('进度' + parsed.payload.progress);
+  if (parsed.payload?.owner) parts.push('负责人' + parsed.payload.owner);
+  if (parsed.payload?.headcount) parts.push(parsed.payload.headcount + '人');
+  if (parsed.laborRequirements && parsed.laborRequirements.length > 0) {
+    parts.push(parsed.laborRequirements.map(r => r.trade + r.count + '人').join('、'));
+  }
+  if (parsed.caption) parts.push(parsed.caption);
+  if (parts.length) {
+    document.getElementById('uSharedText').value = parts.join('，');
+    setSharedTextMode('photo');
+  }
+}
+
+// 粘贴截图支持
+function handleSharedTextPaste(e) {
+  const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+  let imageFile = null;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      imageFile = item.getAsFile();
+      break;
+    }
+  }
+  if (!imageFile) return; // 不是图片，走正常粘贴
+  e.preventDefault();
+
+  // 切换到拍照模式
+  const voiceSection = document.getElementById('unifiedVoiceSection');
+  const photoSection = document.getElementById('unifiedPhotoSection');
+  const voiceBtn = document.getElementById('uVoiceToggleBtn');
+  const photoBtn = document.getElementById('uPhotoToggleBtn');
+  voiceSection.style.display = 'none';
+  voiceBtn.classList.remove('btn-primary');
+  voiceBtn.classList.add('btn-outline');
+  photoSection.style.display = 'block';
+  photoBtn.classList.remove('btn-outline');
+  photoBtn.classList.add('btn-primary');
+
+  // 清除预览残留
+  if (vlmAnimationRunning) hideVLMVisualization();
+  document.getElementById('uPhotoUploadZone').style.display = 'block';
+  document.getElementById('uPhotoPreviewArea').style.display = 'none';
+  document.getElementById('uPhotoPreviewImg').src = '';
+  document.getElementById('vlm-photo').src = '';
+  window._uPhotoBase64 = null;
+
+  // 用粘贴的图片对象构造一个 fake event 走统一上传流程
+  const fakeEvent = { target: { files: [imageFile] } };
+  handleUnifiedPhotoUpload(fakeEvent);
+}
+
+function handleUnifiedPhotoUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) { showToast('请选择图片文件', 'error'); return; }
+
+  // 清空 input 值，允许重复选择同一文件
+  if (event.target.tagName === 'INPUT') event.target.value = '';
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const previewUrl = e.target.result;
+    // 设置 VLM 和普通预览的图片
+    document.getElementById('vlm-photo').src = previewUrl;
+    document.getElementById('uPhotoPreviewImg').src = previewUrl;
+    window._uPhotoBase64 = previewUrl;
+
+    document.getElementById('uPhotoUploadZone').style.display = 'none';
+    document.getElementById('uPhotoPreviewArea').style.display = 'block';
+
+    // 显示 VLM 动画
+    showVLMVisualization();
+
+    // 上传并解析
+    uploadUnifiedPhoto(file);
+  };
+  reader.readAsDataURL(file);
+}
+
+async function uploadUnifiedPhoto(file) {
+  _unifiedMode = 'photo';
+  const hint = document.getElementById('uPhotoParseHint');
+  if (hint) hint.textContent = '⏳ AI 正在识别...';
+
+  try {
+    // 将文件转为 base64（不含 data: 前缀）
+    const base64Data = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result.split(',')[1]);
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+
+    const response = await fetch(API_BASE + '/parse-photo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: base64Data,
+        caption: '',
+        projectId: currentProjectId,
+        areas: getProjectAreas() || [],
+        type: 'photo'
+      })
+    });
+
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    const result = await response.json();
+    applyUnifiedParseResult(result, 'photo');
+    // 把识别结果写入共享文本框
+    fillSharedTextFromParseResult(result);
+    if (hint) hint.textContent = result.source === 'llm'
+      ? `🤖 LLM 真实识别 · ${result.latencyMs || 0}ms`
+      : `⚙️ Mock 模式`;
+
+  } catch (error) {
+    console.error('照片识别失败:', error);
+    const parsed = M.mockParsePhoto('', M.AREAS[currentProjectId] || []);
+    applyUnifiedParseResult(parsed, 'photo');
+    fillSharedTextFromParseResult(parsed);
+    if (hint) hint.textContent = '⚙️ Mock 模式（LLM 不可用）';
+  }
+
+  // 识别完成，隐藏 VLM 动画
+  hideVLMVisualization();
+}
+
+function clearUnifiedPhoto() {
+  if (vlmAnimationRunning) hideVLMVisualization();
+  document.getElementById('uPhotoUploadZone').style.display = 'block';
+  document.getElementById('uPhotoPreviewArea').style.display = 'none';
+  document.getElementById('uPhotoPreviewImg').src = '';
+  document.getElementById('vlm-photo').src = '';
+  window._uPhotoBase64 = null;
+}
+
+// 统一保存
+function saveUnifiedEvent() {
+  const type = document.getElementById('m-type').value;
+  const time = document.getElementById('m-time').value;
+  const areaId = document.getElementById('m-area').value;
+  const planId = document.getElementById('m-plan').value;
+  const completionType = document.getElementById('m-completion-type').value;
+  const formDate = document.getElementById('m-date').value;
+  const eventDate = formDate || (selectedDates.length > 0 ? selectedDates[0] : M.TODAY);
+  const buildingNo = document.getElementById('m-building-no').value;
+  const floorNo = document.getElementById('m-floor-no').value;
+  const mainOwner = document.getElementById('m-owner') ? document.getElementById('m-owner').value : '';
+
+  if (!areaId) { showToast('请选择区域', 'error'); return; }
+  if (!eventDate) { showToast('请选择日期', 'error'); return; }
+
+  let payload = {};
+  switch(type) {
+    case 'progress':
+      const laborRows = document.querySelectorAll('#m-labor-rows .labor-row');
+      const laborStats = {};
+      let totalHeadcount = 0;
+      laborRows.forEach((r, i) => {
+        const t = document.getElementById('m-labor-type-' + i);
+        const c = document.getElementById('m-labor-count-' + i);
+        if (t && c && t.value.trim()) {
+          laborStats[t.value.trim()] = parseInt(c.value) || 0;
+          totalHeadcount += parseInt(c.value) || 0;
+        }
+      });
+      const laborRequirements = [];
+      laborRows.forEach((r, i) => {
+        const t = document.getElementById('m-labor-type-' + i);
+        const c = document.getElementById('m-labor-count-' + i);
+        if (t && c && t.value.trim()) {
+          laborRequirements.push({ trade: t.value.trim(), count: parseInt(c.value) || 0 });
+        }
+      });
+      payload = {
+        taskName: document.getElementById('m-task') ? document.getElementById('m-task').value : '',
+        owner: mainOwner,
+        progress: fixProgress(document.getElementById('m-progress') ? document.getElementById('m-progress').value : ''),
+        headcount: totalHeadcount,
+        laborStats: Object.keys(laborStats).length > 0 ? laborStats : undefined,
+        laborRequirements: laborRequirements.length > 0 ? laborRequirements : undefined,
+        description: document.getElementById('m-caption') ? document.getElementById('m-caption').value : ''
+      };
+      break;
+    case 'material':
+      payload = {
+        materialName: document.getElementById('m-material') ? document.getElementById('m-material').value : '',
+        spec: document.getElementById('m-spec') ? document.getElementById('m-spec').value : '',
+        quantity: parseInt(document.getElementById('m-quantity') ? document.getElementById('m-quantity').value : 0) || 0,
+        unit: document.getElementById('m-unit') ? document.getElementById('m-unit').value : '件',
+        action: document.getElementById('m-action') ? document.getElementById('m-action').value : '进场'
+      };
+      break;
+    case 'safety':
+      const issues = document.getElementById('m-issues') ? document.getElementById('m-issues').value.split(';').map(s => s.trim()).filter(Boolean) : [];
+      payload = {
+        checkType: document.getElementById('m-checktype') ? document.getElementById('m-checktype').value : '',
+        result: document.getElementById('m-result') ? document.getElementById('m-result').value : '正常',
+        issues
+      };
+      break;
+    case 'coordination':
+      payload = {
+        topic: document.getElementById('m-topic') ? document.getElementById('m-topic').value : '',
+        parties: document.getElementById('m-parties') ? document.getElementById('m-parties').value.split(';').map(s => s.trim()).filter(Boolean) : [],
+        summary: document.getElementById('m-summary') ? document.getElementById('m-summary').value : '',
+        status: '已协调'
+      };
+      break;
+    case 'issue':
+      payload = {
+        taskName: document.getElementById('m-task') ? document.getElementById('m-task').value : '',
+        owner: mainOwner,
+        progress: '',
+        headcount: 0,
+        description: document.getElementById('m-caption') ? document.getElementById('m-caption').value : ''
+      };
+      break;
+    case 'attendance':
+      payload = {
+        headcount: parseInt(document.getElementById('m-att-count') ? document.getElementById('m-att-count').value : 0) || 0,
+        status: document.getElementById('m-att-status') ? document.getElementById('m-att-status').value : '正常'
+      };
+      break;
+  }
+
+  const event = {
+    id: `E${String(Date.now()).slice(-3)}`,
+    projectId: currentProjectId,
+    date: eventDate,
+    time: time || new Date().toTimeString().slice(0, 5),
+    type,
+    areaId,
+    planId: planId || undefined,
+    completionType: planId ? completionType : undefined,
+    buildingNo: buildingNo || undefined,
+    floorNo: floorNo || undefined,
+    owner: mainOwner || undefined,
+    payload,
+    submitter: '张明',
+    source: _unifiedMode,
+    confidence: _unifiedMode === 'manual' ? 1.0 : (parseFloat(document.getElementById('u-confidence') ? document.getElementById('u-confidence').textContent : '0') / 100 || 0.85),
+    status: 'draft',
+    note: document.getElementById('m-note').value
+  };
+
+  // 添加照片数据（仅拍照模式）
+  if (_unifiedMode === 'photo' && window._uPhotoBase64) {
+    event.photos = [{ id: `P${String(Date.now()).slice(-3)}`, caption: payload.description || '现场照片', area: areaId, data: window._uPhotoBase64 }];
+  }
+
+  // 添加原始文本（语音/拍照模式）
+  if (_unifiedMode !== 'manual') {
+    event.rawText = document.getElementById('uSharedText').value;
+  }
+
+  M.EVENTS.unshift(event);
+
+  // 同步关联计划
+  if (planId) {
+    const plans = M.PLANS[currentProjectId] || [];
+    const plan = plans.find(p => p.id === planId);
+    if (plan) {
+      if (payload.taskName) plan.taskName = payload.taskName;
+      if (payload.progress) plan.progress = payload.progress;
+    }
+  }
+  M.savePlansToStorage();
+  if (M.saveEventsToStorage) M.saveEventsToStorage();
+
+  closeModal('modalManual');
+  renderDailyPlanCard();
+  renderFilteredEvents();
+  renderStats();
+  if (typeof updateCalendar === 'function') updateCalendar();
+  showToast('事件已保存', 'success');
+}
+
+// ============================================================
+// 手动录入（旧版重定向到统一录入）
+// ============================================================
+function openManualInput(planId) {
+  openUnifiedInput('manual', planId);
 }
 
 // 渲染计划选择列表
@@ -2705,41 +3795,158 @@ function renderPlanSelect(dateStr) {
 }
 
 // 选择计划后自动填充数据
+let _prevPlanId = '';
+
 function onPlanSelect(planId) {
+  const hasData = document.getElementById('m-building-no').value ||
+    document.getElementById('m-area').value ||
+    (document.getElementById('m-task') && document.getElementById('m-task').value) ||
+    (document.getElementById('m-owner') && document.getElementById('m-owner').value) ||
+    (document.getElementById('m-progress') && document.getElementById('m-progress').value);
+
+  // 如果已有数据且切换了计划，询问确认
+  if (hasData && planId !== _prevPlanId && _prevPlanId !== undefined) {
+    const msg = planId ? '切换计划将覆盖已填写数据，是否继续？' : '取消关联计划将清空已填写数据，是否继续？';
+    showConfirm(msg, '切换关联计划', '🔄').then(proceed => {
+      if (proceed) {
+        doPlanSelect(planId);
+      } else {
+        // 恢复旧值
+        document.getElementById('m-plan').value = _prevPlanId;
+      }
+    });
+    return;
+  }
+  doPlanSelect(planId);
+}
+
+function doPlanSelect(planId) {
+  _prevPlanId = planId;
+  clearFieldDiffWarnings();
   if (!planId) {
-    // 选择"无"，清空自动填充的数据，完成类型设为计划外
     document.getElementById('m-completion-type').value = 'unplanned';
+    document.getElementById('m-labor-warning').style.display = 'none';
+    window._mPlanLabor = null;
     return;
   }
   
-  // 找到对应的计划
+  // 有关联计划 → 完成类型自动设为计划内
+  document.getElementById('m-completion-type').value = 'planned';
+
   const projectPlans = M.PLANS[currentProjectId] || [];
   const plan = projectPlans.find(p => p.id === planId);
   
   if (plan) {
-    // 先设置类型，动态表单渲染后才能填充进度/人数
     const planType = plan.type || plan.eventType;
     if (planType) {
       document.getElementById('m-type').value = planType;
       renderManualForm();
     }
-    // 填充基础字段
     if (plan.buildingNo) document.getElementById('m-building-no').value = plan.buildingNo;
     if (plan.floorNo) document.getElementById('m-floor-no').value = plan.floorNo;
     if (plan.areaId || plan.area) document.getElementById('m-area').value = plan.areaId || plan.area;
-    if (plan.owner) document.getElementById('m-owner').value = plan.owner;
-    // 填充动态表单字段（需在 renderManualForm 之后）
+    if (plan.owner) { const el = document.getElementById('m-owner'); if (el) el.value = plan.owner; }
     const taskName = plan.taskName || plan.process;
-    if (taskName) document.getElementById('m-task').value = taskName;
-    if (plan.progress) document.getElementById('m-progress').value = plan.progress;
+    if (taskName) { const el = document.getElementById('m-task'); if (el) el.value = taskName; }
+    if (plan.progress) { const el = document.getElementById('m-progress'); if (el) el.value = plan.progress; }
     const laborList = plan.laborRequirements || plan.laborSchedule || [];
-    const totalWorkers = laborList.reduce((sum, l) => sum + (l.count || 0), 0);
-    if (totalWorkers > 0 && document.getElementById('m-headcount')) {
-      document.getElementById('m-headcount').value = totalWorkers;
-    }
+    window._mPlanLabor = laborList;
+    renderManualLaborRows(laborList, plan);
     document.getElementById('m-completion-type').value = 'planned';
+    checkAllFieldDiffs();
     showToast('已自动填充计划数据', 'success');
   }
+}
+
+function renderManualLaborRows(laborList, plan) {
+  const container = document.getElementById('m-labor-rows');
+  if (!container) return;
+  if (!laborList || laborList.length === 0) {
+    container.innerHTML = `<div class="form-row labor-row">
+      <div class="form-group"><label class="form-label">工种</label><input class="form-input" type="text" id="m-labor-type-0" placeholder="如：木工" oninput="checkManualLaborDiff()"></div>
+      <div class="form-group"><label class="form-label">人数</label><input class="form-input" type="number" id="m-labor-count-0" value="0" min="0" oninput="checkManualLaborDiff()"></div>
+    </div>`;
+    return;
+  }
+  container.innerHTML = laborList.map((l, i) => `<div class="form-row labor-row">
+    <div class="form-group"><label class="form-label">工种</label><input class="form-input" type="text" id="m-labor-type-${i}" value="${(l.trade||l.laborType||'')}" placeholder="如：木工" oninput="checkManualLaborDiff()"></div>
+    <div class="form-group"><label class="form-label">人数</label><input class="form-input" type="number" id="m-labor-count-${i}" value="${l.count || 0}" min="0" oninput="checkManualLaborDiff()"></div>
+  </div>`).join('');
+  window._mlr = laborList.length;
+  checkManualLaborDiff();
+}
+
+function addManualLaborRow() {
+  const container = document.getElementById('m-labor-rows');
+  if (!container) return;
+  const idx = window._mlr || container.querySelectorAll('.labor-row').length;
+  container.insertAdjacentHTML('beforeend', `<div class="form-row labor-row">
+    <div class="form-group"><label class="form-label">工种</label><input class="form-input" type="text" id="m-labor-type-${idx}" placeholder="如：木工" oninput="checkManualLaborDiff()"></div>
+    <div class="form-group"><label class="form-label">人数</label><input class="form-input" type="number" id="m-labor-count-${idx}" value="0" min="0" oninput="checkManualLaborDiff()"></div>
+    <button class="btn btn-danger btn-sm" onclick="this.closest('.labor-row').remove();checkManualLaborDiff()" style="margin-top:24px;">✕</button>
+  </div>`);
+  window._mlr = idx + 1;
+  checkManualLaborDiff();
+}
+
+function checkManualLaborDiff() {
+  const warn = document.getElementById('m-labor-warning');
+  const planId = document.getElementById('m-plan').value;
+  if (!warn || !planId) { if (warn) warn.style.display = 'none'; return; }
+  const plan = window._mPlanLabor;
+  const rows = document.querySelectorAll('#m-labor-rows .labor-row');
+  let diff = false;
+  const currentMap = {};
+  rows.forEach((r, i) => {
+    const t = document.getElementById('m-labor-type-' + i);
+    const c = document.getElementById('m-labor-count-' + i);
+    if (t && c && t.value.trim()) currentMap[t.value.trim()] = parseInt(c.value) || 0;
+  });
+  // 检查计划内的工种是否有变动
+  for (const item of plan) {
+    const trade = item.trade || item.laborType;
+    if (!trade) continue;
+    if (currentMap[trade] !== (item.count || 0)) { diff = true; break; }
+  }
+  // 检查是否有计划外新增的工种
+  if (!diff) {
+    for (const trade of Object.keys(currentMap)) {
+      if (!plan.some(l => (l.trade||l.laborType) === trade)) { diff = true; break; }
+    }
+  }
+  if (diff) {
+    const details = plan.map(l => `${l.trade||l.laborType||''}${l.count}人`).filter(Boolean).join('、');
+    warn.innerHTML = `⚠ 计划要求：${details}`;
+    warn.style.display = 'inline-flex';
+  } else {
+    warn.style.display = 'none';
+  }
+}
+
+function checkManualProgressOver100() {
+  const tag = document.getElementById('m-progress-tag');
+  if (!tag) return;
+  const v = document.getElementById('m-progress').value.replace('%','');
+  const num = parseInt(v);
+  if (num > 100) {
+    tag.innerHTML = '<span style="font-size:12px;">⚠️</span> 超过100%，将标为超额完成';
+    tag.style.background = 'linear-gradient(135deg,#fef2f2,#fee2e2)';
+    tag.style.borderColor = '#fecaca';
+    tag.style.color = '#dc2626';
+  } else {
+    tag.innerHTML = '<span style="font-size:12px;">📌</span> 填总计划进度';
+    tag.style.background = 'linear-gradient(135deg,#fef9c3,#fef3c7)';
+    tag.style.borderColor = '#fde68a';
+    tag.style.color = '#92400e';
+  }
+}
+
+function checkDpProgressOver100() {
+  const warn = document.getElementById('dp-progress-warn');
+  if (!warn) return;
+  const v = document.getElementById('dp-progress').value.replace('%','');
+  const num = parseInt(v);
+  warn.style.display = num > 100 ? 'inline' : 'none';
 }
 
 function renderManualForm() {
@@ -2755,23 +3962,32 @@ function renderManualForm() {
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label class="form-label">进度 <span class="req">*</span></label>
-            <input class="form-input" type="text" id="m-progress" placeholder="如：80%">
+            <label class="form-label">进度 <span class="req">*</span>
+              <span id="m-progress-tag" style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:2px 8px;font-size:10px;font-weight:400;color:#92400e;background:linear-gradient(135deg,#fef9c3,#fef3c7);border:1px solid #fde68a;border-radius:3px;transform:rotate(-1deg);box-shadow:1px 1px 3px rgba(0,0,0,0.08);">
+                <span style="font-size:12px;">📌</span> 填总计划进度
+              </span>
+            </label>
+            <input class="form-input" type="text" id="m-progress" placeholder="如：80%" oninput="checkManualProgressOver100()">
           </div>
           <div class="form-group">
             <label class="form-label">负责人</label>
             <input class="form-input" type="text" id="m-owner" placeholder="如：张师傅">
           </div>
         </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">人数</label>
-            <input class="form-input" type="number" id="m-headcount" value="0" min="0">
+        <div style="margin:8px 0 4px;font-size:12px;font-weight:600;color:#334155;display:flex;align-items:center;gap:8px;">
+          <span>🧑‍🏭 劳动力</span>
+          <span id="m-labor-warning" style="display:none;font-size:10px;padding:2px 8px;border-radius:4px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca;"></span>
+        </div>
+        <div id="m-labor-rows">
+          <div class="form-row labor-row">
+            <div class="form-group"><label class="form-label">工种</label><input class="form-input" type="text" id="m-labor-type-0" placeholder="如：木工" oninput="checkManualLaborDiff()"></div>
+            <div class="form-group"><label class="form-label">人数</label><input class="form-input" type="number" id="m-labor-count-0" value="0" min="0" oninput="checkManualLaborDiff()"></div>
           </div>
-          <div class="form-group">
-            <label class="form-label">描述</label>
-            <input class="form-input" type="text" id="m-caption" placeholder="描述信息">
-          </div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="addManualLaborRow()" style="margin:4px 0 8px;font-size:11px;padding:2px 10px;">+ 添加工种</button>
+        <div class="form-group">
+          <label class="form-label">描述</label>
+          <input class="form-input" type="text" id="m-caption" placeholder="描述信息">
         </div>
       `;
       break;
@@ -2846,6 +4062,22 @@ function renderManualForm() {
         </div>
       `;
       break;
+    case 'issue':
+      html = `
+        <div class="form-group">
+          <label class="form-label">问题描述 <span class="req">*</span></label>
+          <input class="form-input" type="text" id="m-task" placeholder="如：临时用电线路不规范">
+        </div>
+        <div class="form-group">
+          <label class="form-label">负责人</label>
+          <input class="form-input" type="text" id="m-owner" placeholder="如：王工">
+        </div>
+        <div class="form-group">
+          <label class="form-label">详细说明</label>
+          <textarea class="form-textarea" id="m-caption" rows="2" placeholder="问题详情及处理建议"></textarea>
+        </div>
+      `;
+      break;
     case 'attendance':
       html = `
         <div class="form-row">
@@ -2870,103 +4102,7 @@ function renderManualForm() {
 }
 
 function saveManualEvent() {
-  const type = document.getElementById('m-type').value;
-  const time = document.getElementById('m-time').value;
-  const areaId = document.getElementById('m-area').value;
-  const planId = document.getElementById('m-plan').value;
-  const completionType = document.getElementById('m-completion-type').value;
-  
-  // 获取日期：优先使用表单中的日期，否则使用选中日期，最后使用今天
-  const formDate = document.getElementById('m-date').value;
-  const eventDate = formDate || (selectedDates.length > 0 ? selectedDates[0] : M.TODAY);
-  
-  // 获取新增字段
-  const buildingNo = document.getElementById('m-building-no').value;
-  const floorNo = document.getElementById('m-floor-no').value;
-  const mainOwner = document.getElementById('m-owner').value;
-  
-  let payload = {};
-  switch(type) {
-    case 'progress':
-      payload = {
-        taskName: document.getElementById('m-task').value,
-        owner: mainOwner || document.getElementById('m-owner-field').value,
-        progress: fixProgress(document.getElementById('m-progress').value),
-        headcount: parseInt(document.getElementById('m-headcount').value) || 0,
-        description: document.getElementById('m-caption').value
-      };
-      break;
-    case 'material':
-      payload = {
-        materialName: document.getElementById('m-material').value,
-        spec: document.getElementById('m-spec').value,
-        quantity: parseInt(document.getElementById('m-quantity').value) || 0,
-        unit: document.getElementById('m-unit').value,
-        action: document.getElementById('m-action').value
-      };
-      break;
-    case 'safety':
-      const issues = document.getElementById('m-issues').value.split(';').map(s => s.trim()).filter(Boolean);
-      payload = {
-        checkType: document.getElementById('m-checktype').value,
-        result: document.getElementById('m-result').value,
-        issues
-      };
-      break;
-    case 'coordination':
-      payload = {
-        topic: document.getElementById('m-topic').value,
-        parties: document.getElementById('m-parties').value.split(';').map(s => s.trim()).filter(Boolean),
-        summary: document.getElementById('m-summary').value,
-        status: '已协调'
-      };
-      break;
-    case 'attendance':
-      payload = {
-        headcount: parseInt(document.getElementById('m-att-count').value) || 0,
-        status: document.getElementById('m-att-status').value
-      };
-      break;
-  }
-  
-  const event = {
-    id: `E${String(Date.now()).slice(-3)}`,
-    projectId: currentProjectId,
-    date: eventDate,
-    time: time || new Date().toTimeString().slice(0, 5),
-    type,
-    areaId,
-    planId,
-    completionType,
-    buildingNo,
-    floorNo,
-    owner: mainOwner,
-    payload,
-    submitter: '张明',
-    source: 'manual',
-    confidence: 1.0,
-    status: 'draft',
-    note: document.getElementById('m-note').value
-  };
-  
-  M.EVENTS.unshift(event);
-  // 同步关联计划
-  if (planId) {
-    const plans = M.PLANS[currentProjectId] || [];
-    const plan = plans.find(p => p.id === planId);
-    if (plan) {
-      if (payload.taskName) plan.taskName = payload.taskName;
-      if (payload.progress) plan.progress = payload.progress;
-    }
-  }
-  if (M.saveEventsToStorage) M.saveEventsToStorage();
-
-  closeModal('modalManual');
-  renderDailyPlanCard();
-  renderFilteredEvents();
-  renderStats();
-  if (typeof updateCalendar === 'function') updateCalendar();
-  showToast('事件已保存', 'success');
+  saveUnifiedEvent();
 }
 
 // ============================================================

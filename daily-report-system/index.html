@@ -30,6 +30,9 @@
     </div>
   </header>
 
+  <!-- 项目下拉菜单 -->
+  <div id="projectDropdown" style="display:none;position:fixed;z-index:999;background:#fff;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,0.2);min-width:340px;max-height:60vh;overflow-y:auto;"></div>
+
   <!-- ============== 主体 ============== -->
   <main class="app-body">
 
@@ -74,23 +77,11 @@
               <span>快速录入</span>
             </div>
           </div>
-          <div class="card-body" style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 6px;">
-            <div class="entry-card" onclick="openVoiceInput()">
-              <div class="entry-icon voice">🎤</div>
-              <div class="entry-content">
-                <div class="entry-title">语音</div>
-              </div>
-            </div>
-            <div class="entry-card" onclick="openPhotoInput()">
-              <div class="entry-icon photo">📷</div>
-              <div class="entry-content">
-                <div class="entry-title">拍照</div>
-              </div>
-            </div>
+          <div class="card-body" style="display:grid; grid-template-columns: repeat(3, 1fr); gap: 6px;">
             <div class="entry-card" onclick="openManualInput()">
-              <div class="entry-icon manual">✏️</div>
+              <div class="entry-icon manual">📋</div>
               <div class="entry-content">
-                <div class="entry-title">手动</div>
+                <div class="entry-title">日报</div>
               </div>
             </div>
             <div class="entry-card" onclick="openWeeklyReportMapping()">
@@ -383,40 +374,9 @@
           </div>
         </div>
 
-        <div id="photoPreviewArea" class="photo-preview-area">
+        <div id="photoPreviewArea" class="photo-preview-area" style="display:none;">
           <div id="pp-hint" class="preview-hint">等待识别...</div>
-          
-          <!-- VLM注意力热力图可视化动画 -->
-          <div id="vlm-visualization" class="vlm-visualization">
-            <div class="vlm-grid">
-              <!-- 左侧：图片 + 热力图叠加 -->
-              <div class="vlm-image-container">
-                <img id="vlm-photo" src="" class="vlm-photo">
-                <div id="attention-grid" class="attention-grid"></div>
-                <div id="heat-spots" class="heat-spots"></div>
-              </div>
-              
-              <!-- 右侧：Transformer模块和数据流 -->
-              <div class="vlm-info">
-                <div class="vlm-question-box">
-                  <div class="question-label">🔍 识别提问</div>
-                  <div id="vlm-question" class="question-text">正在分析图片...</div>
-                </div>
-                <div class="vlm-transformer-box">
-                  <div class="transformer-label">🧠 Transformer 注意力</div>
-                  <div id="transformer-visual" class="transformer-visual">
-                    <div class="transformer-block"></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div id="particle-flow" class="particle-flow"></div>
-          </div>
-          
-          <!-- 普通预览图 -->
-          <div id="simple-preview" class="simple-preview">
-            <img id="photoPreviewImg" src="" class="preview-image">
-          </div>
+          <div class="photo-preview-placeholder" style="text-align:center;padding:20px;color:#94a3b8;">📷 旧拍照模态框（已迁移至统一录入）</div>
           
           <!-- 语音辅助输入 -->
           <div class="voice-section">
@@ -547,71 +507,166 @@
     </div>
   </div>
 
-  <!-- ============== 模态框：手动录入 ============== -->
+  <!-- ============== 模态框：新建日报事件（统一录入） ============== -->
   <div class="modal-mask" id="modalManual">
-    <div class="modal">
+    <div class="modal" style="max-width:800px;">
       <div class="modal-header">
-        <div class="modal-title">✏️ 手动录入</div>
+        <div class="modal-title">📝 新建日报事件</div>
         <button class="modal-close" onclick="closeModal('modalManual')">✕</button>
       </div>
       <div class="modal-body">
-        <div class="form-group">
-          <label class="form-label">事件类型 <span class="req">*</span></label>
-          <select class="form-select" id="m-type" onchange="renderManualForm()">
-            <option value="progress">🔨 进度</option>
-            <option value="material">📦 材料</option>
-            <option value="safety">🛡 安全</option>
-            <option value="coordination">🤝 协调</option>
-            <option value="attendance">👥 考勤</option>
-          </select>
+
+        <!-- 输入方式快捷栏 -->
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px dashed #e2e8f0;">
+          <button class="btn btn-sm btn-outline" onclick="toggleUnifiedVoiceSection()" id="uVoiceToggleBtn">🎤 语音解析</button>
+          <button class="btn btn-sm btn-outline" onclick="toggleUnifiedPhotoSection()" id="uPhotoToggleBtn">📷 拍照解析</button>
+          <span style="font-size:11px;color:#94a3b8;margin-left:auto;">也可直接填写下方文本</span>
         </div>
-        <div class="form-row">
+
+        <!-- 语音输入区（默认隐藏，仅录音按钮） -->
+        <div id="unifiedVoiceSection" style="display:none;margin-bottom:10px;">
+          <div style="background:linear-gradient(145deg,#f8fafc,#f1f5f9);border-radius:12px;padding:12px;text-align:center;">
+            <div class="recording-pulse" id="uRecordingBtn" onclick="toggleUnifiedRecording()" style="display:inline-flex;">🎤</div>
+            <div style="margin-top:6px;font-size:12px;color:#64748b;" id="uRecordingHint">点击麦克风开始录音</div>
+          </div>
+        </div>
+
+        <!-- 拍照输入区（默认隐藏） -->
+        <div id="unifiedPhotoSection" style="display:none;margin-bottom:10px;">
+          <div style="background:linear-gradient(145deg,#f8fafc,#f1f5f9);border-radius:12px;padding:12px;">
+            <div id="uPhotoUploadZone">
+              <div style="display:flex;gap:10px;justify-content:center;">
+                <button class="btn btn-primary" onclick="document.getElementById('uPhotoCaptureInput').click()" style="font-size:14px;padding:8px 18px;">📷 拍照</button>
+                <button class="btn btn-outline" onclick="document.getElementById('uPhotoFileInput').click()" style="font-size:14px;padding:8px 18px;">🖼 从相册选择</button>
+              </div>
+              <div style="text-align:center;margin-top:6px;font-size:11px;color:#94a3b8;">支持 JPEG / PNG / WebP</div>
+              <input type="file" id="uPhotoCaptureInput" accept="image/*" capture="environment" style="display:none;" onchange="handleUnifiedPhotoUpload(event)">
+              <input type="file" id="uPhotoFileInput" accept="image/*" style="display:none;" onchange="handleUnifiedPhotoUpload(event)">
+            </div>
+            <div id="uPhotoPreviewArea" style="display:none;">
+              <div id="vlm-visualization" class="vlm-visualization">
+                <div class="vlm-grid">
+                  <div class="vlm-image-container">
+                    <img id="vlm-photo" src="" class="vlm-photo">
+                    <div id="attention-grid" class="attention-grid"></div>
+                    <div id="heat-spots" class="heat-spots"></div>
+                  </div>
+                  <div class="vlm-info">
+                    <div class="vlm-question-box">
+                      <div class="question-label">🔍 识别提问</div>
+                      <div id="vlm-question" class="question-text">正在分析图片...</div>
+                    </div>
+                    <div class="vlm-transformer-box">
+                      <div class="transformer-label">🧠 Transformer 注意力</div>
+                      <div id="transformer-visual" class="transformer-visual">
+                        <div class="transformer-block"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div id="particle-flow" class="particle-flow"></div>
+              </div>
+              <div id="simple-preview" class="simple-preview">
+                <img id="uPhotoPreviewImg" src="" class="preview-image">
+              </div>
+              <div style="margin-top:6px;font-size:11px;color:#64748b;text-align:center;" id="uPhotoParseHint"></div>
+              <div style="text-align:center;margin-top:6px;">
+                <button class="btn btn-sm btn-ghost" onclick="clearUnifiedPhoto()">🔄 重新拍照</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 共享文本编辑区（三种录入方式共用） -->
+        <div style="margin-bottom:12px;">
+          <div style="background:linear-gradient(145deg,#f8fafc,#f1f5f9);border-radius:12px;padding:12px;">
+            <label style="font-size:12px;font-weight:600;color:#334155;display:block;margin-bottom:6px;">📝 文本内容</label>
+            <textarea class="form-textarea" id="uSharedText" rows="2" placeholder="语音识别、图片识别结果将显示在此，也可直接输入文字，然后点击「解析」结构化" onpaste="handleSharedTextPaste(event)"></textarea>
+            <div style="font-size:10px;color:#94a3b8;margin-top:4px;">支持粘贴截图（Ctrl+V 直接贴图）</div>
+            <div class="voice-actions" style="margin-top:8px;">
+              <button class="btn btn-sm btn-primary" onclick="parseUnifiedSharedText()">🔍 解析</button>
+              <button class="btn btn-sm btn-secondary" id="uOptimizeBtn" onclick="optimizeUnifiedSharedText()">✨ 优化</button>
+              <button class="btn btn-sm btn-ghost" id="uClearTextBtn" onclick="clearUnifiedSharedText()">🗑 清空</button>
+            </div>
+            <div class="optimize-hint" id="uOptimizeHint" style="display:none;margin-top:6px;font-size:11px;color:#94a3b8;text-align:center;"></div>
+          </div>
+        </div>
+
+        <!-- 公共字段 -->
+        <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+          <div class="form-group">
+            <label class="form-label">事件类型 <span class="req">*</span></label>
+            <select class="form-select" id="m-type" onchange="renderManualForm()">
+              <option value="progress">🔨 进度</option>
+              <option value="material">📦 材料</option>
+              <option value="safety">🛡 安全</option>
+              <option value="coordination">🤝 协调</option>
+              <option value="issue">⚠️ 问题</option>
+              <option value="attendance">👥 考勤</option>
+            </select>
+          </div>
           <div class="form-group">
             <label class="form-label">日期 <span class="req">*</span></label>
-            <input class="form-input" type="date" id="m-date" value="">
+            <input class="form-input" type="date" id="m-date">
           </div>
           <div class="form-group">
             <label class="form-label">时间 <span class="req">*</span></label>
             <input class="form-input" type="time" id="m-time">
           </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">关联计划</label>
-          <select class="form-select" id="m-plan" onchange="onPlanSelect(this.value)">
-            <option value="">无（计划外工作）</option>
-            <!-- JS 渲染当天的计划 -->
-          </select>
+
+        <!-- 关联计划 + 完成类型 -->
+        <div class="form-row" style="display:grid;grid-template-columns:2fr 1fr;gap:10px;">
+          <div class="form-group">
+            <label class="form-label">关联计划</label>
+            <select class="form-select" id="m-plan" onchange="onPlanSelect(this.value)">
+              <option value="">无（计划外工作）</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">完成类型</label>
+            <select class="form-select" id="m-completion-type" onchange="onCompletionTypeChange()">
+              <option value="planned">计划内</option>
+              <option value="unplanned">计划外</option>
+            </select>
+          </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">完成类型</label>
-          <select class="form-select" id="m-completion-type">
-            <option value="planned">计划内</option>
-            <option value="unplanned">计划外</option>
-          </select>
-        </div>
-        
-        <!-- 新增：施工位置字段 -->
-        <div class="form-row">
+
+        <!-- 施工位置 + 区域 -->
+        <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 2fr;gap:10px;">
           <div class="form-group">
             <label class="form-label">楼号/施工段</label>
-            <input class="form-input" type="text" id="m-building-no" placeholder="如：1号楼、A区">
+            <input class="form-input" type="text" id="m-building-no" placeholder="如：1号楼">
           </div>
           <div class="form-group">
             <label class="form-label">层号</label>
-            <input class="form-input" type="text" id="m-floor-no" placeholder="如：F1、B2">
+            <input class="form-input" type="text" id="m-floor-no" placeholder="如：F1">
+          </div>
+          <div class="form-group">
+            <label class="form-label">所属区域 <span class="req">*</span></label>
+            <div class="area-select-wrapper">
+              <select class="form-select" id="m-area"></select>
+              <div class="area-actions">
+                <button class="btn btn-xs btn-primary" onclick="addCustomArea('m-area')">➕</button>
+                <button class="btn btn-xs btn-ghost" onclick="manageAreas()" title="管理区域列表">⚙️</button>
+              </div>
+            </div>
+            <div class="form-hint" id="m-area-hint" style="display:none;"></div>
           </div>
         </div>
-        
-        <div class="form-group">
-          <label class="form-label">所属区域 <span class="req">*</span></label>
-          <select class="form-select" id="m-area">
-            <!-- JS 渲染 -->
-          </select>
+
+        <!-- 动态表单（根据类型切换） -->
+        <div id="manualDynamicForm"></div>
+
+        <!-- 置信度（仅AI解析时显示） -->
+        <div id="uConfidenceRow" class="form-group" style="display:none;">
+          <label class="form-label">🎯 可信度</label>
+          <div class="confidence-display">
+            <div id="u-confidence" class="confidence-value">-</div>
+          </div>
         </div>
-        
-        <div id="manualDynamicForm">
-          <!-- 根据 type 动态渲染 -->
-        </div>
+
+        <!-- 备注 -->
         <div class="form-group">
           <label class="form-label">备注</label>
           <textarea class="form-textarea" id="m-note" rows="2" placeholder="可选"></textarea>
@@ -619,7 +674,7 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="closeModal('modalManual')">取消</button>
-        <button class="btn btn-primary" onclick="saveManualEvent()">保存</button>
+        <button class="btn btn-primary" onclick="saveUnifiedEvent()">保存</button>
       </div>
     </div>
   </div>
@@ -938,7 +993,8 @@
             </div>
             <div class="form-group">
               <label class="form-label">当前进度</label>
-              <input class="form-input" type="text" id="dp-progress" placeholder="如：50%">
+              <input class="form-input" type="text" id="dp-progress" placeholder="如：50%" oninput="checkDpProgressOver100()">
+              <span id="dp-progress-warn" style="display:none;font-size:10px;padding:2px 8px;border-radius:4px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca;white-space:nowrap;">⚠️ 超过100%，将标为超额完成</span>
             </div>
           </div>
         </div>
