@@ -3,6 +3,7 @@
 // ============================================================
 
 let M = window.MockData;
+function fixProgress(v) { if (!v) return v; v = String(v); return v.includes('%') ? v : v + '%'; }
 let currentProjectId = localStorage.getItem('current_project_id') || 'baicaoyuan';
 let currentFilter = 'all';
 let selectedEventId = null;
@@ -253,39 +254,109 @@ function renderFilteredEvents() {
     return;
   }
   
+  // 按 planId 分组（同计划多次填报合并）
+  const planGroups = {}; const standalone = [];
+  sorted.forEach(e => {
+    if (e.planId) { if (!planGroups[e.planId]) planGroups[e.planId] = []; planGroups[e.planId].push(e); }
+    else standalone.push(e);
+  });
+  // 合并后的渲染顺序：取每组最早事件的时间排序
+  const merged = [];
+  Object.values(planGroups).forEach(group => {
+    group.sort((a, b) => a.time.localeCompare(b.time));
+    const first = group[0]; const last = group[group.length - 1];
+    const planName = group[0].payload.taskName || '进度更新';
+    merged.push({
+      _isGroup: true, _events: group,
+      id: first.id, date: first.date, time: first.time,
+      type: first.type, areaId: first.areaId, status: 'confirmed',
+      displayTime: group.length > 1 ? `${first.time}~${last.time}` : first.time,
+      displayCount: group.length,
+      planId: first.planId
+    });
+  });
+  const allItems = [...merged, ...standalone].sort((a, b) => {
+    const dc = b.date.localeCompare(a.date); if (dc !== 0) return dc;
+    return a.time.localeCompare(b.time);
+  });
+
   document.getElementById('eventTimeline').innerHTML = `
     <div class="timeline-line"></div>
-    ${sorted.map(event => `
+    ${allItems.map(item => {
+      if (item._isGroup) {
+        const group = item._events;
+        const plan = (M.PLANS[currentProjectId] || []).find(p => p.id === item.planId);
+        return `
       <div class="event-row">
-        <div class="event-dot ${event.status === 'draft' ? 'draft' : ''}"></div>
-        <div class="event-item" onclick="openEventDetail('${event.id}')">
+        <div class="event-dot"></div>
+        <div class="event-item event-plan-group" style="border-left:3px solid #00adef;">
           <div class="event-head">
-            <span class="event-date" style="font-size:10px; color:#64748b; margin-right:6px;">${event.date}</span>
-            <span class="event-time">${event.time}</span>
-            <span class="event-type-badge" style="background:${M.TYPE_META[event.type].color};">
-              ${M.TYPE_META[event.type].icon} ${M.TYPE_META[event.type].label}
+            <span class="event-date" style="font-size:10px; color:#64748b; margin-right:6px;">${item.date}</span>
+            <span class="event-time">${item.displayTime}</span>
+            <span class="event-type-badge" style="background:${M.TYPE_META[item.type].color};">
+              ${M.TYPE_META[item.type].icon} ${M.TYPE_META[item.type].label}
             </span>
-            <span class="event-area">${getAreaName(event.areaId)}</span>
-            <span class="event-source">${M.SOURCE_META[event.source]?.icon || '⚙️'}</span>
-            <span class="event-status-badge ${event.status}">${event.status === 'draft' ? '草稿' : '已确认'}</span>
+            <span class="event-area">${getAreaName(item.areaId)}</span>
+            <span style="font-size:10px; color:#00adef;">🔄 ${item.displayCount}次填报</span>
           </div>
-          <div class="event-body">${renderEventContent(event)}</div>
-          ${event.voiceText ? `<div class="event-voice">${event.voiceText}</div>` : ''}
-          ${event.photos && event.photos.length > 0 ? renderPhotos(event.photos) : ''}
+          <div class="event-body">
+            ${group.map((e, i) => {
+              return `
+              <div style="display:flex; align-items:center; gap:6px; padding:4px 0;${i > 0 ? ' border-top:1px dashed #e2e8f0;' : ''};">
+                <span style="font-size:10px; color:#94a3b8; min-width:40px;">${e.time}</span>
+                <div style="flex:1;">
+                  <span style="font-size:12px; font-weight:500;">${group.length > 1 ? '→ ' : ''}${e.payload.progress || '-'}</span>
+                  ${e.payload.owner ? `<span style="font-size:10px; color:#64748b; margin-left:4px;">${e.payload.owner}</span>` : ''}
+                </div>
+                <span style="font-size:9px; padding:1px 4px; border-radius:3px; background:${e.status === 'draft' ? '#fef3c7' : '#d1fae5'}; color:${e.status === 'draft' ? '#92400e' : '#065f46'};">${e.status === 'draft' ? '草稿' : '已确认'}</span>
+                <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); confirmEvent('${e.id}')" style="font-size:9px; padding:1px 6px;">${e.status === 'draft' ? '✅ 确认' : '🔄 撤回'}</button>
+                <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); editEventDirect('${e.id}')" style="font-size:9px; padding:1px 6px;">✏️ 编辑</button>
+                <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); openEventDetail('${e.id}')" style="font-size:9px; padding:1px 6px;">查看详情</button>
+                <button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteEvent('${e.id}')" style="font-size:9px; padding:1px 6px;">删除</button>
+              </div>`;
+            }).join('')}
+          </div>
           <div class="event-actions">
-            <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); confirmEvent('${event.id}')">
-              ${event.status === 'draft' ? '✅ 确认' : '🔄 撤回'}
+            <button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); openManualInput('${item.planId}')" style="font-size:10px; padding:2px 8px;">+ 继续填报</button>
+            ${group.some(e => e.status === 'draft') ? `<button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); confirmAllPlanEvents('${item.planId}')" style="font-size:10px; padding:2px 8px;">✅ 全部确认</button>` : ''}
+          </div>
+        </div>
+      </div>`;
+      }
+      return `
+      <div class="event-row">
+        <div class="event-dot ${item.status === 'draft' ? 'draft' : ''}"></div>
+        <div class="event-item" onclick="openEventDetail('${item.id}')">
+          <div class="event-head">
+            <span class="event-date" style="font-size:10px; color:#64748b; margin-right:6px;">${item.date}</span>
+            <span class="event-time">${item.time}</span>
+            <span class="event-type-badge" style="background:${M.TYPE_META[item.type].color};">
+              ${M.TYPE_META[item.type].icon} ${M.TYPE_META[item.type].label}
+            </span>
+            <span class="event-area">${getAreaName(item.areaId)}</span>
+            <span class="event-source">${M.SOURCE_META[item.source]?.icon || '⚙️'}</span>
+            <span class="event-status-badge ${item.status}">${item.status === 'draft' ? '草稿' : '已确认'}</span>
+          </div>
+          <div class="event-body">${renderEventContent(item)}</div>
+          ${item.voiceText ? `<div class="event-voice">${item.voiceText}</div>` : ''}
+          ${item.photos && item.photos.length > 0 ? renderPhotos(item.photos) : ''}
+          <div class="event-actions">
+            <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); confirmEvent('${item.id}')">
+              ${item.status === 'draft' ? '✅ 确认' : '🔄 撤回'}
             </button>
-            <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); openEventDetail('${event.id}')">
+            <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); editEventDirect('${item.id}')">
+              ✏️ 编辑
+            </button>
+            <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); openEventDetail('${item.id}')">
               查看详情
             </button>
-            <button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteEvent('${event.id}')">
+            <button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteEvent('${item.id}')">
               删除
             </button>
           </div>
         </div>
-      </div>
-    `).join('')}
+      </div>`;
+    }).join('')}
   `;
 }
 
@@ -323,6 +394,14 @@ function formatLaborStats(stats) {
 function getAreaName(areaId) {
   const areas = M.AREAS[currentProjectId] || [];
   return areas.find(a => a.id === areaId)?.name || areaId;
+}
+
+function confirmAllPlanEvents(planId) {
+  M.EVENTS.forEach(e => { if (e.planId === planId && e.status === 'draft') e.status = 'confirmed'; });
+  if (M.saveEventsToStorage) M.saveEventsToStorage();
+  renderFilteredEvents();
+  renderStats();
+  showToast('已全部确认', 'success');
 }
 
 // ============================================================
@@ -430,6 +509,7 @@ async function deleteEvent(eventId) {
   const index = M.EVENTS.findIndex(e => e.id === eventId);
   if (index > -1) {
     M.EVENTS.splice(index, 1);
+    if (M.saveEventsToStorage) M.saveEventsToStorage();
     renderFilteredEvents();
     renderStats();
     if (typeof updateCalendar === 'function') updateCalendar();
@@ -482,6 +562,11 @@ function confirmEventFromDetail() {
   closeModal('modalEventDetail');
 }
 
+function editEventDirect(eventId) {
+  selectedEventId = eventId;
+  openEventEdit();
+}
+
 function openEventEdit() {
   const event = M.EVENTS.find(e => e.id === selectedEventId);
   if (!event) return;
@@ -518,11 +603,22 @@ function saveEventEdit() {
   event.payload = event.payload || {};
   event.payload.taskName = document.getElementById('edit-task').value;
   event.payload.owner = document.getElementById('edit-owner').value;
-  event.payload.progress = document.getElementById('edit-progress').value;
+  event.payload.progress = fixProgress(document.getElementById('edit-progress').value);
   event.payload.headcount = parseInt(document.getElementById('edit-headcount').value) || 0;
   event.note = document.getElementById('edit-note').value;
   
+  // 同步关联计划
+  if (event.planId) {
+    const plans = M.PLANS[currentProjectId] || [];
+    const plan = plans.find(p => p.id === event.planId);
+    if (plan) {
+      if (event.payload.taskName) plan.taskName = event.payload.taskName;
+      if (event.payload.progress) plan.progress = event.payload.progress;
+    }
+  }
+  if (M.saveEventsToStorage) M.saveEventsToStorage();
   closeModal('modalEventEdit');
+  renderDailyPlanCard();
   renderFilteredEvents();
   updateCalendar();
   renderStats();
@@ -726,8 +822,15 @@ function goToToday() {
 }
 
 // ============================================================
-// 今日计划卡片
+// 今日计划卡片（可展开/收起）
 // ============================================================
+let planCardCollapsed = {};
+
+function togglePlanCard(id) {
+  planCardCollapsed[id] = !planCardCollapsed[id];
+  renderDailyPlanCard();
+}
+
 function renderDailyPlanCard() {
   const today = M.TODAY;
   const todayPlans = (M.PLANS[currentProjectId] || []).filter(p => {
@@ -750,58 +853,67 @@ function renderDailyPlanCard() {
   let html = '';
 
   todayPlans.forEach(plan => {
+    if (planCardCollapsed[plan.id] === undefined) planCardCollapsed[plan.id] = true;
+    const collapsed = planCardCollapsed[plan.id];
     const laborList = plan.laborRequirements || plan.laborSchedule || [];
     const totalWorkers = laborList.reduce((sum, l) => sum + (l.count || 0), 0);
-    const typeMeta = M.TYPE_META[plan.eventType] || { icon: '📋', label: '计划', color: '#64748b' };
-    const displayProcess = plan.process || plan.description || '施工计划';
+    const typeMeta = M.TYPE_META[plan.type || plan.eventType] || { icon: '📋', label: '计划', color: '#64748b' };
+    const displayProcess = plan.taskName || plan.process || plan.description || '施工计划';
+    const location = [plan.buildingNo, plan.floorNo].filter(Boolean).join(' · ');
+    // 获取关联完成记录
+    const planEvents = M.EVENTS.filter(e => e.planId === plan.id);
 
     html += `
       <div style="background:#f8fafc; border-radius:6px; padding:10px; margin-bottom:8px; border-left:3px solid ${typeMeta.color};">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-          <span style="font-size:12px; font-weight:600; color:#334155;">${typeMeta.icon} ${displayProcess}</span>
-          <span style="font-size:10px; padding:1px 6px; background:${typeMeta.color}; color:#fff; border-radius:4px;">${plan.status === 'completed' ? '已完成' : '进行中'}</span>
+        <!-- 标题行：始终可见 -->
+        <div style="display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none;" onclick="togglePlanCard('${plan.id}')">
+          <span style="font-size:10px; color:#94a3b8; transition:transform .2s;">${collapsed ? '▶' : '▼'}</span>
+          <span style="font-size:12px; font-weight:600; color:#334155; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${typeMeta.icon} ${displayProcess}</span>
+          ${location ? `<span style="font-size:10px; color:#64748b; white-space:nowrap;"> 🏗️ ${location}</span>` : ''}
+          ${plan.progress ? `<span style="font-size:10px; color:#00adef; white-space:nowrap;"> 📊 ${plan.progress}</span>` : ''}
+          <div style="flex:1;"></div>
+          <span style="font-size:10px; padding:1px 6px; background:${typeMeta.color}; color:#fff; border-radius:4px; white-space:nowrap;">${plan.status === 'completed' ? '已完成' : '进行中'}</span>
         </div>
         
-        ${plan.buildingNo || plan.floorNo ? `
-          <div style="font-size:11px; color:#64748b; margin-bottom:4px;">
-            🏗️ ${plan.buildingNo || ''}${plan.floorNo ? ' · ' + plan.floorNo : ''}
-          </div>
-        ` : ''}
-        
-        ${plan.owner ? `
-          <div style="font-size:11px; color:#64748b; margin-bottom:4px;">
-            👤 负责人：${plan.owner}
-          </div>
-        ` : ''}
-        
-        ${totalWorkers > 0 ? `
-          <div style="margin-bottom:4px;">
-            <div style="font-size:10px; color:#64748b; margin-bottom:2px;">👷 出勤：${totalWorkers}人</div>
-            <div style="display:flex; flex-wrap:wrap; gap:3px;">
-              ${laborList.map(l => {
-                const trade = l.trade || l.laborType;
-                return `<span style="font-size:10px; padding:1px 4px; background:#fff; border-radius:3px;">${trade}: ${l.count}人</span>`;
-              }).join('')}
+        ${!collapsed ? `
+        <!-- 展开详情 -->
+        <div style="margin-top:8px; padding-top:8px; border-top:1px solid #e2e8f0;">
+          ${plan.owner ? `<div style="font-size:11px; color:#64748b; margin-bottom:4px;">👤 负责人：${plan.owner}</div>` : ''}
+          ${totalWorkers > 0 ? `
+            <div style="margin-bottom:4px;">
+              <div style="font-size:10px; color:#64748b; margin-bottom:2px;">👷 出勤：${totalWorkers}人</div>
+              <div style="display:flex; flex-wrap:wrap; gap:3px;">
+                ${laborList.map(l => {
+                  const trade = l.trade || l.laborType;
+                  return `<span style="font-size:10px; padding:1px 4px; background:#fff; border-radius:3px;">${trade}: ${l.count}人</span>`;
+                }).join('')}
+              </div>
             </div>
+          ` : ''}
+          ${plan.description && !plan.taskName && !plan.process ? `
+            <div style="font-size:11px; color:#64748b; padding-top:4px; border-top:1px dashed #e2e8f0;">${plan.description}</div>
+          ` : ''}
+        </div>
+        
+        <!-- 填报记录 -->
+        ${planEvents.length > 0 ? `
+          <div style="margin-top:6px; padding-top:6px; border-top:1px dashed #d1d5db;">
+            <div style="font-size:10px; color:#94a3b8; margin-bottom:4px;">📋 今日填报（${planEvents.length}次）</div>
+            ${planEvents.slice(-5).reverse().map(e => `
+              <div style="display:flex; justify-content:space-between; font-size:11px; color:#475569; padding:2px 0;">
+                <span style="color:#94a3b8;">${e.time || ''}</span>
+                <span>${e.payload.progress ? '→ ' + e.payload.progress : ''}</span>
+              </div>
+            `).join('')}
           </div>
         ` : ''}
         
-        ${plan.progress ? `
-          <div style="font-size:11px; color:#00adef;">
-            📊 当前进度：${plan.progress}
-          </div>
-        ` : ''}
-        
-        ${plan.description && !plan.process ? `
-          <div style="font-size:11px; color:#64748b; margin-top:4px; padding-top:4px; border-top:1px dashed #e2e8f0;">
-            ${plan.description}
-          </div>
-        ` : ''}
-        
+        <!-- 操作按钮 -->
         <div style="display:flex; gap:4px; margin-top:6px; padding-top:6px; border-top:1px solid #e2e8f0;">
           <button class="btn btn-ghost btn-sm" onclick="editDailyPlan('${plan.id}')" style="font-size:10px; padding:2px 8px;">✏️ 编辑</button>
           <button class="btn btn-ghost btn-sm" onclick="deleteDailyPlan('${plan.id}')" style="font-size:10px; padding:2px 8px; color:#ef4444;">🗑 删除</button>
         </div>
+        ` : ''}
       </div>
     `;
   });
@@ -996,14 +1108,14 @@ function saveDailyPlan() {
     projectId: currentProjectId,
     startDate,
     endDate,
-    eventType,
+    type: eventType,
     status,
     buildingNo,
     floorNo,
-    area,
-    process,
+    areaId: area,
+    taskName: process,
     owner,
-    progress: progress || '0%',
+    progress: fixProgress(progress) || '0%',
     laborRequirements,
     materials: materials ? materials.split('\n').filter(m => m.trim()) : [],
     machinery: machinery ? machinery.split('\n').filter(m => m.trim()) : [],
@@ -1030,6 +1142,16 @@ function saveDailyPlan() {
     editingPlanId = null;
     document.querySelector('#modalDailyPlan .modal-title').textContent = '📋 新建日计划';
     document.querySelector('#modalDailyPlan .modal-footer .btn-primary').textContent = '保存计划';
+    // 同步关联事件
+    M.EVENTS.forEach(e => {
+      if (e.planId === plan.id) {
+        if (plan.taskName) e.payload.taskName = plan.taskName;
+        if (plan.progress) e.payload.progress = plan.progress;
+        if (plan.areaId) e.areaId = plan.areaId;
+      }
+    });
+    if (M.saveEventsToStorage) M.saveEventsToStorage();
+    renderFilteredEvents();
     showToast('日计划已更新', 'success');
   } else {
     plan.id = `PLAN${String(Date.now()).slice(-3)}`;
@@ -1059,13 +1181,13 @@ function editDailyPlan(planId) {
   
   document.getElementById('dp-start-date').value = plan.startDate || plan.date || M.TODAY;
   document.getElementById('dp-end-date').value = plan.endDate || plan.date || M.TODAY;
-  document.getElementById('dp-event-type').value = plan.eventType || 'progress';
+  document.getElementById('dp-event-type').value = plan.type || plan.eventType || 'progress';
   document.getElementById('dp-status').value = plan.status || 'active';
   document.getElementById('dp-building-no').value = plan.buildingNo || '';
   document.getElementById('dp-floor-no').value = plan.floorNo || '';
   renderAreaSelect('dp-area');
-  document.getElementById('dp-area').value = plan.area || '';
-  document.getElementById('dp-process').value = plan.process || '';
+  document.getElementById('dp-area').value = plan.areaId || plan.area || '';
+  document.getElementById('dp-process').value = plan.taskName || plan.process || '';
   document.getElementById('dp-owner').value = plan.owner || '';
   document.getElementById('dp-progress').value = plan.progress || '';
   document.getElementById('dp-materials').value = (plan.materials || []).join('\n');
@@ -1578,7 +1700,7 @@ function saveVoiceEvent() {
     payload: {
       taskName: document.getElementById('vp-task').value,
       owner: document.getElementById('vp-owner').value,
-      progress: document.getElementById('vp-progress').value,
+      progress: fixProgress(document.getElementById('vp-progress').value),
       headcount: parseInt(document.getElementById('vp-headcount').value) || 0,
       caption: document.getElementById('vp-caption').value
     },
@@ -1591,6 +1713,7 @@ function saveVoiceEvent() {
   };
   
   M.EVENTS.unshift(event);
+  if (M.saveEventsToStorage) M.saveEventsToStorage();
   
   closeModal('modalVoice');
   renderFilteredEvents();
@@ -2494,7 +2617,7 @@ function savePhotoEvent() {
   // 获取表单字段
   const taskName = document.getElementById('pp-task').value;
   const owner = document.getElementById('pp-owner').value;
-  const progress = document.getElementById('pp-progress').value;
+  const progress = fixProgress(document.getElementById('pp-progress').value);
   const headcount = parseInt(document.getElementById('pp-headcount').value) || 0;
   const caption = document.getElementById('pp-caption').value;
 
@@ -2522,6 +2645,7 @@ function savePhotoEvent() {
   };
   
   M.EVENTS.unshift(event);
+  if (M.saveEventsToStorage) M.saveEventsToStorage();
 
   closeModal('modalPhoto');
   renderFilteredEvents();
@@ -2533,7 +2657,7 @@ function savePhotoEvent() {
 // ============================================================
 // 手动录入
 // ============================================================
-function openManualInput() {
+function openManualInput(planId) {
   // 设置默认日期和时间：优先选中日期，否则今天；时间为当前时间
   const today = new Date();
   const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -2551,6 +2675,12 @@ function openManualInput() {
   
   renderManualForm();
   populateAreaSelects('m-area');
+  
+  if (planId) {
+    document.getElementById('m-plan').value = planId;
+    onPlanSelect(planId);
+  }
+  
   showModal('modalManual');
 }
 
@@ -2568,7 +2698,7 @@ function renderPlanSelect(dateStr) {
   
   let html = '<option value="">无（计划外工作）</option>';
   dayPlans.forEach(plan => {
-    html += `<option value="${plan.id}">📋 ${plan.process}${plan.buildingNo ? ' · ' + plan.buildingNo : ''}${plan.floorNo ? ' · ' + plan.floorNo : ''}</option>`;
+    html += `<option value="${plan.id}">📋 ${plan.taskName || plan.process}${plan.buildingNo ? ' · ' + plan.buildingNo : ''}${plan.floorNo ? ' · ' + plan.floorNo : ''}</option>`;
   });
   
   document.getElementById('m-plan').innerHTML = html;
@@ -2587,30 +2717,27 @@ function onPlanSelect(planId) {
   const plan = projectPlans.find(p => p.id === planId);
   
   if (plan) {
-    // 自动填充计划数据到表单
-    if (plan.buildingNo) {
-      document.getElementById('m-building-no').value = plan.buildingNo;
+    // 先设置类型，动态表单渲染后才能填充进度/人数
+    const planType = plan.type || plan.eventType;
+    if (planType) {
+      document.getElementById('m-type').value = planType;
+      renderManualForm();
     }
-    if (plan.floorNo) {
-      document.getElementById('m-floor-no').value = plan.floorNo;
+    // 填充基础字段
+    if (plan.buildingNo) document.getElementById('m-building-no').value = plan.buildingNo;
+    if (plan.floorNo) document.getElementById('m-floor-no').value = plan.floorNo;
+    if (plan.areaId || plan.area) document.getElementById('m-area').value = plan.areaId || plan.area;
+    if (plan.owner) document.getElementById('m-owner').value = plan.owner;
+    // 填充动态表单字段（需在 renderManualForm 之后）
+    const taskName = plan.taskName || plan.process;
+    if (taskName) document.getElementById('m-task').value = taskName;
+    if (plan.progress) document.getElementById('m-progress').value = plan.progress;
+    const laborList = plan.laborRequirements || plan.laborSchedule || [];
+    const totalWorkers = laborList.reduce((sum, l) => sum + (l.count || 0), 0);
+    if (totalWorkers > 0 && document.getElementById('m-headcount')) {
+      document.getElementById('m-headcount').value = totalWorkers;
     }
-    if (plan.area) {
-      document.getElementById('m-area').value = plan.area;
-    }
-    if (plan.process) {
-      document.getElementById('m-process').value = plan.process;
-    }
-    if (plan.owner) {
-      document.getElementById('m-owner').value = plan.owner;
-    }
-    if (plan.eventType) {
-      document.getElementById('m-type').value = plan.eventType;
-      renderManualForm(); // 重新渲染动态表单
-    }
-    
-    // 根据计划自动设置完成类型
     document.getElementById('m-completion-type').value = 'planned';
-    
     showToast('已自动填充计划数据', 'success');
   }
 }
@@ -2623,7 +2750,7 @@ function renderManualForm() {
     case 'progress':
       html = `
         <div class="form-group">
-          <label class="form-label">任务名称 <span class="req">*</span></label>
+          <label class="form-label">工序/任务名称 <span class="req">*</span></label>
           <input class="form-input" type="text" id="m-task" placeholder="如：墙面基层处理">
         </div>
         <div class="form-row">
@@ -2756,7 +2883,6 @@ function saveManualEvent() {
   // 获取新增字段
   const buildingNo = document.getElementById('m-building-no').value;
   const floorNo = document.getElementById('m-floor-no').value;
-  const process = document.getElementById('m-process').value;
   const mainOwner = document.getElementById('m-owner').value;
   
   let payload = {};
@@ -2765,7 +2891,7 @@ function saveManualEvent() {
       payload = {
         taskName: document.getElementById('m-task').value,
         owner: mainOwner || document.getElementById('m-owner-field').value,
-        progress: document.getElementById('m-progress').value,
+        progress: fixProgress(document.getElementById('m-progress').value),
         headcount: parseInt(document.getElementById('m-headcount').value) || 0,
         description: document.getElementById('m-caption').value
       };
@@ -2814,7 +2940,6 @@ function saveManualEvent() {
     completionType,
     buildingNo,
     floorNo,
-    process,
     owner: mainOwner,
     payload,
     submitter: '张明',
@@ -2825,8 +2950,19 @@ function saveManualEvent() {
   };
   
   M.EVENTS.unshift(event);
+  // 同步关联计划
+  if (planId) {
+    const plans = M.PLANS[currentProjectId] || [];
+    const plan = plans.find(p => p.id === planId);
+    if (plan) {
+      if (payload.taskName) plan.taskName = payload.taskName;
+      if (payload.progress) plan.progress = payload.progress;
+    }
+  }
+  if (M.saveEventsToStorage) M.saveEventsToStorage();
 
   closeModal('modalManual');
+  renderDailyPlanCard();
   renderFilteredEvents();
   renderStats();
   if (typeof updateCalendar === 'function') updateCalendar();
@@ -4095,9 +4231,9 @@ async function testLLMConnection() {
 const _REPORT_PAGES = ['01','02','03','0301','04','05','06','07','08','09','10','11','12'];
 
 const TEMPLATES = {
-  cscec:  { name:'中建三局集团', headerColor:'#37a3eb', bg:'背景.png' },
-  bcy:    { name:'百草园·清尚',   headerColor:'#059669', bg:'背景.png' },
-  generic:{ name:'通用周报',      headerColor:'#6366f1', bg:'' }
+  cscec:  { name:'中建三局集团', headerColor:'#37a3eb', bg:'背景.png', projectId:'baicaoyuan' },
+  bcy:    { name:'百草园·清尚',   headerColor:'#059669', bg:'背景.png', projectId:'baicaoyuan' },
+  generic:{ name:'通用周报',      headerColor:'#6366f1', bg:'',           projectId:'baicaoyuan' }
 };
 
 let currentTemplate = 'cscec';
@@ -4339,6 +4475,10 @@ function _applyTemplate() {
 
 function switchTemplate(id) {
   currentTemplate = id;
+  const newProjectId = TEMPLATES[id].projectId;
+  if (newProjectId && newProjectId !== currentProjectId) {
+    switchProject(newProjectId);
+  }
   _applyTemplate();
   const cur = document.querySelector('#reportPageNav button.active[data-page]');
   if (cur) switchMappingTab(cur.dataset.page);

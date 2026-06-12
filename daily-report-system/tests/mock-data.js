@@ -338,8 +338,9 @@ try {
 const today = new Date();
 const TODAY = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
-// 今天的事件流
-const EVENTS = [
+// 今天的事件流（含 localStorage 持久化）
+let EVENTS; try { const s = localStorage.getItem('daily_events'); EVENTS = s ? JSON.parse(s) : null; } catch(e) {}
+const DEFAULT_EVENTS = [
   // 上午 - 班前考勤
   {
     id: 'E001',
@@ -656,6 +657,8 @@ const EVENTS = [
     note: ''
   }
 ];
+if (!EVENTS) { EVENTS = DEFAULT_EVENTS.map(e => ({...e})); localStorage.setItem('daily_events', JSON.stringify(EVENTS)); }
+function saveEventsToStorage() { try { localStorage.setItem('daily_events', JSON.stringify(EVENTS)); } catch(e) {} }
 
 // 历史事件（用于日历展示）
 const HISTORY_EVENTS = [
@@ -1646,5 +1649,6 @@ window.MockData = {
   getPage01Data, getPage03Data, getPage0301Data, getPage04Data, getPage05Photos,
   getPage06Data, getPage07Data, getPage08Data, getPage09Data, getPage10Data, getPage11Data, getPage12Data,
   DAILY_ATTENDANCE, getAttendanceForDate, setAttendanceForDate, getWeekAttendanceStats,
-  getMilestoneData, saveMilestoneData
+  getMilestoneData, saveMilestoneData,
+  saveEventsToStorage
 };
