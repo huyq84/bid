@@ -38,38 +38,7 @@
 
     <div class="tab-content">
       <div class="main-col">
-        <!-- 今日概览 -->
-        <div class="card">
-          <div class="card-header">
-            <div class="card-title">
-              <div class="icon">📅</div>
-              <span id="todayDateLabel">今日日报</span>
-              <span style="margin-left:auto; font-size:10px; color:#94a3b8; font-weight:400;" id="weekInfo"></span>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="today-summary">
-              <div class="summary-item blue">
-                <div class="num" id="statProgress">0</div>
-                <div class="lbl">进度</div>
-              </div>
-              <div class="summary-item orange">
-                <div class="num" id="statMaterial">0</div>
-                <div class="lbl">材料</div>
-              </div>
-              <div class="summary-item red">
-                <div class="num" id="statSafety">0</div>
-                <div class="lbl">安全</div>
-              </div>
-              <div class="summary-item purple">
-                <div class="num" id="statCoordination">0</div>
-                <div class="lbl">协调</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 录入入口（4 个） -->
+        <!-- 录入入口（5 个） -->
         <div class="card">
           <div class="card-header">
             <div class="card-title">
@@ -90,6 +59,12 @@
                 <div class="entry-title">周报</div>
               </div>
             </div>
+            <div class="entry-card" onclick="openMonthlyReport()">
+              <div class="entry-icon" style="background:#ec4899;">📅</div>
+              <div class="entry-content">
+                <div class="entry-title">月报</div>
+              </div>
+            </div>
             <div class="entry-card" onclick="openAttendanceInput()">
               <div class="entry-icon" style="background:#8b5cf6;">✓</div>
               <div class="entry-content">
@@ -100,6 +75,12 @@
               <div class="entry-icon" style="background:#f59e0b;">◈</div>
               <div class="entry-content">
                 <div class="entry-title">节点</div>
+              </div>
+            </div>
+            <div class="entry-card" onclick="openEccEditor()">
+              <div class="entry-icon" style="background:#0ea5e9;">⚑</div>
+              <div class="entry-content">
+                <div class="entry-title">ECC</div>
               </div>
             </div>
           </div>
@@ -115,6 +96,7 @@
             <div class="filter-chip" data-filter="safety"       onclick="filterEvents('safety', this)">🛡 安全</div>
             <div class="filter-chip" data-filter="coordination" onclick="filterEvents('coordination', this)">🤝 协调</div>
             <div class="filter-chip" data-filter="attendance"   onclick="filterEvents('attendance', this)">👥 考勤</div>
+            <div class="filter-chip" data-filter="drawing"      onclick="filterEvents('drawing', this)">📐 图纸深化</div>
             <button class="btn btn-success btn-sm" onclick="confirmTodayReport()" style="margin-left:auto; margin-right:4px;">✅ 一键确认</button>
           </div>
           <div class="card-body">
@@ -153,6 +135,7 @@
             </div>
             <div class="calendar-legend">
               <div class="legend-item legend-btn" onclick="goToToday()"><span class="legend-dot today">●</span> 今天</div>
+              <div class="legend-item"><span class="legend-dot plan">📋</span> 今日计划</div>
               <div class="legend-item"><span class="legend-dot completed">✓</span> 已确认</div>
               <div class="legend-item"><span class="legend-dot draft">○</span> 草稿</div>
               <div class="legend-item">
@@ -166,29 +149,6 @@
           </div>
         </div>
 
-        <!-- 项目信息卡 -->
-        <div class="card" id="projectInfoCard">
-          <div class="card-header">
-            <div class="card-title">
-              <div class="icon">🏗</div>
-              <span>项目信息</span>
-            </div>
-          </div>
-          <div class="card-body" id="projectInfoBody"></div>
-        </div>
-
-        <!-- 事项台账 -->
-        <div class="card aside-scroll">
-          <div class="card-header">
-            <div class="card-title">
-              <div class="icon">📋</div>
-              <span>事项台账</span>
-            </div>
-            <button class="btn btn-ghost btn-sm" onclick="openIssueForm()">+ 新建</button>
-          </div>
-          <div class="card-body" id="issueList"></div>
-        </div>
-
         <!-- 今日计划 -->
         <div class="card aside-scroll">
           <div class="card-header">
@@ -196,9 +156,26 @@
               <div class="icon">🎯</div>
               <span>今日计划</span>
             </div>
-            <button class="btn btn-ghost btn-sm" onclick="openDailyPlanForm()">+ 新建</button>
+            <div style="display:flex;gap:4px;align-items:center;">
+              <span style="font-size:10px;color:#94a3b8;">统计口径</span>
+              <button id="planUnitBtn-people" onclick="setPage06Unit('people')" style="font-size:10px;padding:2px 6px;border-radius:3px;cursor:pointer;background:#00adef;color:#fff;border:1px solid #0081cc;">人数</button>
+              <button id="planUnitBtn-manDays" onclick="setPage06Unit('manDays')" style="font-size:10px;padding:2px 6px;border-radius:3px;cursor:pointer;background:#fff;color:#475569;border:1px solid #cbd5e1;">工日</button>
+              <button class="btn btn-ghost btn-sm" onclick="openDailyPlanForm()">+ 新建</button>
+            </div>
           </div>
           <div class="card-body" id="dailyPlanCard"></div>
+        </div>
+
+        <!-- 协调事宜 -->
+        <div class="card aside-scroll">
+          <div class="card-header">
+            <div class="card-title">
+              <div class="icon">🤝</div>
+              <span>协调事宜</span>
+            </div>
+            <button class="btn btn-ghost btn-sm" onclick="openIssueForm()">+ 新建</button>
+          </div>
+          <div class="card-body" id="issueList"></div>
         </div>
       </aside>
     </div>
@@ -266,8 +243,12 @@
                 <option value="coordination">🤝 协调沟通</option>
                 <option value="issue">⚠️ 问题事项</option>
                 <option value="attendance">👤 人员考勤</option>
+                <option value="drawing">📐 图纸深化</option>
               </select>
             </div>
+            
+            <!-- 关联计划 ID（隐藏） -->
+            <input type="hidden" id="vp-planId" value="">
             
             <!-- 区域 -->
             <div class="form-group">
@@ -435,8 +416,12 @@
                   <option value="coordination">🤝 协调沟通</option>
                   <option value="issue">⚠️ 问题事项</option>
                   <option value="attendance">👤 人员考勤</option>
+                  <option value="drawing">📐 图纸深化</option>
                 </select>
               </div>
+              
+              <!-- 关联计划 ID（隐藏） -->
+              <input type="hidden" id="pp-planId" value="">
               
               <!-- 区域 -->
               <div class="form-group">
@@ -540,8 +525,8 @@
                 <button class="btn btn-outline" onclick="document.getElementById('uPhotoFileInput').click()" style="font-size:14px;padding:8px 18px;">🖼 从相册选择</button>
               </div>
               <div style="text-align:center;margin-top:6px;font-size:11px;color:#94a3b8;">支持 JPEG / PNG / WebP</div>
-              <input type="file" id="uPhotoCaptureInput" accept="image/*" capture="environment" style="display:none;" onchange="handleUnifiedPhotoUpload(event)">
-              <input type="file" id="uPhotoFileInput" accept="image/*" style="display:none;" onchange="handleUnifiedPhotoUpload(event)">
+              <input type="file" id="uPhotoCaptureInput" accept="image/*" capture="environment" multiple style="display:none;" onchange="handleUnifiedPhotoUpload(event)">
+              <input type="file" id="uPhotoFileInput" accept="image/*" multiple style="display:none;" onchange="handleUnifiedPhotoUpload(event)">
             </div>
             <div id="uPhotoPreviewArea" style="display:none;">
               <div id="vlm-visualization" class="vlm-visualization">
@@ -570,6 +555,28 @@
                 <img id="uPhotoPreviewImg" src="" class="preview-image">
               </div>
               <div style="margin-top:6px;font-size:11px;color:#64748b;text-align:center;" id="uPhotoParseHint"></div>
+              <div id="uPhotoCaptionBox" style="margin-top:8px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:8px;">
+                <div style="font-size:10px;color:#b45309;line-height:1.4;margin-bottom:6px;">💡 此描述（标签）会在周报 05 现场照片中显示，可编辑并选择是否展示</div>
+                <div style="display:flex;gap:6px;align-items:center;">
+                  <input class="form-input" type="text" id="uPhotoCaption" placeholder="照片描述/标签（来自 AI 识别）" style="flex:1;font-size:12px;padding:4px 8px;">
+                  <label style="display:flex;align-items:center;gap:4px;font-size:11px;white-space:nowrap;cursor:pointer;padding:4px 8px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:4px;">
+                    <input type="checkbox" id="uPhotoShowInReport" checked>
+                    <span>报表显示</span>
+                  </label>
+                </div>
+              </div>
+              <div id="uPhotoWizardPanel" style="display:none;margin-top:10px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                  <span id="uPhotoWizardCounter" style="font-size:12px;font-weight:600;color:#0f172a;"></span>
+                  <span id="uPhotoWizardSavedBadge" style="font-size:11px;color:#16a34a;"></span>
+                </div>
+                <div id="uPhotoWizardStrip" style="display:flex;gap:6px;overflow-x:auto;padding:4px 2px 6px;"></div>
+                <div style="display:flex;gap:6px;margin-top:8px;justify-content:flex-end;">
+                  <button class="btn btn-sm btn-ghost" id="uPhotoWizardSkipBtn" onclick="skipPhotoWizard()" style="font-size:12px;">⏭ 跳过</button>
+                  <button class="btn btn-sm btn-danger" onclick="cancelPhotoWizard()" style="font-size:12px;">❌ 取消</button>
+                  <button class="btn btn-sm btn-primary" id="uPhotoWizardSaveBtn" onclick="savePhotoWizardAndNext()" style="font-size:12px;">📥 保存并继续下一张 →</button>
+                </div>
+              </div>
               <div style="text-align:center;margin-top:6px;">
                 <button class="btn btn-sm btn-ghost" onclick="clearUnifiedPhoto()">🔄 重新拍照</button>
               </div>
@@ -603,6 +610,7 @@
               <option value="coordination">🤝 协调</option>
               <option value="issue">⚠️ 问题</option>
               <option value="attendance">👥 考勤</option>
+              <option value="drawing">📐 图纸深化</option>
             </select>
           </div>
           <div class="form-group">
@@ -634,15 +642,15 @@
 
         <!-- 施工位置 + 区域 -->
         <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 2fr;gap:10px;">
-          <div class="form-group">
+          <div class="form-group" data-dp-show="progress,material,safety,coordination,attendance">
             <label class="form-label">楼号/施工段</label>
             <input class="form-input" type="text" id="m-building-no" placeholder="如：1号楼">
           </div>
-          <div class="form-group">
+          <div class="form-group" data-dp-show="progress,material,safety,coordination,attendance">
             <label class="form-label">层号</label>
             <input class="form-input" type="text" id="m-floor-no" placeholder="如：F1">
           </div>
-          <div class="form-group">
+          <div class="form-group" data-dp-show="progress,material,safety,coordination,attendance">
             <label class="form-label">所属区域 <span class="req">*</span></label>
             <div class="area-select-wrapper">
               <select class="form-select" id="m-area"></select>
@@ -679,63 +687,32 @@
     </div>
   </div>
 
-  <!-- ============== 模态框：事项台账表单 ============== -->
+  <!-- ============== 模态框：协调登记 ============== -->
   <div class="modal-mask" id="modalIssue">
     <div class="modal">
       <div class="modal-header">
-        <div class="modal-title">📋 事项登记</div>
+        <div class="modal-title">🤝 协调登记</div>
         <button class="modal-close" onclick="closeModal('modalIssue')">✕</button>
       </div>
       <div class="modal-body">
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">事项类型 <span class="req">*</span></label>
-            <select class="form-select" id="i-type">
-              <option value="quality">质量整改</option>
-              <option value="safety">安全隐患</option>
-              <option value="coordination">协调事项</option>
-              <option value="ecc">ECC 专项</option>
-              <option value="change">工程变更</option>
-              <option value="visa">现场签证</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">优先级 <span class="req">*</span></label>
-            <select class="form-select" id="i-priority">
-              <option value="high">紧急</option>
-              <option value="medium" selected>中等</option>
-              <option value="low">一般</option>
-            </select>
-          </div>
-        </div>
         <div class="form-group">
-          <label class="form-label">事项标题 <span class="req">*</span></label>
-          <input class="form-input" type="text" id="i-title" placeholder="一句话说清楚什么问题">
+          <label class="form-label">需协调事宜 <span class="req">*</span></label>
+          <input class="form-input" type="text" id="i-title" placeholder="一句话说清楚需协调什么问题">
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label class="form-label">所属区域 <span class="req">*</span></label>
-            <select class="form-select" id="i-area">
-              <!-- JS 渲染 -->
-            </select>
+            <label class="form-label">提出部门 <span class="req">*</span></label>
+            <input class="form-input" type="text" id="i-propose" placeholder="如：项目部 / 设计单位">
           </div>
           <div class="form-group">
-            <label class="form-label">责任方 <span class="req">*</span></label>
-            <input class="form-input" type="text" id="i-owner" placeholder="姓名或班组">
+            <label class="form-label">配合部门 <span class="req">*</span></label>
+            <input class="form-input" type="text" id="i-cooperate" placeholder="如：总包 / 装修单位">
           </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">截止日期 <span class="req">*</span></label>
-          <input class="form-input" type="date" id="i-deadline">
-        </div>
-        <div class="form-group">
-          <label class="form-label">详细描述 <span class="req">*</span></label>
-          <textarea class="form-textarea" id="i-description" rows="3" placeholder="问题描述、影响范围、已采取措施等"></textarea>
         </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="closeModal('modalIssue')">取消</button>
-        <button class="btn btn-primary" onclick="saveIssue()">创建事项</button>
+        <button class="btn btn-primary" onclick="saveIssue()">保存</button>
       </div>
     </div>
   </div>
@@ -771,15 +748,14 @@
         <button data-page="01" onclick="switchMappingTab('01')">01 封面</button>
         <button data-page="02" onclick="switchMappingTab('02')">02 目录</button>
         <button data-page="03" onclick="switchMappingTab('03')">03 管理人员</button>
-        <button data-page="0301" onclick="_milestonePage=0;switchMappingTab('0301')">0301 重要节点</button>
-        <button data-page="04" onclick="switchMappingTab('04')">04 工作完成</button>
-        <button data-page="05" onclick="switchMappingTab('05')">05 工作现场</button>
-        <button data-page="06" onclick="switchMappingTab('06')">06 人员统计</button>
-        <button data-page="07" onclick="switchMappingTab('07')">07 ECC销项</button>
-        <button data-page="08" onclick="switchMappingTab('08')">08 图纸深化</button>
-        <button data-page="09" onclick="switchMappingTab('09')">09 周计划</button>
-        <button data-page="10" onclick="switchMappingTab('10')">10 施工段划分</button>
-        <button data-page="11" onclick="switchMappingTab('11')">11 施工段计划</button>
+        <button data-page="04" onclick="_milestonePage=0;switchMappingTab('04')">04 重要节点</button>
+        <button data-page="05" onclick="_page04Page=0;switchMappingTab('05')">05 工作完成</button>
+        <button data-page="06" onclick="_page05Page=0;switchMappingTab('06')">06 工作现场</button>
+        <button data-page="07" onclick="switchMappingTab('07')">07 人员统计</button>
+        <button data-page="08" onclick="switchMappingTab('08')">08 ECC销项</button>
+        <button data-page="09" onclick="switchMappingTab('09')">09 图纸深化</button>
+        <button data-page="10" onclick="switchMappingTab('10')">10 周计划</button>
+        <button data-page="11" onclick="switchMappingTab('11')">11 施工段划分与计划</button>
         <button data-page="12" onclick="switchMappingTab('12')">12 协调事宜</button>
 
         <div class="nav-controls">
@@ -867,45 +843,71 @@
 
   <!-- ============== 模态框：编辑事件 ============== -->
   <div class="modal-mask" id="modalEventEdit">
-    <div class="modal">
+    <div class="modal" style="max-width:720px;">
       <div class="modal-header">
         <div class="modal-title">✏️ 编辑事件</div>
         <button class="modal-close" onclick="closeModal('modalEventEdit')">✕</button>
       </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label class="form-label">日期 <span class="req">*</span></label>
-          <input class="form-input" type="date" id="edit-date">
+      <div class="modal-body" style="max-height:70vh;overflow-y:auto;">
+        <div class="form-row" style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;">
+          <div class="form-group">
+            <label class="form-label">事件类型</label>
+            <select class="form-select" id="edit-type">
+              <option value="progress">🔨 进度</option>
+              <option value="material">📦 材料</option>
+              <option value="safety">🛡 安全</option>
+              <option value="coordination">🤝 协调</option>
+              <option value="issue">⚠️ 问题</option>
+              <option value="attendance">👥 考勤</option>
+              <option value="drawing">📐 图纸深化</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">日期 <span class="req">*</span></label>
+            <input class="form-input" type="date" id="edit-date">
+          </div>
+          <div class="form-group">
+            <label class="form-label">时间 <span class="req">*</span></label>
+            <input class="form-input" type="time" id="edit-time">
+          </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">时间 <span class="req">*</span></label>
-          <input class="form-input" type="time" id="edit-time">
+        <!-- 关联计划 + 完成类型 -->
+        <div class="form-row" style="display:grid;grid-template-columns:2fr 1fr;gap:10px;" data-dp-show="progress,material,safety,coordination,attendance">
+          <div class="form-group">
+            <label class="form-label">关联计划</label>
+            <select class="form-select" id="edit-plan">
+              <option value="">无（计划外工作）</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">完成类型</label>
+            <select class="form-select" id="edit-completion-type">
+              <option value="planned">计划内</option>
+              <option value="unplanned">计划外</option>
+            </select>
+          </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">区域 <span class="req">*</span></label>
-          <select class="form-select" id="edit-area">
-            <option value="">请选择区域</option>
-          </select>
+        <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 2fr;gap:10px;">
+          <div class="form-group" data-dp-show="progress,material,safety,coordination,attendance">
+            <label class="form-label">楼号/施工段</label>
+            <input class="form-input" type="text" id="edit-building-no" placeholder="如：1号楼">
+          </div>
+          <div class="form-group" data-dp-show="progress,material,safety,coordination,attendance">
+            <label class="form-label">层号</label>
+            <input class="form-input" type="text" id="edit-floor-no" placeholder="如：F1">
+          </div>
+          <div class="form-group" data-dp-show="progress,material,safety,coordination,attendance">
+            <label class="form-label">所属区域 <span class="req">*</span></label>
+            <select class="form-select" id="edit-area">
+              <option value="">请选择区域</option>
+            </select>
+          </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">任务名称</label>
-          <input class="form-input" type="text" id="edit-task" placeholder="任务名称">
-        </div>
-        <div class="form-group">
-          <label class="form-label">负责人</label>
-          <input class="form-input" type="text" id="edit-owner" placeholder="负责人">
-        </div>
-        <div class="form-group">
-          <label class="form-label">进度</label>
-          <input class="form-input" type="text" id="edit-progress" placeholder="如：50%">
-        </div>
-        <div class="form-group">
-          <label class="form-label">人数</label>
-          <input class="form-input" type="number" id="edit-headcount" placeholder="人数" min="0">
-        </div>
+        <div id="editDynamicForm"></div>
+        <div id="editPhotosSection"></div>
         <div class="form-group">
           <label class="form-label">备注</label>
-          <textarea class="form-textarea" id="edit-note" rows="3" placeholder="备注信息"></textarea>
+          <textarea class="form-textarea" id="edit-note" rows="2" placeholder="可选"></textarea>
         </div>
       </div>
       <div class="modal-footer">
@@ -929,22 +931,23 @@
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">开始日期 <span class="req">*</span></label>
-              <input class="form-input" type="date" id="dp-start-date">
+              <input class="form-input" type="date" id="dp-start-date" onchange="recalcPlanManDays()">
             </div>
             <div class="form-group">
               <label class="form-label">结束日期 <span class="req">*</span></label>
-              <input class="form-input" type="date" id="dp-end-date">
+              <input class="form-input" type="date" id="dp-end-date" onchange="recalcPlanManDays()">
             </div>
           </div>
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">事件类型 <span class="req">*</span></label>
-              <select class="form-select" id="dp-event-type">
+              <select class="form-select" id="dp-event-type" onchange="filterPlanFormByType()">
                 <option value="progress">🔨 进度</option>
                 <option value="material">📦 材料</option>
                 <option value="safety">🛡 安全</option>
                 <option value="coordination">🤝 协调</option>
                 <option value="attendance">👥 考勤</option>
+                <option value="drawing">📐 图纸深化</option>
               </select>
             </div>
             <div class="form-group">
@@ -959,7 +962,7 @@
         </div>
         
         <!-- 施工位置 -->
-        <div class="form-section">
+        <div class="form-section" data-dp-show="progress,material,safety,coordination,attendance">
           <div class="section-title">施工位置</div>
           <div class="form-row">
             <div class="form-group">
@@ -981,58 +984,80 @@
         
         <!-- 工序与负责人 -->
         <div class="form-section">
-          <div class="section-title">工序信息</div>
-          <div class="form-group">
-            <label class="form-label">工序 <span class="req">*</span></label>
-            <input class="form-input" type="text" id="dp-process" placeholder="如：钢筋绑扎、混凝土浇筑">
+          <div class="section-title" id="dp-form-title">工序信息</div>
+          <div class="form-group" data-dp-show="progress,material,safety,drawing">
+            <label class="form-label" id="dp-process-label">工序 <span class="req">*</span></label>
+            <textarea class="form-textarea" id="dp-process" rows="2" placeholder="如：钢筋绑扎、混凝土浇筑"></textarea>
           </div>
           <div class="form-row">
-            <div class="form-group">
+            <div class="form-group" data-dp-show="progress,safety,coordination,drawing">
               <label class="form-label">负责人</label>
               <input class="form-input" type="text" id="dp-owner" placeholder="姓名或班组">
             </div>
-            <div class="form-group">
+            <div class="form-group" data-dp-show="progress,drawing">
               <label class="form-label">当前进度</label>
               <input class="form-input" type="text" id="dp-progress" placeholder="如：50%" oninput="checkDpProgressOver100()">
               <span id="dp-progress-warn" style="display:none;font-size:10px;padding:2px 8px;border-radius:4px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca;white-space:nowrap;">⚠️ 超过100%，将标为超额完成</span>
             </div>
           </div>
         </div>
-        
+
         <!-- 劳动力安排 -->
-        <div class="form-section">
+        <div class="form-section" data-dp-show="progress,attendance">
           <div class="section-title">劳动力需求</div>
           <div id="laborRows">
             <div class="form-row labor-row">
-              <div class="form-group">
+              <div class="form-group" style="flex:2;">
                 <label class="form-label">工种</label>
-                <input class="form-input" type="text" id="labor-type-0" placeholder="如：木工、钢筋工">
+                <input class="form-input" type="text" id="labor-type-0" placeholder="如：木工、钢筋工" oninput="recalcPlanManDays()">
               </div>
-              <div class="form-group">
+              <div class="form-group" style="flex:1;">
                 <label class="form-label">人数</label>
-                <input class="form-input" type="number" id="labor-count-0" value="0" min="0">
+                <input class="form-input" type="number" id="labor-count-0" value="0" min="0" oninput="recalcPlanManDays()">
+              </div>
+              <div class="form-group" style="flex:1;">
+                <label class="form-label">工日</label>
+                <input class="form-input dp-labor-mandays" type="number" id="labor-mandays-0" value="0" min="0" step="0.5" onchange="onLaborManDayChanged()">
               </div>
               <button class="btn btn-danger btn-sm" onclick="removeLaborRow(0)" style="margin-top:24px;">✕</button>
             </div>
           </div>
           <button class="btn btn-ghost btn-sm" onclick="addLaborRow()">+ 添加工种</button>
+          <!-- 总工日（汇总各行，只读） -->
+          <div class="form-row" style="margin-top:8px;background:#f1f5f9;padding:6px 8px;border-radius:4px;align-items:flex-end;">
+            <div class="form-group" style="flex:1;">
+              <label class="form-label">总工日（汇总各行，只读）</label>
+              <input class="form-input" type="number" id="dp-man-days" value="0" min="0" step="0.5" readonly style="background:#f8fafc;color:#64748b;">
+            </div>
+            <div style="font-size:10px;color:#94a3b8;padding-bottom:8px;">改各工种工日/人数自动重算</div>
+          </div>
         </div>
         
         <!-- 材料与机械 -->
-        <div class="form-section">
+        <div class="form-section" data-dp-show="progress,material">
           <div class="section-title">材料与机械</div>
-          <div class="form-group">
+          <div class="form-group" data-dp-show="progress,material">
             <label class="form-label">材料清单</label>
             <textarea class="form-textarea" id="dp-materials" rows="2" placeholder="请输入材料清单，每行一种"></textarea>
           </div>
-          <div class="form-group">
+          <div class="form-group" data-dp-show="progress">
             <label class="form-label">机械设备</label>
             <textarea class="form-textarea" id="dp-machinery" rows="2" placeholder="请输入机械设备，每行一台"></textarea>
           </div>
         </div>
-        
+
+        <!-- 施工段示意图 -->
+        <div class="form-section" data-dp-show="progress,material,drawing">
+          <div class="section-title">施工段示意图</div>
+          <div class="form-group">
+            <label class="form-label">上传区域平面图（可多选）</label>
+            <input class="form-input" type="file" id="dp-zone-images" accept="image/*" multiple onchange="previewZoneImages(event)">
+            <div id="dp-zone-images-preview" style="display:none;margin-top:8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;"></div>
+          </div>
+        </div>
+
         <!-- 安全注意事项 -->
-        <div class="form-section">
+        <div class="form-section" data-dp-show="progress,safety">
           <div class="section-title">安全管理</div>
           <div class="form-group">
             <label class="form-label">安全注意事项</label>
@@ -1078,47 +1103,196 @@
     </div>
   </div>
 
-  <!-- ============== 模态框：每日签到 ============== -->
+  <!-- ============== 模态框：每日签到 / 工人管理 ============== -->
   <div class="modal-mask" id="modalAttendance">
-    <div class="modal" style="max-width:520px;">
+    <div class="modal" style="max-width:720px;">
       <div class="modal-header">
-        <div class="modal-title">✓ 管理人员签到</div>
+        <div class="modal-title" id="attendanceModalTitle">✓ 管理人员签到</div>
         <button class="modal-close" onclick="closeModal('modalAttendance')">✕</button>
       </div>
+      <!-- Tab 切换栏 -->
+      <div style="display:flex;background:#f1f5f9;border-bottom:1px solid #e2e8f0;">
+        <button id="attTabBtn-attendance" onclick="switchAttendanceTab('attendance')" style="flex:1;padding:10px;font-size:13px;font-weight:600;cursor:pointer;background:#fff;color:#00adef;border:none;border-bottom:2px solid #00adef;">✓ 签到</button>
+        <button id="attTabBtn-workers" onclick="switchAttendanceTab('workers')" style="flex:1;padding:10px;font-size:13px;font-weight:600;cursor:pointer;background:transparent;color:#64748b;border:none;border-bottom:2px solid transparent;">👷 工人管理</button>
+      </div>
       <div class="modal-body">
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">📅 日期</label>
-            <input class="form-input" type="date" id="attendanceDate">
+        <!-- Tab 1: 签到 -->
+        <div id="attTabContent-attendance" class="att-tab-content">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">📅 日期</label>
+              <input class="form-input" type="date" id="attendanceDate">
+            </div>
+            <div class="form-group" style="display:flex; align-items:flex-end; gap:4px;">
+              <button class="btn btn-sm btn-primary" onclick="setAllAttendance(true)">全选</button>
+              <button class="btn btn-sm btn-secondary" onclick="setAllAttendance(false)">全不选</button>
+            </div>
           </div>
-          <div class="form-group" style="display:flex; align-items:flex-end; gap:4px;">
-            <button class="btn btn-sm btn-primary" onclick="setAllAttendance(true)">全选</button>
-            <button class="btn btn-sm btn-secondary" onclick="setAllAttendance(false)">全不选</button>
+          <div id="attendanceList" style="max-height:320px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:4px; padding:4px 0;"></div>
+          <div style="margin-top:8px;border-top:1px solid #e2e8f0;padding-top:8px;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+              <span style="font-size:12px;font-weight:600;color:#374151;">📸 现场照片</span>
+              <label style="background:#2563eb;color:#fff;border:none;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:11px;" id="attPhotoUploadBtn">
+                上传
+                <input type="file" accept="image/*" style="display:none" onchange="uploadAttendancePhoto(this)">
+              </label>
+              <button style="background:#6366f1;color:#fff;border:none;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:11px;display:none;" id="attPhotoEnlargeBtn" onclick="enlargeAttendancePhoto()">放大</button>
+              <button style="background:#ef4444;color:#fff;border:none;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:11px;display:none;" id="attPhotoClearBtn" onclick="clearAttendancePhoto()">清除</button>
+            </div>
+            <div id="attPhotoPreview" style="width:100%;max-height:120px;border-radius:6px;overflow:hidden;border:2px dashed #d1d5db;display:flex;align-items:center;justify-content:center;background:#f9fafb;min-height:60px;font-size:11px;color:#9ca3af;">暂无照片</div>
+            <input type="text" id="attPhotoCaption" value="" placeholder="输入照片标签" style="width:100%;margin-top:4px;font-size:11px;border:1px solid #d1d5db;border-radius:3px;padding:2px 6px;display:none;" oninput="_s03PhotoCaption=this.value;renderMappingPage03()">
           </div>
         </div>
-        <div id="attendanceList" style="max-height:320px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:4px; padding:4px 0;"></div>
-        <div style="margin-top:8px;border-top:1px solid #e2e8f0;padding-top:8px;">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-            <span style="font-size:12px;font-weight:600;color:#374151;">📸 现场照片</span>
-            <label style="background:#2563eb;color:#fff;border:none;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:11px;" id="attPhotoUploadBtn">
-              上传
-              <input type="file" accept="image/*" style="display:none" onchange="uploadAttendancePhoto(this)">
-            </label>
-            <button style="background:#6366f1;color:#fff;border:none;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:11px;display:none;" id="attPhotoEnlargeBtn" onclick="enlargeAttendancePhoto()">放大</button>
-            <button style="background:#ef4444;color:#fff;border:none;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:11px;display:none;" id="attPhotoClearBtn" onclick="clearAttendancePhoto()">清除</button>
+        <!-- Tab 2: 工人管理（标准工种模板 + 本周/下周人数录入） -->
+        <div id="attTabContent-workers" class="att-tab-content" style="display:none;">
+          <div style="display:flex;align-items:center;gap:8px;background:#f1f5f9;padding:6px 10px;border-radius:4px;margin-bottom:6px;">
+            <span style="font-size:11px;color:#475569;font-weight:600;">📊 数据源：</span>
+            <button id="attWorkerModeBtn-fixed" onclick="setWorkersMode('fixed')" style="font-size:11px;padding:3px 10px;border-radius:3px;cursor:pointer;background:#00adef;color:#fff;border:1px solid #0081cc;">📋 固定模板</button>
+            <button id="attWorkerModeBtn-dynamic" onclick="setWorkersMode('dynamic')" style="font-size:11px;padding:3px 10px;border-radius:3px;cursor:pointer;background:#fff;color:#475569;border:1px solid #cbd5e1;">⚡ 动态获取</button>
+            <div style="flex:1;"></div>
+            <span id="attWorkerModeHint" style="font-size:10px;color:#94a3b8;">使用「固定模板」：在下方表格手工录入本周/下周人数，周报 06 直接显示该数据</span>
           </div>
-          <div id="attPhotoPreview" style="width:100%;max-height:120px;border-radius:6px;overflow:hidden;border:2px dashed #d1d5db;display:flex;align-items:center;justify-content:center;background:#f9fafb;min-height:60px;font-size:11px;color:#9ca3af;">暂无照片</div>
-          <input type="text" id="attPhotoCaption" value="" placeholder="输入照片标签" style="width:100%;margin-top:4px;font-size:11px;border:1px solid #d1d5db;border-radius:3px;padding:2px 6px;display:none;" oninput="_s03PhotoCaption=this.value;renderMappingPage03()">
+          <!-- 显示字段切换（仅动态模式可见） -->
+          <div id="attDisplayFieldRow" style="display:none;align-items:center;gap:8px;background:#f8fafc;padding:4px 10px;border-radius:4px;margin-bottom:6px;">
+            <span style="font-size:11px;color:#475569;font-weight:600;">🏷️ 显示字段：</span>
+            <button id="attDisplayFieldBtn-tradeName" onclick="setPage06DisplayField('tradeName')" style="font-size:11px;padding:2px 8px;border-radius:3px;cursor:pointer;background:#00adef;color:#fff;border:1px solid #0081cc;">模板名称</button>
+            <button id="attDisplayFieldBtn-mapFrom" onclick="setPage06DisplayField('mapFrom')" style="font-size:11px;padding:2px 8px;border-radius:3px;cursor:pointer;background:#fff;color:#475569;border:1px solid #cbd5e1;">映射来源名称（不转换）</button>
+            <span style="font-size:10px;color:#94a3b8;margin-left:4px;">周报 06 显示的工种列</span>
+          </div>
+          <div id="standardTradesList" style="max-height:380px;overflow-y:auto;"></div>
+          <button class="btn btn-ghost btn-sm" onclick="addStandardTradeRow()" style="margin-top:8px;font-size:11px;">+ 新增工种</button>
+          <div style="margin-top:10px;display:flex;gap:6px;justify-content:flex-end;">
+            <button class="btn btn-sm btn-primary" onclick="saveWeeklyLaborData()" style="font-size:11px;background:#059669;border-color:#047857;">💾 保存本周/下周人数</button>
+          </div>
+          <!-- 周报 06 照片管理 -->
+          <div style="margin-top:12px;border-top:1px solid #e2e8f0;padding-top:10px;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+              <span style="font-size:12px;font-weight:600;color:#374151;">📷 现场照片</span>
+              <label style="background:#2563eb;color:#fff;border:none;border-radius:4px;padding:3px 10px;cursor:pointer;font-size:11px;">
+                上传图片
+                <input type="file" accept="image/*" style="display:none" onchange="uploadPage06Photo(this)">
+              </label>
+              <span style="font-size:10px;color:#94a3b8;" id="page06PhotoCount">共 0 张照片</span>
+            </div>
+            <div id="page06PhotoGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;max-height:200px;overflow-y:auto;"></div>
+          </div>
         </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="closeModal('modalAttendance')">取消</button>
-        <button class="btn btn-primary" onclick="saveAttendance()">保存</button>
+        <button id="attendanceFooterSave" class="btn btn-primary" onclick="saveAttendance()">保存签到</button>
+        <button id="attendanceFooterDone" class="btn btn-primary" onclick="closeModal('modalAttendance');renderMappingPage06();" style="display:none;">完成</button>
       </div>
     </div>
   </div>
 
   <!-- ============== 模态框：重要节点编辑 ============== -->
+
+  <!-- ============== 模态框：ECC 销项管理（带 TAB：录入 / 汇总） ============== -->
+  <div class="modal-mask" id="modalEcc">
+    <div class="modal" style="max-width:960px;">
+      <div class="modal-header">
+        <div class="modal-title">⚑ ECC 销项管理</div>
+        <button class="modal-close" onclick="closeModal('modalEcc')">✕</button>
+      </div>
+      <div style="display:flex;background:#f1f5f9;border-bottom:1px solid #e2e8f0;">
+        <div id="eccTabEntry" class="ecc-tab active" onclick="switchEccTab('entry')">📋 录入</div>
+        <div id="eccTabSummary" class="ecc-tab" onclick="switchEccTab('summary')">📊 汇总</div>
+      </div>
+      <div class="modal-body" id="eccEditorBody" style="max-height:560px;overflow:hidden;padding:0;display:flex;flex-direction:column;">
+        <!-- TAB: 录入 -->
+        <div id="eccEntryPanel" style="display:flex;flex-direction:column;flex:1;min-height:0;">
+          <div style="padding:10px 16px;background:#f8fafc;border-bottom:1px solid #e2e8f0;display:flex;gap:8px;align-items:center;">
+            <span style="font-size:12px;color:#64748b;">筛选状态：</span>
+            <select id="eccFilterStatus" onchange="renderEccList()" style="font-size:12px;padding:3px 8px;border:1px solid #cbd5e1;border-radius:4px;">
+              <option value="all">全部</option>
+              <option value="open">未关闭</option>
+              <option value="closing">流程关闭中</option>
+              <option value="closed">已关闭</option>
+            </select>
+            <button class="btn btn-primary btn-sm" onclick="openEccItemForm()" style="margin-left:auto;">+ 新增 ECC</button>
+          </div>
+          <div id="eccListContainer" style="flex:1;overflow:auto;padding:12px 16px;"></div>
+        </div>
+        <!-- TAB: 汇总 -->
+        <div id="eccSummaryPanel" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:auto;padding:16px;">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;padding:10px 12px;background:#f1f5f9;border-radius:6px;">
+            <span style="font-size:13px;color:#0f172a;font-weight:600;">数据源：</span>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;">
+              <input type="radio" name="eccSummaryMode" value="auto" onchange="setEccSummaryMode('auto')"> 自动（汇总录入数据）
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;">
+              <input type="radio" name="eccSummaryMode" value="manual" onchange="setEccSummaryMode('manual')"> 手动（直接录入）
+            </label>
+            <span id="eccSummaryModeHint" style="margin-left:auto;font-size:11px;color:#94a3b8;"></span>
+          </div>
+          <div id="eccSummaryContent"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-sm btn-ghost" onclick="closeModal('modalEcc')">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== 模态框：ECC 单条录入/编辑（独立弹窗） ============== -->
+  <div class="modal-mask" id="modalEccItem">
+    <div class="modal" style="max-width:680px;">
+      <div class="modal-header">
+        <div class="modal-title" id="eccFormTitle">新增 ECC</div>
+        <button class="modal-close" onclick="closeEccItemForm()">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="ecc-id">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 16px;">
+          <div class="form-group" style="grid-column:1 / -1;">
+            <label class="form-label">问题描述 <span style="color:#ef4444;">*</span></label>
+            <input class="form-input" type="text" id="ecc-title" placeholder="如：餐厅区天花平整度偏差">
+          </div>
+          <div class="form-group">
+            <label class="form-label">所属区域</label>
+            <select class="form-select" id="ecc-area"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">状态 <span style="color:#ef4444;">*</span></label>
+            <select class="form-select" id="ecc-status">
+              <option value="open">未关闭</option>
+              <option value="closing">流程关闭中</option>
+              <option value="closed">已关闭</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">发现日期</label>
+            <input class="form-input" type="date" id="ecc-discovered-date">
+          </div>
+          <div class="form-group">
+            <label class="form-label">关闭日期</label>
+            <input class="form-input" type="date" id="ecc-closed-date">
+          </div>
+          <div class="form-group" style="grid-column:1 / -1;">
+            <label class="form-label">现场照片</label>
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+              <input type="file" id="ecc-photo-input" accept="image/*" multiple style="display:none" onchange="handleEccPhotoUpload(event)">
+              <button type="button" class="btn btn-sm btn-secondary" onclick="document.getElementById('ecc-photo-input').click()">📷 上传图片</button>
+              <span style="font-size:11px;color:#94a3b8;">支持多张，单张不超过 5MB</span>
+            </div>
+            <div id="ecc-photo-preview" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-sm btn-ghost" onclick="closeEccItemForm()">取消</button>
+        <button class="btn btn-sm btn-primary" onclick="saveEccItem()">💾 保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== 周报 06 照片放大 ============== -->
+  <div id="page06PhotoEnlargeOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:10000;align-items:center;justify-content:center;flex-direction:column;gap:12px;">
+    <button onclick="document.getElementById('page06PhotoEnlargeOverlay').style.display='none'" style="position:absolute;top:16px;right:16px;background:none;border:none;color:#fff;font-size:24px;cursor:pointer;">✕</button>
+    <img id="page06PhotoEnlargeImg" src="" style="max-width:90vw;max-height:80vh;object-fit:contain;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,0.5);">
+    <div id="page06PhotoEnlargeCaption" style="color:#fff;font-size:14px;font-weight:600;"></div>
+  </div>
   <div class="modal-mask" id="modalMilestone">
     <div class="modal" style="max-width:820px;">
       <div class="modal-header">
@@ -1199,8 +1373,20 @@
     <div style="position:absolute;top:16px;right:24px;color:#fff;font-size:28px;cursor:pointer;line-height:1;" onclick="document.getElementById('photoEnlargeOverlay').style.display='none'">✕</div>
   </div>
 
+  <!-- 图片放大查看 -->
+  <div id="photoLightbox" class="modal-mask" onclick="closePhotoLightbox()" style="background:rgba(0,0,0,0.9);">
+    <div onclick="event.stopPropagation();" style="position:relative;max-width:92vw;max-height:92vh;display:flex;flex-direction:column;align-items:center;">
+      <img id="photoLightboxImg" src="" style="max-width:92vw;max-height:80vh;border-radius:6px;box-shadow:0 8px 32px rgba(0,0,0,0.6);background:#000;" />
+      <div id="photoLightboxCaption" style="margin-top:12px;color:#fff;font-size:14px;text-align:center;max-width:80vw;"></div>
+      <div style="margin-top:8px;color:#94a3b8;font-size:11px;text-align:center;">点击背景或按 ESC 关闭</div>
+    </div>
+  </div>
+
   <!-- 引入脚本 -->
   <script src="mock-data.js"></script>
   <script src="app.js"></script>
+  <script>
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closePhotoLightbox(); });
+  </script>
 </body>
 </html>

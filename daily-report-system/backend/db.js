@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS dr_daily_plans (
   status TEXT DEFAULT 'active',
   labor_schedule JSONB DEFAULT '[]',
   area_targets JSONB DEFAULT '[]',
+  total_man_days INTEGER DEFAULT 0,
   extra JSONB DEFAULT '{}',
   created_at TEXT,
   updated_at TEXT
@@ -112,6 +113,7 @@ CREATE TABLE IF NOT EXISTS dr_events (
   time TEXT,
   type TEXT NOT NULL,
   area_id TEXT,
+  plan_id TEXT,
   payload JSONB DEFAULT '{}',
   submitter TEXT DEFAULT '张明',
   source TEXT DEFAULT 'manual',
@@ -121,6 +123,11 @@ CREATE TABLE IF NOT EXISTS dr_events (
   photos JSONB DEFAULT '[]',
   note TEXT DEFAULT ''
 );
+ALTER TABLE dr_events ADD COLUMN IF NOT EXISTS plan_id TEXT;
+ALTER TABLE dr_events ADD COLUMN IF NOT EXISTS completion_type TEXT;
+ALTER TABLE dr_events ADD COLUMN IF NOT EXISTS building_no TEXT;
+ALTER TABLE dr_events ADD COLUMN IF NOT EXISTS floor_no TEXT;
+ALTER TABLE dr_events ADD COLUMN IF NOT EXISTS owner TEXT;
 
 -- 事项台账
 CREATE TABLE IF NOT EXISTS dr_issues (
@@ -150,7 +157,20 @@ CREATE TABLE IF NOT EXISTS dr_ecc_items (
   area_id TEXT,
   discovered_date TEXT,
   status TEXT DEFAULT 'open',
-  closed_date TEXT
+  closed_date TEXT,
+  photos JSONB DEFAULT '[]'::jsonb
+);
+
+-- ECC 手动汇总（按项目一条）
+CREATE TABLE IF NOT EXISTS dr_ecc_summaries (
+  project_id TEXT PRIMARY KEY REFERENCES dr_projects(id) ON DELETE CASCADE,
+  total INTEGER DEFAULT 0,
+  closed INTEGER DEFAULT 0,
+  closing INTEGER DEFAULT 0,
+  open INTEGER DEFAULT 0,
+  rate TEXT DEFAULT '—',
+  photos JSONB DEFAULT '[]'::jsonb,
+  updated_at TIMESTAMPTZ DEFAULT now()
 );
 
 -- 图纸深化
@@ -159,8 +179,18 @@ CREATE TABLE IF NOT EXISTS dr_drawing_deepenings (
   project_id TEXT REFERENCES dr_projects(id) ON DELETE CASCADE,
   task TEXT,
   owner TEXT,
-  status TEXT DEFAULT '进行中'
+  status TEXT DEFAULT '进行中',
+  progress TEXT DEFAULT '',
+  plan_id TEXT,
+  event_id TEXT,
+  area_id TEXT,
+  created_date TEXT
 );
+ALTER TABLE dr_drawing_deepenings ADD COLUMN IF NOT EXISTS progress TEXT DEFAULT '';
+ALTER TABLE dr_drawing_deepenings ADD COLUMN IF NOT EXISTS plan_id TEXT;
+ALTER TABLE dr_drawing_deepenings ADD COLUMN IF NOT EXISTS event_id TEXT;
+ALTER TABLE dr_drawing_deepenings ADD COLUMN IF NOT EXISTS area_id TEXT;
+ALTER TABLE dr_drawing_deepenings ADD COLUMN IF NOT EXISTS created_date TEXT;
 
 -- 周甘特项
 CREATE TABLE IF NOT EXISTS dr_weekly_gantt_items (
@@ -191,6 +221,38 @@ CREATE TABLE IF NOT EXISTS dr_daily_attendance (
   present BOOLEAN DEFAULT false,
   reason TEXT DEFAULT '',
   PRIMARY KEY (date, manager_id)
+);
+
+-- 标准工种模板（周报 06 人员统计表头，project_id 为 null 表示全局共享）
+CREATE TABLE IF NOT EXISTS dr_standard_trades (
+  id SERIAL PRIMARY KEY,
+  project_id TEXT,
+  trade_name TEXT NOT NULL,
+  map_from TEXT,
+  sort_order INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 周报 06 手工录入的本周/下周人数（固定模板模式下使用）
+CREATE TABLE IF NOT EXISTS dr_weekly_labor_data (
+  id SERIAL PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  week_start TEXT NOT NULL,
+  trade_id INTEGER NOT NULL REFERENCES dr_standard_trades(id) ON DELETE CASCADE,
+  this_week_count INTEGER DEFAULT 0,
+  next_week_count INTEGER DEFAULT 0,
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(project_id, week_start, trade_id)
+);
+
+-- 周报 06 现场照片
+CREATE TABLE IF NOT EXISTS dr_page06_photos (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  src TEXT NOT NULL,
+  caption TEXT DEFAULT '',
+  trade_id TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
 );
 `;
 
@@ -296,11 +358,75 @@ const SEED_MILESTONE_PLANS_HARD = [
   { project_id: 'baicaoyuan', id: 'MP008', category: '精装', node_type: '关键节点', area_label: '电梯厅', description: '标准层电梯厅精装施工', target_month: 8, year: 2026, sub_items: '[]' },
 ];
 
+// 标准工种模板（周报 06 人员统计表头，project_id 为 null 表示全局共享）
+const SEED_STANDARD_TRADES = [
+  { trade_name: '5S小队',   map_from: '普工' },
+  { trade_name: '电工',     map_from: '电工' },
+  { trade_name: '电焊工',   map_from: '焊工' },
+  { trade_name: '工长',     map_from: null },
+  { trade_name: '库管',     map_from: null },
+  { trade_name: '临电专员', map_from: null },
+  { trade_name: '木工',     map_from: '木工' },
+  { trade_name: '水工',     map_from: '水电工' },
+  { trade_name: '瓦工',     map_from: '瓦工' },
+  { trade_name: '普工',     map_from: null },
+  { trade_name: '油工',     map_from: '油漆工' },
+  { trade_name: '防水工',   map_from: null },
+  { trade_name: '管理人员', map_from: null },
+  { trade_name: '室内电梯司机', map_from: null }
+];
+
+// 自动创建数据库（若不存在）
+async function ensureDatabaseExists() {
+  const targetDb = process.env.DB_NAME || 'weekly_report';
+  try {
+    // 试探：是否能连上目标库
+    await pool.query('SELECT 1');
+    return; // 库存在，正常返回
+  } catch (e) {
+    // 3D000 = invalid catalog name（数据库不存在）
+    if (e.code !== '3D000') throw e;
+  }
+
+  // 库不存在 → 连默认 postgres 库来创建
+  console.log(`[DB] 目标数据库 "${targetDb}" 不存在，尝试自动创建...`);
+  const adminPool = new pg.Pool({
+    host: process.env.DB_HOST || 'localhost',
+    port: parseInt(process.env.DB_PORT || '5432'),
+    database: 'postgres',
+    user: process.env.DB_USER || 'postgres',
+    password: process.env.DB_PASSWORD || '123456',
+  });
+  try {
+    await adminPool.query(`CREATE DATABASE "${targetDb}"`);
+    console.log(`[DB] 目标数据库 "${targetDb}" 创建成功`);
+  } catch (createErr) {
+    // 42P04 = duplicate_database（其他进程/请求刚创建了）
+    if (createErr.code !== '42P04') {
+      console.error(`[DB] 创建数据库失败（需要 CREATEDB 权限）: ${createErr.message}`);
+      throw createErr;
+    }
+    console.log(`[DB] 目标数据库 "${targetDb}" 已存在（其他进程）`);
+  } finally {
+    await adminPool.end();
+  }
+
+  // 等 pool 的连接缓存清掉，下次 query 时它会用新库重连
+}
+
 export async function initDatabase() {
+  // 1. 确保目标数据库存在（不存在则自动创建）
+  await ensureDatabaseExists();
+
   // Create tables
   await pool.query(SCHEMA_SQL);
   // 给旧表加 extra 列
   try { await pool.query('ALTER TABLE dr_daily_plans ADD COLUMN IF NOT EXISTS extra JSONB DEFAULT \'{}\''); } catch {}; // skip on older PG
+  try { await pool.query('ALTER TABLE dr_daily_plans ADD COLUMN IF NOT EXISTS total_man_days INTEGER DEFAULT 0'); } catch {};
+  // 给旧 ECC 表加 photos 列
+  try { await pool.query('ALTER TABLE dr_ecc_items ADD COLUMN IF NOT EXISTS photos JSONB DEFAULT \'[]\'::jsonb'); } catch {};
+  // 给旧 ECC 汇总表加 photos 列
+  try { await pool.query('ALTER TABLE dr_ecc_summaries ADD COLUMN IF NOT EXISTS photos JSONB DEFAULT \'[]\'::jsonb'); } catch {};
 
   // Seed projects
   for (const p of SEED_PROJECTS) {
@@ -352,10 +478,22 @@ export async function initDatabase() {
       [mp.project_id, mp.id, mp.category, mp.node_type, mp.area_label, mp.description, mp.target_month, mp.year, mp.sub_items]
     );
   }
+
+  // Seed standard trades (项目内标准工种模板，project_id 为 null 表示全局默认)
+  const { rows: stCount } = await pool.query('SELECT COUNT(*) AS cnt FROM dr_standard_trades');
+  if (parseInt(stCount[0].cnt) === 0) {
+    for (let i = 0; i < SEED_STANDARD_TRADES.length; i++) {
+      const t = SEED_STANDARD_TRADES[i];
+      await pool.query(
+        `INSERT INTO dr_standard_trades (project_id, trade_name, map_from, sort_order) VALUES (NULL, $1, $2, $3)`,
+        [t.trade_name, t.map_from, i + 1]
+      );
+    }
+  }
 }
 
 export async function getDbStats() {
-  const tables = ['dr_projects', 'dr_areas', 'dr_workers', 'dr_management_team', 'dr_milestones', 'dr_milestone_plans', 'dr_daily_plans', 'dr_events', 'dr_issues', 'dr_ecc_items', 'dr_drawing_deepenings', 'dr_weekly_gantt_items', 'dr_construction_zone_schedules', 'dr_daily_attendance'];
+  const tables = ['dr_projects', 'dr_areas', 'dr_workers', 'dr_management_team', 'dr_milestones', 'dr_milestone_plans', 'dr_daily_plans', 'dr_events', 'dr_issues', 'dr_ecc_items', 'dr_drawing_deepenings', 'dr_weekly_gantt_items', 'dr_construction_zone_schedules', 'dr_daily_attendance', 'dr_standard_trades', 'dr_weekly_labor_data', 'dr_page06_photos', 'dr_ecc_summaries'];
   const stats = {};
   for (const t of tables) {
     try {

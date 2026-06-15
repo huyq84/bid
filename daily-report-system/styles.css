@@ -318,6 +318,7 @@ aside .card { margin-bottom: 0; }
 }
 .btn-primary  { background: #00adef; color: #fff; border-color: #00adef; }
 .btn-primary:hover { background: #0081cc; border-color: #0081cc; }
+.btn-primary:disabled { background: #cbd5e1; border-color: #cbd5e1; cursor: not-allowed; }
 .btn-ghost    { background: #fff; color: #475569; border-color: #cbd5e1; }
 .btn-ghost:hover { background: #f1f5f9; }
 .btn-outline  { background: #fff; color: #00adef; border: 1.5px solid #00adef; }
@@ -509,6 +510,23 @@ aside .card { margin-bottom: 0; }
   margin: 0 auto; page-break-after: always;
 }
 .report-page-frame.no-bg { background-image: none !important; background-color: #fff; }
+.ecc-tab {
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #64748b;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+.ecc-tab:hover { color: #00adef; }
+.ecc-tab.active {
+  color: #00adef;
+  border-bottom-color: #00adef;
+  background: #fff;
+  font-weight: 700;
+}
 
 /* ========== 平台风格周报预览 ========== */
 #modalWeeklyMapping {
@@ -855,6 +873,7 @@ aside .card { margin-bottom: 0; }
 .legend-dot.today { background: #00adef; }
 .legend-dot.completed { background: #10b981; }
 .legend-dot.draft { background: #ef4444; }
+.legend-dot.plan { background: #8b5cf6; }
 
 /* ---------- 计划管理样式 ---------- */
 .labor-row, .area-row {
@@ -1633,16 +1652,18 @@ aside .card { margin-bottom: 0; }
 }
 
 @keyframes fieldUnmatchedPulse {
-  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.3); }
-  25% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.5); border-color: #ef4444; }
-  50% { box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.3); border-color: rgba(239, 68, 68, 0.6); }
-  75% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.5); border-color: #ef4444; }
-  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.3); }
+  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.2); }
+  25% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.5); }
+  50% { box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.3); }
+  75% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.5); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.2); }
 }
 .field-unmatched {
-  animation: fieldUnmatchedPulse 1.5s ease-in-out 10;
   border-color: #ef4444 !important;
   background: #fef2f2 !important;
+}
+.field-unmatched-pulse {
+  animation: fieldUnmatchedPulse 1s ease-in-out 5;
 }
 .field-diff-warning {
   display: inline-flex !important;

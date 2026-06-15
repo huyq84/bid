@@ -23,6 +23,20 @@ export function mockParseVoice(text, projectId, areas = [], workers = [], plans 
     confidence: 0.75
   };
 
+  // 图纸深化类型识别（优先于默认 progress）
+  const drawingKeywords = ['图纸深化', '深化设计', '深化图', '节点图', '立面图', '幕墙节点', '打样', '样板段', '旋转楼梯', '岩板', '木饰面清单', '弧角打样'];
+  if (drawingKeywords.some(kw => text.includes(kw))) {
+    result.type = 'drawing';
+    const progMatch = text.match(/(\d+%?)\s*进度/);
+    if (progMatch) result.payload.progress = progMatch[1];
+    const drawTaskMatch = text.match(/(图纸深化|深化)([\u4e00-\u9fa5、，；\s\d号-]{0,40})/);
+    if (drawTaskMatch) result.payload.taskName = (drawTaskMatch[1] + (drawTaskMatch[2] || '')).trim().slice(0, 40);
+    else {
+      const descMatch = text.match(/[\u4e00-\u9fa5、，；\d号-]{4,40}/);
+      if (descMatch) result.payload.taskName = descMatch[0];
+    }
+  }
+
   // 提取区域
   for (const area of areas) {
     if (text.includes(area.name) || text.includes(area.id)) {

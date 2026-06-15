@@ -322,6 +322,48 @@ const DEFAULT_PLANS = {
         { areaId: 'A4', taskName: '石材干挂', targetProgress: '30%' }
       ],
       createdAt: '2026-06-03T07:00:00Z'
+    },
+    {
+      id: 'PLAN004',
+      projectId: 'baicaoyuan',
+      date: '2026-06-13',
+      startDate: '2026-06-13',
+      endDate: '2026-06-19',
+      description: '推进各区域精装收尾',
+      taskName: '各区域精装收尾',
+      progress: '70%',
+      status: 'active',
+      laborSchedule: [
+        { laborType: '木工', count: 8 },
+        { laborType: '电工', count: 4 },
+        { laborType: '油漆工', count: 3 },
+        { laborType: '瓦工', count: 2 }
+      ],
+      areaTargets: [
+        { areaId: 'A1', taskName: '墙面面层', targetProgress: '80%' },
+        { areaId: 'A3', taskName: '石材铺贴', targetProgress: '60%' }
+      ],
+      createdAt: '2026-06-13T07:00:00Z'
+    },
+    {
+      id: 'PLAN005',
+      projectId: 'baicaoyuan',
+      date: '2026-06-15',
+      startDate: '2026-06-15',
+      endDate: '2026-06-21',
+      description: '下阶段收尾和验收准备',
+      taskName: '下阶段收尾和验收准备',
+      progress: '0%',
+      status: 'planned',
+      laborSchedule: [
+        { laborType: '木工', count: 6 },
+        { laborType: '电工', count: 3 },
+        { laborType: '油漆工', count: 4 },
+        { laborType: '瓦工', count: 1 },
+        { laborType: '水电工', count: 2 }
+      ],
+      areaTargets: [],
+      createdAt: '2026-06-13T08:00:00Z'
     }
   ],
   'lvcheng-riverside': [],
@@ -332,11 +374,14 @@ const DEFAULT_PLANS = {
 let PLANS;
 try {
   const stored = localStorage.getItem('daily_plans');
-  if (stored) {
+  const SCHEMA_VERSION = 'v3';
+  const storedVersion = localStorage.getItem('daily_plans_version');
+  if (stored && storedVersion === SCHEMA_VERSION) {
     PLANS = JSON.parse(stored);
   } else {
     PLANS = JSON.parse(JSON.stringify(DEFAULT_PLANS));
     localStorage.setItem('daily_plans', JSON.stringify(PLANS));
+    localStorage.setItem('daily_plans_version', SCHEMA_VERSION);
   }
 } catch (e) {
   PLANS = JSON.parse(JSON.stringify(DEFAULT_PLANS));
@@ -674,6 +719,7 @@ const DEFAULT_EVENTS = [
 ];
 if (!EVENTS) { EVENTS = DEFAULT_EVENTS.map(e => ({...e})); localStorage.setItem('daily_events', JSON.stringify(EVENTS)); }
 function saveEventsToStorage() { try { localStorage.setItem('daily_events', JSON.stringify(EVENTS)); } catch(e) {} }
+function savePlansToStorage() { try { localStorage.setItem('daily_plans', JSON.stringify(PLANS)); } catch(e) {} }
 
 // 历史事件（用于日历展示）
 const HISTORY_EVENTS = [
@@ -855,7 +901,7 @@ const ISSUES = [
     resolution: '',
     photos: [],
     proposeDept: '精装项目部',
-    cooperateDept: '地暖单位、监理'
+
   }
 ];
 
@@ -1022,11 +1068,12 @@ const CONSTRUCTION_ZONE_SCHEDULES = [
 
 // 类型显示配置
 const TYPE_META = {
-  progress:    { label: '进度',   color: '#00adef', icon: '🔨', bgClass: 'type-progress' },
-  material:    { label: '材料',   color: '#f59e0b', icon: '📦', bgClass: 'type-material' },
-  safety:      { label: '安全',   color: '#ef4444', icon: '🛡', bgClass: 'type-safety' },
-  coordination:{ label: '协调',   color: '#8b5cf6', icon: '🤝', bgClass: 'type-coordination' },
-  attendance:  { label: '考勤',   color: '#10b981', icon: '👥', bgClass: 'type-attendance' }
+  progress:    { label: '进度',     color: '#00adef', icon: '🔨', bgClass: 'type-progress' },
+  material:    { label: '材料',     color: '#f59e0b', icon: '📦', bgClass: 'type-material' },
+  safety:      { label: '安全',     color: '#ef4444', icon: '🛡', bgClass: 'type-safety' },
+  coordination:{ label: '协调',     color: '#8b5cf6', icon: '🤝', bgClass: 'type-coordination' },
+  attendance:  { label: '考勤',     color: '#10b981', icon: '👥', bgClass: 'type-attendance' },
+  drawing:     { label: '图纸深化', color: '#6366f1', icon: '📐', bgClass: 'type-drawing' }
 };
 
 const ISSUE_TYPE_META = {
@@ -1087,6 +1134,23 @@ function mockParseVoice(text, projectId, areas, workers, plans) {
     },
     confidence: 0.85
   };
+
+  // 图纸深化类型识别（优先于默认 progress）
+  const drawingKeywords = ['图纸深化', '深化设计', '深化图', '节点图', '立面图', '幕墙节点', '打样', '样板段', '旋转楼梯', '岩板', '木饰面清单', '弧角打样'];
+  if (drawingKeywords.some(kw => text.includes(kw))) {
+    result.type = 'drawing';
+    // 进度提取
+    const progMatch = text.match(/(\d+%?)\s*进度/);
+    if (progMatch) result.payload.progress = progMatch[1];
+    // 复用任务提取
+    const drawTaskMatch = text.match(/(图纸深化|深化)([\u4e00-\u9fa5、，；\s\d号-]{0,40})/);
+    if (drawTaskMatch) result.payload.taskName = (drawTaskMatch[1] + (drawTaskMatch[2] || '')).trim().slice(0, 40);
+    else {
+      // 抓取包含图纸/打样/样板的整段描述
+      const descMatch = text.match(/[\u4e00-\u9fa5、，；\d号-]{4,40}/);
+      if (descMatch) result.payload.taskName = descMatch[0];
+    }
+  }
 
   // 提取区域
   for (const area of (AREAS[projectId] || [])) {
@@ -1270,17 +1334,27 @@ function mockParsePhoto(caption, areas = AREAS[CURRENT_PROJECT_ID] || [], plans 
 
 // 模拟"周报聚合"
 function mockAggregateWeekly(projectId, weekStart, weekEnd) {
-  const project = PROJECTS.find(p => p.id === projectId);
-  const areas = AREAS[projectId] || [];
-  const allEvents = [...EVENTS, ...HISTORY_EVENTS];
+  // 关键：从 window.MockData 读取（init 时会被后端 /api/data/all 覆盖为 PostgreSQL 数据）
+  // 不能用模块级 const（永远是 mock 默认值，刷新后不会更新）
+  const MD = (typeof window !== 'undefined' && window.MockData) || {};
+  const projects = MD.PROJECTS || PROJECTS;
+  const areasMap = MD.AREAS || AREAS;
+  const events = MD.EVENTS || EVENTS;
+  const historyEvents = MD.HISTORY_EVENTS || HISTORY_EVENTS;
+  const issues = MD.ISSUES || ISSUES;
+
+  const project = projects.find(p => p.id === projectId);
+  const areas = areasMap[projectId] || [];
+  const allEvents = [...events, ...historyEvents];
   const weekEvents = allEvents.filter(e => e.projectId === projectId && e.date >= weekStart && e.date <= weekEnd);
-  const weekIssues = ISSUES.filter(i => i.projectId === projectId);
+  const weekIssues = issues.filter(i => i.projectId === projectId);
+  const coordinationIssues = weekIssues.filter(i => i.type === 'coordination' && i.status !== 'closed');
 
   return {
     projectName: project.name,
     client: project.client,
     weekRange: `${weekStart} ~ ${weekEnd}`,
-    overview: `本周（${weekStart} ~ ${weekEnd}）${project.name} 持续推进精装施工。累计完成 ${weekEvents.filter(e => e.type === 'progress').length} 项进度任务，处理 ${weekIssues.length} 项专项事项。整体施工有序，质量、安全可控。`,
+    overview: `本周（${weekStart} ~ ${weekEnd}）${project.name} 持续推进精装施工。累计完成 ${weekEvents.filter(e => e.type === 'progress').length} 项进度任务，处理 ${weekIssues.length} 项专项事项（含 ${coordinationIssues.length} 项协调事宜）。整体施工有序，质量、安全可控。`,
     progressByArea: areas.map(area => {
       const areaEvents = weekEvents.filter(e => e.areaId === area.id && e.type === 'progress');
       return {
@@ -1296,6 +1370,12 @@ function mockAggregateWeekly(projectId, weekStart, weekEnd) {
       closed: weekIssues.filter(i => i.status === 'closed').length,
       details: weekIssues.map(i => `【${ISSUE_TYPE_META[i.type].label}】${i.title}（${ISSUE_STATUS_META[i.status].label}）`).join('\n')
     },
+    coordinationIssues: coordinationIssues.map((i, idx) => ({
+      seq: idx + 1,
+      title: i.title,
+      proposeDept: i.proposeDept || '—',
+      cooperateDept: i.cooperateDept || '—'
+    })),
     safetyStats: {
       checkCount: weekEvents.filter(e => e.type === 'safety').length,
       issueCount: weekEvents.filter(e => e.type === 'safety' && e.payload?.issues?.length > 0).length
@@ -1352,7 +1432,11 @@ function getMonthlyStats(year, month, projectId) {
 // --- 页面 04：上周工作完成情况 ---
 // 从 EVENTS（progress 类型）聚合周报"工作完成"表格数据
 function getPage04Data(projectId, weekStart, weekEnd) {
-  const allEvents = [...EVENTS, ...HISTORY_EVENTS];
+  // 关键：从 window.MockData 读取（init 时会被后端 /api/data/all 覆盖为 PostgreSQL 数据）
+  const MD = (typeof window !== 'undefined' && window.MockData) || {};
+  const events = MD.EVENTS || EVENTS;
+  const historyEvents = MD.HISTORY_EVENTS || HISTORY_EVENTS;
+  const allEvents = [...events, ...historyEvents];
   let weekEvents = allEvents.filter(e =>
     e.projectId === projectId &&
     e.type === 'progress' &&
@@ -1360,13 +1444,14 @@ function getPage04Data(projectId, weekStart, weekEnd) {
     e.status === 'confirmed'
   );
 
-  // 同一计划同一天多次填报 → 只保留最新一条
+  // 同一计划本周内多次填报 → 只保留最新一条（取本周最终状态）
+  weekEvents.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
   const dedup = new Map();
   const noPlan = [];
   weekEvents.forEach(e => {
     if (e.planId) {
-      const key = e.planId + '|' + e.date;
-      dedup.set(key, e); // 后面覆盖前面，自然保留最新
+      const key = e.planId;
+      dedup.set(key, e); // 排序后遍历，最后一条即最新，自动覆盖
     } else {
       noPlan.push(e);
     }
@@ -1383,8 +1468,9 @@ function getPage04Data(projectId, weekStart, weekEnd) {
 
   const rows = [];
   let seq = 0;
+  const AREAS_SRC = MD.AREAS || AREAS;
   Object.entries(groups).forEach(([areaId, events]) => {
-    const area = (AREAS[projectId] || []).find(a => a.id === areaId);
+    const area = (this && this.customAreas && this.customAreas[projectId] || []).find(a => a.id === areaId) || (AREAS_SRC[projectId] || []).find(a => a.id === areaId);
     const areaName = area ? area.name : areaId;
     // 区域 header 行
     rows.push({ type: 'header', text: `${areaName}：` });
@@ -1406,29 +1492,55 @@ function getPage04Data(projectId, weekStart, weekEnd) {
 
 // --- 页面 05：工作现场照片 ---
 function getPage05Photos(projectId, weekStart, weekEnd, maxCount = 6) {
-  const allEvents = [...EVENTS, ...HISTORY_EVENTS];
+  // 关键：从 window.MockData 读取（init 时会被后端 /api/data/all 覆盖为 PostgreSQL 数据）
+  const MD = (typeof window !== 'undefined' && window.MockData) || {};
+  const events = MD.EVENTS || EVENTS;
+  const historyEvents = MD.HISTORY_EVENTS || HISTORY_EVENTS;
+  const allEvents = [...events, ...historyEvents];
   const weekEvents = allEvents.filter(e =>
     e.projectId === projectId &&
-    e.date >= weekStart && e.date <= weekEnd
+    e.date >= weekStart && e.date <= weekEnd &&
+    e.status === 'confirmed'
   );
-  const allPhotos = [];
+  // 按区域聚合照片
+  const byArea = {};
   weekEvents.forEach(e => {
+    const areaId = e.areaId || '__unknown__';
     (e.photos || []).forEach(p => {
-      allPhotos.push({
+      if (!byArea[areaId]) byArea[areaId] = [];
+      byArea[areaId].push({
         id: p.id,
         caption: p.caption || '现场照片',
         area: p.area || e.areaId || '',
         eventType: e.type,
-        eventId: e.id
+        eventId: e.id,
+        date: e.date,
+        data: p.data || '',
+        showInReport: p.showInReport !== false
       });
     });
   });
-  return allPhotos.slice(0, maxCount);
+  // 输出：混合 header + photo 行，page05 分页器可直接渲染
+  const AREAS_SRC = MD.AREAS || AREAS;
+  const areas = AREAS_SRC[projectId] || [];
+  const items = [];
+  let total = 0;
+  Object.entries(byArea).forEach(([areaId, photos]) => {
+    if (photos.length === 0) return;
+    const area = (this && this.customAreas && this.customAreas[projectId] || []).find(a => a.id === areaId) || areas.find(a => a.id === areaId);
+    const areaName = area ? area.name : (areaId === '__unknown__' ? '未分类' : areaId);
+    items.push({ type: 'header', text: areaName, count: photos.length });
+    photos.forEach(p => { items.push({ type: 'photo', ...p }); total++; });
+  });
+  return { items, total };
 }
 
 // --- 页面 01：封面 ---
 function getPage01Data(projectId, dateOverride) {
-  const proj = PROJECTS.find(p => p.id === projectId);
+  // 关键：从 window.MockData 读取（init 时会被后端 /api/data/all 覆盖为 PostgreSQL 数据）
+  const MD = (typeof window !== 'undefined' && window.MockData) || {};
+  const projects = MD.PROJECTS || PROJECTS;
+  const proj = projects.find(p => p.id === projectId);
   if (!proj) return null;
   const baseDate = dateOverride || TODAY;
   const { weekStart, weekEnd } = getWeekRangeForDate(baseDate);
@@ -1445,7 +1557,10 @@ function getPage01Data(projectId, dateOverride) {
 
 // --- 页面 03：管理人员 ---
 function getPage03Data() {
-  return MANAGEMENT_TEAM.map((m, i) => ({
+  // 关键：从 window.MockData 读取（init 时会被后端 /api/data/all 覆盖为 PostgreSQL 数据）
+  const MD = (typeof window !== 'undefined' && window.MockData) || {};
+  const team = MD.MANAGEMENT_TEAM || MANAGEMENT_TEAM;
+  return team.map((m, i) => ({
     seq: i + 1,
     position: m.position,
     name: m.name,
@@ -1461,8 +1576,10 @@ let MILESTONE_DATA = null;
 
 function initMilestoneData() {
   if (MILESTONE_DATA) return;
+  // 关键：从 window.MockData 读取（init 时会被后端 /api/data/all 覆盖为 PostgreSQL 数据）
+  const MD = (typeof window !== 'undefined' && window.MockData) || {};
   const projectId = CURRENT_PROJECT_ID;
-  const plans = MILESTONE_PLANS[projectId] || [];
+  const plans = (MD.MILESTONE_PLANS && MD.MILESTONE_PLANS[projectId]) || MILESTONE_PLANS[projectId] || [];
   const monthSet = new Set();
   plans.forEach(p => {
     if (p.targetMonth) monthSet.add(p.targetMonth);
@@ -1529,53 +1646,222 @@ function getPage0301Data(projectId) {
 }
 
 // --- 页面 06：人员统计 ---
-function getPage06Data(projectId, weekStart, weekEnd) {
-  const plans = getPlansForProject(projectId);
-  const weekPlans = plans.filter(p => {
-    if (p.startDate) return p.startDate >= weekStart && p.startDate <= weekEnd;
-    if (p.date) return p.date >= weekStart && p.date <= weekEnd;
-    return false;
+// 周报 06 表头兜底（DB 没数据时使用）
+const DEFAULT_STANDARD_TRADES = [
+  { tradeName: '5S小队',   mapFrom: '普工' },
+  { tradeName: '电工',     mapFrom: '电工' },
+  { tradeName: '电焊工',   mapFrom: '焊工' },
+  { tradeName: '工长',     mapFrom: null },
+  { tradeName: '库管',     mapFrom: null },
+  { tradeName: '临电专员', mapFrom: null },
+  { tradeName: '木工',     mapFrom: '木工' },
+  { tradeName: '水工',     mapFrom: '水电工' },
+  { tradeName: '瓦工',     mapFrom: '瓦工' },
+  { tradeName: '普工',     mapFrom: null },
+  { tradeName: '油工',     mapFrom: '油漆工' },
+  { tradeName: '防水工',   mapFrom: null },
+  { tradeName: '管理人员', mapFrom: null },
+  { tradeName: '室内电梯司机', mapFrom: null }
+];
+
+function _guessTradeFromTaskName(taskName) {
+  if (!taskName) return null;
+  const map = [
+    [/吊顶|天花|龙骨/, '木工'],
+    [/墙面|找平|基层|面层|钢架/, '木工'],
+    [/水电|穿线|配管|电气|电路|灯具|照明/, '水电工'],
+    [/焊|钢筋/, '焊工'],
+    [/油|涂料|漆/, '油漆工'],
+    [/瓦|贴|石材/, '瓦工'],
+    [/地暖|防水|保温/, '木工'],
+    [/地砖|地面/, '瓦工'],
+    [/砌|砖/, '瓦工']
+  ];
+  for (const [re, trade] of map) {
+    if (re.test(taskName)) return trade;
+  }
+  return null;
+}
+
+function getPage06Data(projectId, weekStart, weekEnd, mode = 'fixed', displayField = 'tradeName', unit = 'people') {
+  // 取表头：DB 优先，兜底 DEFAULT_STANDARD_TRADES（必须先解析，供数据归一化使用）
+  const dbTrades = (this && this.STANDARD_TRADES && this.STANDARD_TRADES.length > 0)
+    ? this.STANDARD_TRADES
+    : DEFAULT_STANDARD_TRADES;
+  const STANDARD_TRADES = dbTrades.map(t => ({
+    id: t.id,
+    trade: t.tradeName,
+    mapFrom: t.mapFrom
+  }));
+  // 把任意工种名（mapFrom 或 tradeName 任一匹配）归一化到 mapFrom；
+  // 若都不匹配（用户新增了非标准工种），原样保留。
+  const findStandardKey = (raw) => {
+    if (!raw) return raw;
+    const t = STANDARD_TRADES.find(st => st.mapFrom === raw || st.trade === raw);
+    return t && t.mapFrom ? t.mapFrom : raw;
+  };
+
+  // 本周人数：从已确认的施工进度事件汇总
+  // 关键：从 window.MockData 读取（init 时会被后端 /api/data/all 覆盖为 PostgreSQL 数据）
+  const MD = (typeof window !== 'undefined' && window.MockData) || {};
+  const events = MD.EVENTS || EVENTS;
+  const historyEvents = MD.HISTORY_EVENTS || HISTORY_EVENTS;
+  const thisWeekTradeCounts = {};
+  const weekEvents = [...events, ...historyEvents].filter(e =>
+    e.projectId === projectId &&
+    e.type === 'progress' &&
+    e.status === 'confirmed' &&
+    e.date >= weekStart && e.date <= weekEnd
+  );
+  weekEvents.forEach(e => {
+    if (e.payload?.laborRequirements?.length) {
+      e.payload.laborRequirements.forEach(item => {
+        const trade = findStandardKey(item.trade || item.laborType);
+        const count = item.count;
+        if (trade && count) {
+          thisWeekTradeCounts[trade] = (thisWeekTradeCounts[trade] || 0) + count;
+        }
+      });
+    } else if (e.payload?.laborStats) {
+      // attendance 事件的 laborStats: { '木工': 1, '电工': 1, ... }
+      for (const rawTrade in e.payload.laborStats) {
+        const count = e.payload.laborStats[rawTrade];
+        const trade = findStandardKey(rawTrade);
+        if (trade && count) {
+          thisWeekTradeCounts[trade] = (thisWeekTradeCounts[trade] || 0) + count;
+        }
+      }
+    } else {
+      // progress 事件没有工种级数据时，根据 taskName 推测工种 + headcount
+      const taskName = e.payload?.taskName || '';
+      const hc = e.payload?.headcount || 0;
+      const guessTrade = _guessTradeFromTaskName(taskName);
+      if (guessTrade && hc) {
+        const key = findStandardKey(guessTrade);
+        thisWeekTradeCounts[key] = (thisWeekTradeCounts[key] || 0) + hc;
+      }
+    }
   });
-  const tradeCounts = {};
-  weekPlans.forEach(p => {
+
+  // 下周人数/工日：从下周区间的计划汇总
+  // 口径：
+  //   - people（默认）："下周期间在岗人头数"——一个 plan 只要在下周任一天活跃，完整计入 count
+  //   - manDays："下周预计投入人·日"——按 plan 总工日 × overlapDays/totalDays 比例分摊
+  const fmtDate = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const nextMon = new Date(weekEnd);
+  nextMon.setDate(nextMon.getDate() + 1);
+  const nextSun = new Date(nextMon);
+  nextSun.setDate(nextMon.getDate() + 6);
+  const nextStart = fmtDate(nextMon), nextEnd = fmtDate(nextSun);
+  const plans = getPlansForProject(projectId);
+  const dayDiff = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000) + 1;
+  const nextWeekPlans = plans.filter(p => {
+    const d = p.startDate || p.date;
+    const de = p.endDate || p.startDate || p.date;
+    if (!d || !de) return false;
+    return d <= nextEnd && de >= nextStart;
+  });
+  const nextWeekTradeCounts = {};
+  nextWeekPlans.forEach(p => {
+    const planStart = p.startDate || p.date;
+    const planEnd = p.endDate || p.startDate || p.date;
+    if (!planStart) return;
     const list = p.laborRequirements || p.laborSchedule || [];
-    list.forEach(item => {
-      const trade = item.trade || item.laborType;
-      const count = item.count;
-      if (trade && count) {
-        tradeCounts[trade] = (tradeCounts[trade] || 0) + count;
+    if (unit === 'manDays') {
+      // 工日：plan 总工日 × overlapDays / totalDays
+      // 优先用 plan.totalManDays，没有则 sum(count) × totalDays 兜底
+      const totalDays = dayDiff(planStart, planEnd);
+      const overlapStart = planStart > nextStart ? planStart : nextStart;
+      const overlapEnd = planEnd < nextEnd ? planEnd : nextEnd;
+      const overlapDays = dayDiff(overlapStart, overlapEnd);
+      if (overlapDays <= 0) return;
+      const planTotalManDays = Number(p.totalManDays) || list.reduce((s, x) => s + (Number(x.count) || 0), 0) * totalDays;
+      const ratio = overlapDays / totalDays;
+      const alloc = planTotalManDays * ratio;
+      // 按工种比例拆分（用各工种 count 占总 count 的比例分配工日）
+      const totalCount = list.reduce((s, x) => s + (Number(x.count) || 0), 0) || 1;
+      list.forEach(item => {
+        const trade = findStandardKey(item.trade || item.laborType);
+        const count = Number(item.count) || 0;
+        if (trade && count) {
+          const share = (count / totalCount) * alloc;
+          nextWeekTradeCounts[trade] = (nextWeekTradeCounts[trade] || 0) + share;
+        }
+      });
+    } else {
+      // 人头：plan 在下周活跃，完整计入 count
+      list.forEach(item => {
+        const trade = findStandardKey(item.trade || item.laborType);
+        const count = Number(item.count) || 0;
+        if (trade && count) {
+          nextWeekTradeCounts[trade] = (nextWeekTradeCounts[trade] || 0) + count;
+        }
+      });
+    }
+  });
+  // STANDARD_TRADES 已在函数开头解析（供 findStandardKey 使用）
+
+  // 固定模板模式：查 (projectId, weekStart, tradeId) 的手工录入
+  const manualByTradeId = {};
+  if (mode === 'fixed' && this && Array.isArray(this.WEEKLY_LABOR_DATA)) {
+    this.WEEKLY_LABOR_DATA.forEach(w => {
+      if (w.projectId === projectId && w.weekStart === weekStart) {
+        manualByTradeId[w.tradeId] = { thisWeek: w.thisWeekCount || 0, nextWeek: w.nextWeekCount || 0 };
       }
     });
-  });
-  const STANDARD_TRADES = [
-    { trade: '5S小队', mapFrom: '普工' },
-    { trade: '电工', mapFrom: '电工' },
-    { trade: '电焊工', mapFrom: '焊工' },
-    { trade: '工长', mapFrom: null },
-    { trade: '库管', mapFrom: null },
-    { trade: '临电专员', mapFrom: null },
-    { trade: '木工', mapFrom: '木工' },
-    { trade: '水工', mapFrom: '水电工' },
-    { trade: '瓦工', mapFrom: '瓦工' },
-    { trade: '普工', mapFrom: null },
-    { trade: '油工', mapFrom: '油漆工' },
-    { trade: '防水工', mapFrom: null },
-    { trade: '管理人员', mapFrom: null },
-    { trade: '室内电梯司机', mapFrom: null }
-  ];
-  const rows = STANDARD_TRADES.map((t, i) => {
-    const count = t.mapFrom ? (tradeCounts[t.mapFrom] || 0) : 0;
-    return { seq: i + 1, trade: t.trade, thisWeek: count || '—', nextWeek: count || '—' };
+  }
+
+  // 动态生成模式：只显示本周/下周有人数的工种（去 mapFrom 和 trade 都没数据的项）
+  const usedTrades = (mode === 'dynamic')
+    ? STANDARD_TRADES.filter(t => {
+        const mapHit = t.mapFrom && ((thisWeekTradeCounts[t.mapFrom] || 0) > 0 || (nextWeekTradeCounts[t.mapFrom] || 0) > 0);
+        const tradeHit = (thisWeekTradeCounts[t.trade] || 0) > 0 || (nextWeekTradeCounts[t.trade] || 0) > 0;
+        return mapHit || tradeHit;
+      })
+    : STANDARD_TRADES;
+
+  const rows = usedTrades.map((t, i) => {
+    let thisCnt = 0, nextCnt = 0;
+    if (mode === 'fixed' && t.id != null) {
+      // 固定模板：使用手动录入
+      thisCnt = (manualByTradeId[t.id] || {}).thisWeek || 0;
+      nextCnt = (manualByTradeId[t.id] || {}).nextWeek || 0;
+    } else {
+      // 动态：从事件/计划汇总（mapFrom 优先，tradeName 兜底）
+      const thisKey = t.mapFrom || t.trade;
+      const nextKey = t.mapFrom || t.trade;
+      thisCnt = thisKey ? (thisWeekTradeCounts[thisKey] || 0) : 0;
+      nextCnt = nextKey ? (nextWeekTradeCounts[nextKey] || 0) : 0;
+    }
+    const tradeName = (displayField === 'mapFrom' && t.mapFrom) ? t.mapFrom : t.trade;
+    const fmt = (v) => (unit === 'manDays' ? Math.round(v * 10) / 10 : v);
+    return { seq: i + 1, trade: tradeName, thisWeek: thisCnt ? fmt(thisCnt) : '—', nextWeek: nextCnt ? fmt(nextCnt) : '—' };
   });
   const totalThis = rows.reduce((s, r) => s + (typeof r.thisWeek === 'number' ? r.thisWeek : 0), 0);
   const totalNext = rows.reduce((s, r) => s + (typeof r.nextWeek === 'number' ? r.nextWeek : 0), 0);
-  rows.push({ seq: 15, trade: '合计', thisWeek: totalThis || '—', nextWeek: totalNext || '—' });
+  const fmtTotal = (v) => (unit === 'manDays' ? Math.round(v * 10) / 10 : v);
+  rows.push({ seq: rows.length + 1, trade: '合计', thisWeek: totalThis ? fmtTotal(totalThis) : '—', nextWeek: totalNext ? fmtTotal(totalNext) : '—' });
   return rows;
 }
 
 // --- 页面 07：ECC 销项 ---
 function getPage07Data(projectId) {
-  const items = ECC_ITEMS.filter(e => e.projectId === projectId && e.id !== 'ECC099');
+  // 优先使用手动汇总（用户在 ECC 汇总 TAB 录入的）
+  const manual = (this && this.ECC_SUMMARIES && this.ECC_SUMMARIES[projectId]) || null;
+  if (manual && manual.total > 0) {
+    return {
+      total: manual.total,
+      closed: manual.closed,
+      closing: manual.closing,
+      open: manual.open,
+      rate: manual.rate
+    };
+  }
+  // 兜底：从 ECC_ITEMS 自动汇总
+  // 关键：从 window.MockData 读取（init 时会被后端 /api/data/all 覆盖为 PostgreSQL 数据）
+  const MD = (typeof window !== 'undefined' && window.MockData) || {};
+  const eccItems = MD.ECC_ITEMS || ECC_ITEMS;
+  const items = eccItems.filter(e => e.projectId === projectId && e.id !== 'ECC099');
   const total = items.length;
   const closed = items.filter(e => e.status === 'closed').length;
   const closing = items.filter(e => e.status === 'closing').length;
@@ -1585,37 +1871,307 @@ function getPage07Data(projectId) {
 }
 
 // --- 页面 08：图纸深化 ---
+// 数据源：DRAWING_DEEPENINGS（seed 静态条目，无 eventId）+ DRAWING_DEEPENINGS 同步条目（有 eventId）
+// 兜底：type='drawing' 且未被双写同步的 EVENTS 条目也会展示。
+// 合并规则：同一 planId 的多次填报合并为一条，taskName / owner / areaId 取最新一次，progress 取最新一次。
 function getPage08Data(projectId) {
-  return DRAWING_DEEPENINGS.filter(d => d.projectId === projectId).map((d, i) => ({
+  // 关键：从 window.MockData 读取（init 时会被后端 /api/data/all 覆盖为 PostgreSQL 数据）
+  const MD = (typeof window !== 'undefined' && window.MockData) || {};
+  const allDd = (MD.DRAWING_DEEPENINGS || DRAWING_DEEPENINGS || [])
+    .filter(d => d.projectId === projectId);
+  const seed = allDd.filter(d => !d.eventId).map((d, i) => ({
     seq: i + 1,
     task: d.task,
     owner: d.owner,
-    status: d.status
+    progress: d.progress || '',
+    status: d.status,
+    source: 'seed',
+    eventId: null
   }));
+  const syncedEventIds = new Set(allDd.filter(d => d.eventId).map(d => d.eventId));
+  // 已同步的 EVENTS：按 planId 分组，取最后一条（按 createdDate）
+  const synced = allDd.filter(d => d.eventId).map((d, i) => ({
+    seq: seed.length + i + 1,
+    task: d.task,
+    owner: d.owner,
+    progress: d.progress || '',
+    status: d.status,
+    source: 'event-synced',
+    eventId: d.eventId,
+    planId: d.planId || null,
+    createdDate: d.createdDate || ''
+  }));
+  // 兜底：未被双写同步的 EVENTS
+  const fromEvents = (MD.EVENTS || EVENTS || [])
+    .filter(e => e.projectId === projectId && e.type === 'drawing' && e.status === 'confirmed' && !syncedEventIds.has(e.id))
+    .map((e, i) => {
+      const p = e.payload || {};
+      return {
+        seq: seed.length + synced.length + i + 1,
+        task: p.taskName || '',
+        owner: p.owner || e.owner || '',
+        progress: p.progress || '',
+        status: p.status || '进行中',
+        source: 'event',
+        eventId: e.id,
+        planId: e.planId || null,
+        createdDate: e.date || ''
+      };
+    });
+  const all = [...seed, ...synced, ...fromEvents];
+  // 按 planId 合并：同一 planId 多条时，取 createdDate 最新的一条
+  const byPlan = new Map();
+  for (const r of all) {
+    if (r.planId) {
+      const cur = byPlan.get(r.planId);
+      if (!cur || (r.createdDate || '') > (cur.createdDate || '')) byPlan.set(r.planId, r);
+    } else {
+      byPlan.set('__no_plan_' + Math.random(), r);  // 保留无 planId 的
+    }
+  }
+  // 重新编号
+  return Array.from(byPlan.values()).map((r, i) => ({ ...r, seq: i + 1 }));
 }
 
 // --- 页面 09：周计划 ---
-function getPage09Data() {
-  return WEEKLY_GANTT_ITEMS;
+function getPage09Data(projectId, nextWeekStart, nextWeekEnd) {
+  const pid = projectId || CURRENT_PROJECT_ID || 'baicaoyuan';
+  // 关键：从 window.MockData 读取（init 时会被后端 /api/data/all 覆盖为 PostgreSQL 数据）
+  const MD = (typeof window !== 'undefined' && window.MockData) || {};
+  const PLANS_SRC = MD.PLANS || PLANS;
+  const AREAS_SRC = MD.AREAS || AREAS;
+  const plans = PLANS_SRC[pid] || [];
+  const projectAreas = AREAS_SRC[pid] || [];
+  const areaMap = {};
+  projectAreas.forEach(a => { areaMap[a.id] = a.name; });
+
+  // 下周日期范围（支持外部传入，不传则用系统时间 new Date() + 7天）
+  let wr, nextMon, nextSun;
+  if (nextWeekStart && nextWeekEnd) {
+    wr = { weekStart: nextWeekStart, weekEnd: nextWeekEnd };
+    nextMon = new Date(nextWeekStart);
+    nextSun = new Date(nextWeekEnd);
+  } else {
+    const today = new Date();
+    const nextWeek = new Date(today);
+    nextWeek.setDate(today.getDate() + 7);
+    wr = getWeekRangeForDate(nextWeek.toISOString().slice(0, 10));
+    nextMon = new Date(wr.weekStart);
+    nextSun = new Date(wr.weekEnd);
+  }
+  const fmt = (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+
+  // 过滤出下周有重叠的进度计划
+  const relevantPlans = plans.filter(p => {
+    if (p.status === 'cancelled') return false;
+    if (p.type && p.type !== 'progress') return false;
+    const s = p.startDate || p.date;
+    const e = p.endDate || p.date;
+    if (!s) return false;
+    return s <= wr.weekEnd && e >= wr.weekStart;
+  });
+
+  if (relevantPlans.length === 0) return [];
+
+  // 展开 areaTargets 为独立行
+  const rows = [];
+  relevantPlans.forEach(plan => {
+    if (plan.areaTargets && plan.areaTargets.length > 0) {
+      plan.areaTargets.forEach(at => {
+        const areaName = areaMap[at.areaId] || at.areaId || '全区';
+        rows.push({ planId: plan.id, area: areaName, task: at.taskName || plan.taskName, durationDays: 7, _s: plan.startDate || plan.date, _e: plan.endDate || plan.date });
+      });
+    } else {
+      const areaName = areaMap[plan.areaId] || (plan.areaId ? plan.areaId : '全区');
+      rows.push({ planId: plan.id, area: areaName, task: plan.taskName || '施工任务', durationDays: 7, _s: plan.startDate || plan.date, _e: plan.endDate || plan.date });
+    }
+  });
+
+  // 按区域分组
+  const areaGroups = {};
+  rows.forEach(r => {
+    if (!areaGroups[r.area]) areaGroups[r.area] = [];
+    areaGroups[r.area].push(r);
+  });
+
+  // 排序：按区域顺序，再按计划日期
+  const areaOrder = Object.keys(areaGroups).sort();
+  let seq = 0;
+  const result = [];
+  areaOrder.forEach(area => {
+    const group = areaGroups[area].sort((a, b) => (a._s || '').localeCompare(b._s || ''));
+    group.forEach(r => {
+      seq++;
+      const s = new Date(r._s);
+      const e = new Date(r._e);
+      const schedule = [];
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(nextMon);
+        d.setDate(nextMon.getDate() + i);
+        schedule.push(d >= s && d <= e ? 1 : 0);
+      }
+      // 计算工作天数
+      const workDays = schedule.filter(Boolean).length;
+      // 查找原始计划获取 labor
+      const plan = plans.find(p => p.id === r.planId);
+      const ls = plan && (plan.laborSchedule || plan.laborRequirements || []);
+      const labor = ls.length > 0
+        ? ls.map(l => (l.trade || l.laborType || '').trim() + (l.count ? l.count + '人' : '')).filter(Boolean).join('、')
+        : '';
+      const mat = plan && plan.materials;
+      const material = mat && mat.length > 0 ? mat.join('；') : '待定';
+      result.push({
+        seq, area, task: r.task,
+        durationDays: workDays || r.durationDays,
+        schedule,
+        labor: labor || '',
+        material
+      });
+    });
+  });
+
+  return result;
 }
 
 // --- 页面 10：施工段划分 ---
-function getPage10Data() {
-  return [
-    { label: '食堂一层', image: '10下周计划施工段划分-食堂一层.png' },
-    { label: '食堂二层', image: '10下周计划施工段划分-食堂二层.png' },
-    { label: '食堂B1层', image: '10下周计划施工段划分-食堂B1层.png' }
-  ];
+const PAGE10_IMAGE_MAP = {
+  '食堂一层': '../10下周计划施工段划分-食堂一层.png',
+  '食堂二层': '../10下周计划施工段划分-食堂二层.png',
+  '食堂B1层': '../10下周计划施工段划分-食堂B1层.png',
+  '食堂': '../10下周计划施工段划分.png',
+};
+function _matchPage10Image(label, floors) {
+  // 优先精确匹配
+  if (PAGE10_IMAGE_MAP[label]) return PAGE10_IMAGE_MAP[label];
+  // 尝试匹配 食堂+楼层
+  for (const f of floors) {
+    const key = label + f;
+    if (PAGE10_IMAGE_MAP[key]) return PAGE10_IMAGE_MAP[key];
+  }
+  // 尝试匹配纯区域名
+  for (const [k, v] of Object.entries(PAGE10_IMAGE_MAP)) {
+    if (label.includes(k) || k.includes(label)) return v;
+  }
+  return '';
+}
+// --- 页面 10/11 共享：按楼栋/施工段分组 ---
+// 返回按 section 排序的 sections，每 section 含 plans / images / rows（schedule 表格行）
+// sections 用 localeCompare 'zh' 排序：中文 pinyin 序，食堂(shi) 排在前，1号楼(yi) 排在后
+// YYYY-MM-DD → YYYY/M/D（去前导零）
+function _formatDateYMD(s) {
+  if (!s) return '';
+  const m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (!m) return s;
+  return `${m[1]}/${parseInt(m[2])}/${parseInt(m[3])}`;
+}
+function getPageSectionsData(projectId) {
+  const pid = projectId || CURRENT_PROJECT_ID || 'baicaoyuan';
+  // 关键：从 window.MockData 读取（init 时会被后端 /api/data/all 覆盖为 PostgreSQL 数据）
+  const MD = (typeof window !== 'undefined' && window.MockData) || {};
+  const PLANS_SRC = MD.PLANS || PLANS;
+  const AREAS_SRC = MD.AREAS || AREAS;
+  const plans = PLANS_SRC[pid] || [];
+  const projectAreas = AREAS_SRC[pid] || [];
+  const areaMap = {};
+  projectAreas.forEach(a => { areaMap[a.id] = a.name; });
+
+  // 按 buildingNo || areaName 分组
+  const sectionMap = {};
+  plans.forEach(p => {
+    if (p.status === 'cancelled') return;
+    if (p.type && p.type !== 'progress') return;
+    const areaName = areaMap[p.areaId] || p.areaId || '全区';
+    const key = p.buildingNo || areaName;
+    if (!sectionMap[key]) sectionMap[key] = { name: key, plans: [], areaMap };
+    sectionMap[key].plans.push(p);
+  });
+
+  return Object.values(sectionMap)
+    .sort((a, b) => a.name.localeCompare(b.name, 'zh'))
+    .map(sec => {
+      // ---- page 10 内容：施工段图片 ----
+      const images = [];
+      sec.plans.forEach(p => (p.zoneImages || []).forEach(img => {
+        if (!images.some(x => x.dataUrl === img.dataUrl)) images.push(img);
+      }));
+      if (images.length === 0) {
+        const matched = _matchPage10Image(sec.name, []);
+        if (matched) images.push({ name: matched, dataUrl: matched });
+      }
+      const imageItems = images.map(img => ({
+        label: img.name || sec.name,
+        image: img.dataUrl
+      }));
+
+      // ---- page 11 内容：施工进度计划跟踪行（按 areaId+taskName 分组） ----
+      const activePlans = sec.plans.filter(p => p.taskName && p.type === 'progress');
+      // 动态收集该 section 所有唯一楼层
+      const floorSet = new Set();
+      activePlans.forEach(p => { if (p.floorNo) floorSet.add(p.floorNo); });
+      if (floorSet.size === 0) floorSet.add('一层');
+      const floorOrder = ['B2层','B1层','一层','二层','三层','四层','五层','六层','七层','八层','九层','十层','十一层','十二层','十三层','十四层','十五层'];
+      const sortedFloors = [...floorSet].sort((a,b) => {
+        const ia = floorOrder.findIndex(o => a.startsWith(o));
+        const ib = floorOrder.findIndex(o => b.startsWith(o));
+        if (ia >= 0 && ib >= 0) return ia - ib;
+        if (ia >= 0) return -1;
+        if (ib >= 0) return 1;
+        return a.localeCompare(b, 'zh');
+      });
+      const floorColors = ['#f4b084','#a9d08e','#9dc3e6','#e6b0aa','#d5a6e6','#a6d5e6','#f9d586','#b0e6b0','#e6a6c0','#a6e6e6','#c0a6e6','#e6c0a6'];
+      const floorHeaders = sortedFloors.map((name,i) => ({ name, color: floorColors[i % floorColors.length] }));
+
+      const groups = {};
+      activePlans.forEach(p => {
+        const gkey = (p.areaId || '') + '|' + p.taskName;
+        if (!groups[gkey]) groups[gkey] = { building: p.buildingNo || sec.name, location: areaMap[p.areaId] || p.areaId || '', process: p.taskName, plans: [] };
+        groups[gkey].plans.push(p);
+      });
+
+      const rows = Object.values(groups).map(g => {
+        const floorData = {};
+        floorHeaders.forEach(fh => { floorData[fh.name] = null; });
+        g.plans.forEach(p => {
+          const floor = p.floorNo || '一层';
+          if (!floorData[floor]) {
+            const s = p.startDate || p.date || '';
+            const e = p.endDate || p.date || '';
+            floorData[floor] = {
+              floor,
+              startDate: _formatDateYMD(s),
+              endDate: _formatDateYMD(e),
+              days: s && e ? Math.ceil((new Date(e) - new Date(s)) / 86400000) + 1 : ''
+            };
+          }
+        });
+        return {
+          building: g.building,
+          location: g.location,
+          process: g.process,
+          floors: floorHeaders.map(fh => floorData[fh.name] || { floor: fh.name, startDate: '', endDate: '', days: '' })
+        };
+      });
+
+      return { name: sec.name, items: imageItems, rows, floorHeaders };
+    });
 }
 
-// --- 页面 11：施工段计划 ---
-function getPage11Data() {
-  return CONSTRUCTION_ZONE_SCHEDULES;
+// --- 页面 10：施工段划分（按楼栋/施工段分 sub-page）---
+function getPage10Data(projectId) {
+  return getPageSectionsData(projectId).map(sec => ({ section: sec.name, items: sec.items }));
+}
+
+// --- 页面 11：施工计划（按楼栋/施工段分 sub-page）---
+function getPage11Data(projectId) {
+  return getPageSectionsData(projectId).map(sec => ({ section: sec.name, items: sec.rows }));
 }
 
 // --- 页面 12：协调事宜 ---
 function getPage12Data(projectId, onlyOpen = true) {
-  let items = ISSUES.filter(i =>
+  // 关键：从 window.MockData 读取（init 时会被后端 /api/data/all 覆盖为 PostgreSQL 数据）
+  const MD = (typeof window !== 'undefined' && window.MockData) || {};
+  const issues = MD.ISSUES || ISSUES;
+  let items = issues.filter(i =>
     i.projectId === projectId &&
     i.type === 'coordination'
   );
@@ -1716,6 +2272,9 @@ function getWeekRangeForDate(dateStr) {
 }
 
 function getPlansForProject(projectId) {
+  // 关键：优先从 window.MockData 读取（init 时会被后端 /api/data/all 覆盖为 PostgreSQL 数据）
+  const MD = (typeof window !== 'undefined' && window.MockData) || {};
+  if (MD.PLANS && MD.PLANS[projectId]) return MD.PLANS[projectId];
   const stored = localStorage.getItem('daily_plans');
   if (stored) {
     try {
@@ -1734,8 +2293,8 @@ window.MockData = {
   TYPE_META, ISSUE_TYPE_META, PRIORITY_META, ISSUE_STATUS_META, MILESTONE_STATUS_META, SOURCE_META,
   mockParseVoice, mockParsePhoto, mockAggregateWeekly, getDailyEvents, getMonthlyStats,
   getPage01Data, getPage03Data, getPage0301Data, getPage04Data, getPage05Photos,
-  getPage06Data, getPage07Data, getPage08Data, getPage09Data, getPage10Data, getPage11Data, getPage12Data,
+  getPage06Data, getPage07Data, getPage08Data, getPage09Data, getPage10Data, getPage11Data, getPageSectionsData, getPage12Data,
   DAILY_ATTENDANCE, getAttendanceForDate, setAttendanceForDate, getWeekAttendanceStats,
   getMilestoneData, saveMilestoneData,
-  saveEventsToStorage
+  saveEventsToStorage, savePlansToStorage
 };

@@ -12,17 +12,69 @@ async function loadDataFromAPI() {
     const data = await res.json();
     if (!data || !data.PROJECTS) return;
 
+    // 快照本地照片（后端可能因 ON CONFLICT 不更新 photos 字段，导致刷新后丢失）
+    const localPhotosByEventId = new Map();
+    const collectPhotos = (events) => {
+      if (!events) return;
+      for (const ev of events) {
+        if (ev.photos && ev.photos.length > 0 && ev.photos.some(p => p.data)) {
+          localPhotosByEventId.set(ev.id, ev.photos);
+        }
+      }
+    };
+    collectPhotos(M.EVENTS);
+    collectPhotos(M.HISTORY_EVENTS);
+
     // 覆盖 MockData 的各属性
     M.PROJECTS = data.PROJECTS;
     M.AREAS = data.AREAS;
     M.WORKERS = data.WORKERS;
     M.MANAGEMENT_TEAM = data.MANAGEMENT_TEAM;
-    M.EVENTS = data.EVENTS;
-    M.HISTORY_EVENTS = data.HISTORY_EVENTS;
+    // 就地替换而非赋值, 保持 mock-data.js 内 module-level EVENTS 引用同步
+    // 保留本地未确认（draft）的事件：后端不会返回本地刚填的（因为没等异步同步完成）
+    const localEventIds = new Set(M.EVENTS.map(e => e.id));
+    const apiEventIds = new Set(data.EVENTS.map(e => e.id));
+    // 本地有但后端没有的（通常是本地刚 saveUnifiedEvent 后，异步 fetch 还没完成前刷新）
+    const localOnlyEvents = M.EVENTS.filter(e => !apiEventIds.has(e.id));
+    M.EVENTS.length = 0;
+    M.EVENTS.push(...data.EVENTS, ...localOnlyEvents);
+    M.HISTORY_EVENTS.length = 0; M.HISTORY_EVENTS.push(...data.HISTORY_EVENTS);
     M.ISSUES = data.ISSUES;
 
-    // 深度合并 PLANS（保留已有）
-    if (data.PLANS && Object.keys(data.PLANS).length > 0) M.PLANS = data.PLANS;
+    // 合并：API 事件无照片但本地有 → 恢复本地照片
+    const mergePhotos = (events) => {
+      if (!events) return;
+      for (const ev of events) {
+        if ((!ev.photos || ev.photos.length === 0) && localPhotosByEventId.has(ev.id)) {
+          ev.photos = localPhotosByEventId.get(ev.id);
+        }
+      }
+    };
+    mergePhotos(M.EVENTS);
+    mergePhotos(M.HISTORY_EVENTS);
+    // 持久化合并后的数据到 localStorage（防止下次刷新又丢）
+    if (M.saveEventsToStorage) {
+      try { M.saveEventsToStorage(); } catch {}
+    }
+
+    // 深度合并 PLANS（API + 本地，按 id 去重，API 版本优先）
+    if (data.PLANS && Object.keys(data.PLANS).length > 0) {
+      for (const pid of Object.keys(data.PLANS)) {
+        if (!M.PLANS[pid]) M.PLANS[pid] = [];
+        const existingIds = new Set(M.PLANS[pid].map(p => p.id));
+        // 先把 API 计划按 id 索引，本地已有同 id 的用 API 版本覆盖（以远端为准）
+        for (const apiPlan of data.PLANS[pid]) {
+          const idx = M.PLANS[pid].findIndex(p => p.id === apiPlan.id);
+          if (idx > -1) M.PLANS[pid][idx] = apiPlan;
+          else M.PLANS[pid].push(apiPlan);
+          existingIds.add(apiPlan.id);
+        }
+        // 保留本地独有的计划（API 没返回的，但本地有）
+        //（M.PLANS[pid] 中未被覆盖的本地项保持不变）
+      }
+    }
+    // 同步 PLANS 到 localStorage（让 getPlansForProject 等 mock-data.js 函数能读到最新数据）
+    try { localStorage.setItem('daily_plans', JSON.stringify(M.PLANS)); } catch(e) { console.warn('[localStorage] 写计划失败:', e.message); }
 
     // ECC / 图纸深化 / 甘特 / 施工段
     M.ECC_ITEMS = data.ECC_ITEMS || [];
@@ -37,8 +89,20 @@ async function loadDataFromAPI() {
     // 签到
     M.DAILY_ATTENDANCE = data.DAILY_ATTENDANCE || {};
 
-    // 重写保存方法使其同步到后端 API
+    // 标准工种模板（周报 06 表头，DB 管理）
+    M.STANDARD_TRADES = data.STANDARD_TRADES || [];
+
+    // 固定模板模式下录入的本周/下周人数（按 project/week/trade 存）
+    M.WEEKLY_LABOR_DATA = data.WEEKLY_LABOR_DATA || [];
+
+    // ECC 手动汇总（按项目一条）
+    M.ECC_SUMMARIES = data.ECC_SUMMARIES || {};
+
+    // 重写保存方法：先同步写 localStorage（防刷新丢）→ 再异步同步到后端
     M.saveEventsToStorage = async function() {
+      // 1. 立即写 localStorage（同步操作，瞬间完成）
+      try { localStorage.setItem('daily_events', JSON.stringify(M.EVENTS)); } catch(e) { console.warn('[localStorage] 写事件失败:', e.message); }
+      // 2. 异步同步到后端 API
       for (const ev of M.EVENTS) {
         try {
           await fetch('http://localhost:3010/api/events', {
@@ -50,7 +114,9 @@ async function loadDataFromAPI() {
     };
 
     M.savePlansToStorage = async function() {
-      // 定义标准字段（数据库有对应列），其余归入 extra
+      // 1. 立即写 localStorage
+      try { localStorage.setItem('daily_plans', JSON.stringify(M.PLANS)); } catch(e) { console.warn('[localStorage] 写计划失败:', e.message); }
+      // 2. 异步同步到后端
       const STD_FIELDS = new Set(['id','projectId','date','startDate','endDate','description','taskName','progress','status','laborSchedule','laborRequirements','areaTargets','createdAt','updatedAt']);
       for (const projectId of Object.keys(M.PLANS)) {
         for (const p of M.PLANS[projectId]) {
@@ -69,8 +135,9 @@ async function loadDataFromAPI() {
                 taskName: p.taskName,
                 progress: p.progress || '0%',
                 status: p.status || 'active',
-                laborSchedule: p.laborRequirements || [],
+                laborSchedule: p.laborRequirements || p.laborSchedule || [],
                 areaTargets: p.areaTargets || [],
+                totalManDays: p.totalManDays || 0,
                 extra,
                 createdAt: p.createdAt,
                 updatedAt: new Date().toISOString()
@@ -78,6 +145,36 @@ async function loadDataFromAPI() {
             });
           } catch {}
         }
+      }
+    };
+
+    // 协调事宜：先同步写 localStorage → 异步同步到后端 dr_issues 表
+    M.saveIssuesToStorage = async function() {
+      try { localStorage.setItem('daily_issues', JSON.stringify(M.ISSUES)); } catch(e) { console.warn('[localStorage] 写协调失败:', e.message); }
+      for (const iss of M.ISSUES) {
+        try {
+          await fetch('http://localhost:3010/api/issues', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: iss.id,
+              projectId: iss.projectId,
+              type: iss.type,
+              title: iss.title,
+              areaId: iss.areaId || null,
+              priority: iss.priority || 'medium',
+              status: iss.status || 'open',
+              createdDate: iss.createdDate || null,
+              deadline: iss.deadline || null,
+              owner: iss.owner || null,
+              description: iss.description || null,
+              resolution: iss.resolution || '',
+              photos: iss.photos || [],
+              closedDate: iss.closedDate || null,
+              proposeDept: iss.proposeDept || null,
+              cooperateDept: iss.cooperateDept || null
+            })
+          });
+        } catch {}
       }
     };
 
@@ -173,6 +270,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', async () => {
+  // 先恢复 localStorage 中的本地数据（确保未同步到后端的事件不会丢失）
+  try {
+    const stored = localStorage.getItem('daily_events');
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        M.EVENTS.length = 0;
+        M.EVENTS.push(...parsed);
+      }
+    }
+  } catch(e) { console.warn('[localStorage] 读事件失败:', e.message); }
   await loadDataFromAPI();  // 先拉取后端真实数据（失败静默回退 MockData）
   initCustomAreas();  // 再加载用户自定义区域
   initProject();
@@ -222,8 +330,10 @@ function updateHeaderDate() {
     weekText = `已选择 ${selectedDates.length} 天`;
   }
   
-  document.getElementById('todayDateLabel').textContent = dateText;
-  document.getElementById('weekInfo').textContent = weekText;
+  const dateLabel = document.getElementById('todayDateLabel');
+  const weekInfo = document.getElementById('weekInfo');
+  if (dateLabel) dateLabel.textContent = dateText;
+  if (weekInfo) weekInfo.textContent = weekText;
 }
 
 function openProjectSwitcher() {
@@ -312,9 +422,12 @@ function renderTodayEvents() {
             <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); openEventDetail('${event.id}')">
               查看详情
             </button>
-            <button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteEvent('${event.id}')">
+            ${event.status !== 'confirmed' ? `<button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteEvent('${event.id}')">
               删除
-            </button>
+            </button>` : ''}
+            ${event.status !== 'confirmed' ? `<button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); editEventDirect('${event.id}')">
+              ✏️ 编辑
+            </button>` : ''}
           </div>
         </div>
       </div>
@@ -401,25 +514,23 @@ function renderFilteredEvents() {
           <div class="event-body">
             ${group.map((e, i) => {
               return `
-              <div style="display:flex; align-items:center; gap:6px; padding:4px 0;${i > 0 ? ' border-top:1px dashed #e2e8f0;' : ''};">
+              <div style="display:flex; align-items:center; gap:6px; padding:4px 0;${i > 0 ? ' border-top:1px dashed #e2e8f0;' : ''};flex-wrap:wrap;">
                 <span style="font-size:10px; color:#94a3b8; min-width:40px;">${e.time}</span>
-                <div style="flex:1;">
+                <div style="flex:1; min-width:80px;">
                   <span style="font-size:12px; font-weight:500;">${group.length > 1 ? '→ ' : ''}${e.payload.progress || '-'}</span>
                   ${e.payload.owner ? `<span style="font-size:10px; color:#64748b; margin-left:4px;">${e.payload.owner}</span>` : ''}
                 </div>
                 <span style="font-size:9px; padding:1px 4px; border-radius:3px; background:${e.status === 'draft' ? '#fef3c7' : '#d1fae5'}; color:${e.status === 'draft' ? '#92400e' : '#065f46'};">${e.status === 'draft' ? '草稿' : '已确认'}</span>
+                <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); confirmEvent('${e.id}')" style="font-size:9px; padding:1px 6px;">${e.status === 'draft' ? '✅ 确认' : '🔄 撤回'}</button>
+                ${e.status !== 'confirmed' ? `<button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); editEventDirect('${e.id}')" style="font-size:9px; padding:1px 6px;">✏️ 编辑</button>` : ''}
+                <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); openEventDetail('${e.id}')" style="font-size:9px; padding:1px 6px;">查看详情</button>
+                ${e.status !== 'confirmed' ? `<button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteEvent('${e.id}')" style="font-size:9px; padding:1px 6px;">删除</button>` : ''}
               </div>`;
             }).join('')}
           </div>
           <div class="event-actions">
             <button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); openManualInput('${item.planId}')" style="font-size:10px; padding:2px 8px;">+ 继续填报</button>
             ${group.some(e => e.status === 'draft') ? `<button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); confirmAllPlanEvents('${item.planId}')" style="font-size:10px; padding:2px 8px;">✅ 全部确认</button>` : ''}
-            ${group.map(e => `
-              <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); confirmEvent('${e.id}')" style="font-size:9px; padding:1px 6px;">${e.status === 'draft' ? '✅ 确认' : '🔄 撤回'}</button>
-              <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); editEventDirect('${e.id}')" style="font-size:9px; padding:1px 6px;">✏️ 编辑</button>
-              <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); openEventDetail('${e.id}')" style="font-size:9px; padding:1px 6px;">查看详情</button>
-              <button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteEvent('${e.id}')" style="font-size:9px; padding:1px 6px;">删除</button>
-            `).join('')}
           </div>
         </div>
       </div>`;
@@ -445,15 +556,15 @@ function renderFilteredEvents() {
             <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); confirmEvent('${item.id}')">
               ${item.status === 'draft' ? '✅ 确认' : '🔄 撤回'}
             </button>
-            <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); editEventDirect('${item.id}')">
+            ${item.status !== 'confirmed' ? `<button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); editEventDirect('${item.id}')">
               ✏️ 编辑
-            </button>
+            </button>` : ''}
             <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); openEventDetail('${item.id}')">
               查看详情
             </button>
-            <button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteEvent('${item.id}')">
+            ${item.status !== 'confirmed' ? `<button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteEvent('${item.id}')">
               删除
-            </button>
+            </button>` : ''}
           </div>
         </div>
       </div>`;
@@ -475,6 +586,10 @@ function renderEventContent(event) {
       return `<strong>${payload.topic || '协调事项'}</strong>：${payload.summary || payload.status || '-'}`;
     case 'attendance':
       return `<strong>考勤打卡</strong>：${payload.headcount || 0} 人到岗${payload.laborStats ? `<br>${formatLaborStats(payload.laborStats)}` : ''}`;
+    case 'drawing':
+      const drawStatus = payload.status || '进行中';
+      const drawStatusColor = drawStatus === '已完成' ? '#059669' : '#6366f1';
+      return `<strong>${payload.taskName || '图纸深化'}</strong>：${payload.owner ? `责任人 ${payload.owner}` : ''} <span style="display:inline-block;padding:1px 6px;background:${drawStatusColor};color:#fff;border-radius:3px;font-size:10px;margin-left:4px;">${drawStatus}</span>`;
     default:
       return JSON.stringify(payload);
   }
@@ -483,10 +598,74 @@ function renderEventContent(event) {
 function renderPhotos(photos) {
   return `
     <div class="event-photo">
-      ${photos.map(p => `<div class="photo-thumb">📷<div class="cap">${p.caption || '图片'}</div></div>`).join('')}
+      ${photos.map((p, i) => {
+        if (p.data) {
+          return `<div class="photo-thumb" style="cursor:zoom-in;padding:0;" onclick="event.stopPropagation();openPhotoLightbox('${p.id}')">
+            <img src="${p.data}" style="width:100%;height:100%;object-fit:cover;display:block;" />
+            <div class="cap">${p.caption || '图片'}</div>
+          </div>`;
+        }
+        return `<div class="photo-thumb">📷<div class="cap">${p.caption || '图片'}</div></div>`;
+      }).join('')}
     </div>
   `;
 }
+
+window.openPhotoLightbox = function(photoId) {
+  // 从所有事件中找
+  const allEvents = [...M.EVENTS, ...M.HISTORY_EVENTS];
+  let photo = null;
+  for (const e of allEvents) {
+    const found = (e.photos || []).find(p => p.id === photoId);
+    if (found) { photo = found; break; }
+  }
+  if (!photo || !photo.data) { showToast('图片数据不存在', 'warning'); return; }
+  window._showLightbox(photo.data, photo.caption || '现场照片');
+};
+
+// 查找已存在事件中是否有相同 base64 的照片（用于查重）
+function findDuplicatePhoto(base64Data) {
+  if (!base64Data) return null;
+  const allEvents = [...M.EVENTS, ...M.HISTORY_EVENTS];
+  for (const ev of allEvents) {
+    for (const p of (ev.photos || [])) {
+      if (p.data && p.data === base64Data) {
+        return {
+          eventId: ev.id,
+          date: ev.date,
+          time: ev.time,
+          type: ev.type,
+          status: ev.status,
+          taskName: ev.payload?.taskName || ev.payload?.process || '-',
+          owner: ev.payload?.owner || '-',
+          photoCaption: p.caption || ''
+        };
+      }
+    }
+  }
+  return null;
+}
+
+// ============================================================
+// 多张照片上传向导（每张 = 一条独立事件）
+// ============================================================
+let _photoWizard = null; // { queue: [{data, file}], index, savedCount }
+
+window.openPhotoLightboxSrc = function(src, caption) {
+  if (!src) return;
+  window._showLightbox(src, caption || '现场照片');
+};
+
+window._showLightbox = function(src, caption) {
+  document.getElementById('photoLightboxImg').src = src;
+  document.getElementById('photoLightboxCaption').textContent = caption;
+  showModal('photoLightbox');
+};
+
+window.closePhotoLightbox = function() {
+  closeModal('photoLightbox');
+  document.getElementById('photoLightboxImg').src = '';
+};
 
 function formatLaborStats(stats) {
   return Object.entries(stats).map(([type, count]) => `${type}: ${count}人`).join('，');
@@ -516,10 +695,11 @@ function renderStats() {
     if (dates && !dates.includes(e.date)) return false;
     return true;
   });
-  document.getElementById('statProgress').textContent = events.filter(e => e.type === 'progress').length;
-  document.getElementById('statMaterial').textContent = events.filter(e => e.type === 'material').length;
-  document.getElementById('statSafety').textContent = events.filter(e => e.type === 'safety').length;
-  document.getElementById('statCoordination').textContent = events.filter(e => e.type === 'coordination').length;
+  const el = (id) => document.getElementById(id);
+  if (el('statProgress')) el('statProgress').textContent = events.filter(e => e.type === 'progress').length;
+  if (el('statMaterial')) el('statMaterial').textContent = events.filter(e => e.type === 'material').length;
+  if (el('statSafety')) el('statSafety').textContent = events.filter(e => e.type === 'safety').length;
+  if (el('statCoordination')) el('statCoordination').textContent = events.filter(e => e.type === 'coordination').length;
 }
 
 // ============================================================
@@ -530,8 +710,10 @@ function renderProjectInfo() {
   const areas = M.AREAS[currentProjectId] || [];
   const milestones = M.MILESTONES[currentProjectId] || [];
   const completedMilestones = milestones.filter(m => m.status === 'completed').length;
-  
-  document.getElementById('projectInfoBody').innerHTML = `
+  const body = document.getElementById('projectInfoBody');
+  if (!body) return;  // 卡片已移除
+
+  body.innerHTML = `
     <div style="display:grid; gap:6px;">
       <div style="display:flex; justify-content:space-between;">
         <span style="font-size:10px; color:#64748b;">区域</span>
@@ -549,22 +731,59 @@ function renderProjectInfo() {
 }
 
 // ============================================================
-// 事项台账
+// 月报（按月聚合日报/周报数据，输出月报初稿）
+// ============================================================
+function openMonthlyReport() {
+  showToast('月报功能开发中…', 'info');
+}
+
+// ============================================================
+// 协调事宜
 // ============================================================
 function renderIssues() {
-  const issues = M.ISSUES.filter(i => i.projectId === currentProjectId && i.status !== 'closed');
-  document.getElementById('issueList').innerHTML = issues.length > 0 ? issues.map(issue => `
-    <div class="issue-row" onclick="openIssueDetail('${issue.id}')">
-      <div class="issue-priority" style="background:${M.PRIORITY_META[issue.priority].color}"></div>
-      <div class="issue-info">
-        <div class="issue-title">${issue.title}</div>
-        <div class="issue-meta">${M.ISSUE_TYPE_META[issue.type].label} · ${getAreaName(issue.areaId)} · ${issue.owner}</div>
-      </div>
-      <div class="issue-status" style="background:${M.ISSUE_STATUS_META[issue.status].color}20; color:${M.ISSUE_STATUS_META[issue.status].color};">
-        ${M.ISSUE_STATUS_META[issue.status].label}
-      </div>
-    </div>
-  `).join('') : `<div style="text-align:center; padding:20px; color:#94a3b8;">暂无跟踪事项</div>`;
+  const issues = M.ISSUES.filter(i => i.projectId === currentProjectId && i.type === 'coordination' && i.status !== 'closed');
+  if (issues.length === 0) {
+    document.getElementById('issueList').innerHTML = `<div style="text-align:center; padding:20px; color:#94a3b8; font-size:12px;">暂无协调事宜</div>`;
+    return;
+  }
+  let html = `<table style="width:100%; border-collapse:collapse; font-size:12px;">
+    <thead>
+      <tr style="background:#0ea5e9; color:#fff;">
+        <th style="padding:6px 4px; border:1px solid #bae6fd; width:32px;">序号</th>
+        <th style="padding:6px 4px; border:1px solid #bae6fd;">需协调事宜</th>
+        <th style="padding:6px 4px; border:1px solid #bae6fd; width:90px;">提出部门</th>
+        <th style="padding:6px 4px; border:1px solid #bae6fd; width:90px;">配合部门</th>
+        <th style="padding:6px 4px; border:1px solid #bae6fd; width:60px;">操作</th>
+      </tr>
+    </thead>
+    <tbody>`;
+  issues.forEach((issue, i) => {
+    const bg = i % 2 === 0 ? '#dbeafe' : '#eff6ff';
+    html += `<tr style="background:${bg};">
+      <td style="padding:6px 4px; border:1px solid #bae6fd; text-align:center;">${i+1}</td>
+      <td style="padding:6px 4px; border:1px solid #bae6fd;">${issue.title || '—'}</td>
+      <td style="padding:6px 4px; border:1px solid #bae6fd; text-align:center;">${issue.proposeDept || '—'}</td>
+      <td style="padding:6px 4px; border:1px solid #bae6fd; text-align:center;">${issue.cooperateDept || '—'}</td>
+      <td style="padding:6px 4px; border:1px solid #bae6fd; text-align:center;">
+        <button style="background:none;border:none;color:#0ea5e9;cursor:pointer;font-size:11px;padding:0 4px;" onclick="event.stopPropagation();openIssueDetail('${issue.id}')">编辑</button>
+        <button style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:11px;padding:0 4px;" onclick="event.stopPropagation();closeIssue('${issue.id}')">闭环</button>
+      </td>
+    </tr>`;
+  });
+  html += `</tbody></table>`;
+  document.getElementById('issueList').innerHTML = html;
+}
+
+async function closeIssue(issueId) {
+  const issue = M.ISSUES.find(i => i.id === issueId);
+  if (!issue) return;
+  if (!confirm(`确定将「${issue.title}」标记为已闭环？`)) return;
+  issue.status = 'closed';
+  renderIssues();
+  showToast('已闭环', 'success');
+  if (M.saveIssuesToStorage) {
+    try { await M.saveIssuesToStorage(); } catch(e) { console.warn('[协调] 同步后端失败:', e.message); }
+  }
 }
 
 // ============================================================
@@ -574,6 +793,7 @@ function confirmEvent(eventId) {
   const event = M.EVENTS.find(e => e.id === eventId);
   if (event) {
     event.status = event.status === 'draft' ? 'confirmed' : 'draft';
+    if (M.saveEventsToStorage) M.saveEventsToStorage();
     renderFilteredEvents();
     renderStats();
     if (typeof updateCalendar === 'function') updateCalendar();
@@ -596,6 +816,7 @@ function confirmTodayReport() {
   ).forEach(e => {
     e.status = 'confirmed';
   });
+  if (M.saveEventsToStorage) M.saveEventsToStorage();
   renderFilteredEvents();
   renderStats();
   if (typeof updateCalendar === 'function') updateCalendar();
@@ -624,37 +845,126 @@ async function deleteEvent(eventId) {
 function openEventDetail(eventId) {
   const event = M.EVENTS.find(e => e.id === eventId);
   if (!event) return;
-  
+
   selectedEventId = eventId;
-  document.getElementById('eventDetailTitle').textContent = `${M.TYPE_META[event.type].icon} ${M.TYPE_META[event.type].label}详情`;
+  const meta = M.TYPE_META[event.type] || { icon: '📌', label: event.type, color: '#94a3b8' };
+  document.getElementById('eventDetailTitle').textContent = `${meta.icon} ${meta.label}详情`;
+
+  const plan = (M.PLANS[currentProjectId] || []).find(p => p.id === event.planId);
+  const planName = plan ? (plan.taskName || plan.process) : (event.payload?.taskName || '');
+  const p = event.payload || {};
+  const rowKV = (label, val) => val ? `<div><div style="font-size:11px;color:#64748b;">${label}</div><div style="font-weight:500;font-size:13px;">${val}</div></div>` : '';
+
+  let typeFields = '';
+  switch (event.type) {
+    case 'progress':
+      typeFields = `
+        <div class="form-row">
+          ${rowKV('工序/任务名称', planName || p.taskName)}
+          ${rowKV('进度', p.progress)}
+          ${rowKV('负责人', p.owner)}
+        </div>
+        ${(p.laborRequirements && p.laborRequirements.length) ? `<div>${rowKV('工种', p.laborRequirements.map(l => `${l.trade}:${l.count || 0}人`).join('，'))}</div>` : ''}
+        ${p.description ? `<div>${rowKV('描述', p.description)}</div>` : ''}
+      `;
+      break;
+    case 'material':
+      typeFields = `
+        <div class="form-row">
+          ${rowKV('材料名称', p.materialName)}
+          ${rowKV('规格', p.spec)}
+          ${rowKV('数量', p.quantity ? p.quantity + (p.unit || '') : '')}
+          ${rowKV('操作', p.action)}
+        </div>
+        ${p.description ? `<div>${rowKV('描述', p.description)}</div>` : ''}
+      `;
+      break;
+    case 'safety':
+      typeFields = `
+        <div class="form-row">
+          ${rowKV('检查类型', p.checkType)}
+          ${rowKV('检查结果', p.result)}
+        </div>
+        ${p.issues && p.issues.length ? `<div>${rowKV('问题', p.issues.join('；'))}</div>` : ''}
+        ${p.description ? `<div>${rowKV('描述', p.description)}</div>` : ''}
+      `;
+      break;
+    case 'coordination':
+      typeFields = `
+        <div class="form-row">
+          ${rowKV('协调主题', p.topic)}
+          ${rowKV('参与方', (p.parties || []).join('、'))}
+          ${rowKV('结论', p.summary)}
+        </div>
+        ${p.description ? `<div>${rowKV('描述', p.description)}</div>` : ''}
+      `;
+      break;
+    case 'issue':
+      typeFields = `
+        <div class="form-row">
+          ${rowKV('任务名称', p.taskName)}
+          ${rowKV('负责人', p.owner)}
+        </div>
+        ${p.description ? `<div>${rowKV('描述', p.description)}</div>` : ''}
+      `;
+      break;
+    case 'attendance':
+      typeFields = `
+        <div class="form-row">
+          ${rowKV('应到人数', p.headcount)}
+          ${rowKV('状态', p.status)}
+        </div>
+        ${p.description ? `<div>${rowKV('描述', p.description)}</div>` : ''}
+      `;
+      break;
+    case 'drawing':
+      typeFields = `
+        <div class="form-row">
+          ${rowKV('深化任务', p.taskName)}
+          ${rowKV('责任人', p.owner)}
+          ${rowKV('完成情况', p.status || '进行中')}
+        </div>
+        ${p.relatedMilestone ? `<div>${rowKV('关联节点', p.relatedMilestone)}</div>` : ''}
+        ${p.description ? `<div>${rowKV('描述', p.description)}</div>` : ''}
+      `;
+      break;
+  }
+
   document.getElementById('eventDetailBody').innerHTML = `
     <div style="display:grid; gap:12px;">
       <div class="form-row">
-        <div>
-          <div style="font-size:12px; color:#64748b;">时间</div>
-          <div style="font-weight:500;">${event.date} ${event.time}</div>
-        </div>
-        <div>
-          <div style="font-size:12px; color:#64748b;">区域</div>
-          <div style="font-weight:500;">${getAreaName(event.areaId)}</div>
-        </div>
+        ${rowKV('类型', `${meta.icon} ${meta.label}`)}
+        ${rowKV('日期', event.date)}
+        ${rowKV('时间', event.time)}
       </div>
+      ${event.planId ? `<div class="form-row">
+        ${rowKV('关联计划', planName || '-')}
+        ${rowKV('完成类型', event.completionType === 'unplanned' ? '📌 计划外' : '✅ 计划内')}
+      </div>` : ''}
       <div class="form-row">
-        <div>
-          <div style="font-size:12px; color:#64748b;">来源</div>
-          <div style="font-weight:500;">${M.SOURCE_META[event.source]?.label || '自动'}</div>
-        </div>
-        <div>
-          <div style="font-size:12px; color:#64748b;">可信度</div>
-          <div style="font-weight:500;">${(event.confidence * 100).toFixed(0)}%</div>
-        </div>
+        ${rowKV('所属区域', getAreaName(event.areaId))}
+        ${rowKV('楼号/施工段', event.buildingNo)}
+        ${rowKV('层号', event.floorNo)}
       </div>
-      <div>
-        <div style="font-size:12px; color:#64748b;">内容</div>
-        <div style="font-size:14px; line-height:1.6;">${renderEventContent(event)}</div>
+      ${typeFields}
+      <div class="form-row">
+        ${rowKV('来源', M.SOURCE_META[event.source]?.label || '手动')}
+        ${rowKV('可信度', event.confidence ? (event.confidence * 100).toFixed(0) + '%' : '—')}
+        ${rowKV('状态', event.status === 'confirmed' ? '✅ 已确认' : '📝 草稿')}
       </div>
-      ${event.voiceText ? `<div><div style="font-size:12px; color:#64748b;">语音原文</div><div style="font-size:13px; font-style:italic; color:#64748b; background:#f8fafc; padding:8px; border-radius:4px;">${event.voiceText}</div></div>` : ''}
-      ${event.note ? `<div><div style="font-size:12px; color:#64748b;">备注</div><div style="font-size:13px;">${event.note}</div></div>` : ''}
+      ${event.voiceText ? `<div><div style="font-size:11px;color:#64748b;">语音原文</div><div style="font-size:13px;font-style:italic;color:#64748b;background:#f8fafc;padding:8px;border-radius:4px;">${event.voiceText}</div></div>` : ''}
+      ${event.photos && event.photos.length > 0 ? `<div>
+        <div style="font-size:11px;color:#64748b;margin-bottom:6px;">现场照片（${event.photos.length} 张）</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+          ${event.photos.map(p => p.data
+            ? `<div style="cursor:zoom-in;aspect-ratio:1/1;border-radius:4px;overflow:hidden;background:#f1f5f9;position:relative;" onclick="openPhotoLightbox('${p.id}')">
+                <img src="${p.data}" style="width:100%;height:100%;object-fit:cover;display:block;" />
+                <div style="position:absolute;left:0;right:0;bottom:0;padding:3px 6px;background:linear-gradient(transparent,rgba(0,0,0,0.65));color:#fff;font-size:10px;line-height:1.3;">${p.caption || '现场照片'}</div>
+              </div>`
+            : `<div style="aspect-ratio:1/1;border-radius:4px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:24px;">📷</div>`).join('')}
+        </div>
+      </div>` : ''}
+      ${event.note ? `<div>${rowKV('备注', event.note)}</div>` : ''}
     </div>
   `;
   document.getElementById('eventDetailConfirmBtn').textContent = event.status === 'draft' ? '✅ 确认事件' : '🔄 撤回确认';
@@ -674,43 +984,431 @@ function editEventDirect(eventId) {
 function openEventEdit() {
   const event = M.EVENTS.find(e => e.id === selectedEventId);
   if (!event) return;
-  
+  const p = event.payload || {};
+
+  // 填充公共字段
+  document.getElementById('edit-type').value = event.type;
   document.getElementById('edit-date').value = event.date;
   document.getElementById('edit-time').value = event.time;
-  document.getElementById('edit-area').value = event.areaId;
-  document.getElementById('edit-task').value = event.payload?.taskName || '';
-  document.getElementById('edit-owner').value = event.payload?.owner || '';
-  document.getElementById('edit-progress').value = event.payload?.progress || '';
-  document.getElementById('edit-headcount').value = event.payload?.headcount || '';
+  document.getElementById('edit-building-no').value = event.buildingNo || '';
+  document.getElementById('edit-floor-no').value = event.floorNo || '';
   document.getElementById('edit-note').value = event.note || '';
+
+  // 关联计划 + 完成类型
+  const planSelect = document.getElementById('edit-plan');
+  const dayPlans = (M.PLANS[currentProjectId] || []).filter(pp =>
+    pp.status !== 'cancelled' && (
+      (pp.startDate && pp.endDate && pp.startDate <= event.date && pp.endDate >= event.date) ||
+      pp.date === event.date
+    )
+  );
+  planSelect.innerHTML = '<option value="">无（计划外工作）</option>' +
+    dayPlans.map(pp => `<option value="${pp.id}">📋 ${pp.taskName || pp.process}${pp.buildingNo ? ' · ' + pp.buildingNo : ''}${pp.floorNo ? ' · ' + pp.floorNo : ''}</option>`).join('');
+  planSelect.value = event.planId || '';
+  document.getElementById('edit-completion-type').value = event.completionType || (event.planId ? 'planned' : 'unplanned');
+
+  // 区域下拉（包含预置区域 + 自定义区域）
+  const areaSelect = document.getElementById('edit-area');
+  const areas = getProjectAreas();
+  areaSelect.innerHTML = '<option value="">请选择区域</option>' +
+    areas.map(a => `<option value="${a.id}">${a.name}${a.custom ? ' ★' : ''}</option>`).join('');
+  areaSelect.value = event.areaId || '';
+
+  // 动态字段（按类型）
+  renderEditForm(event.type, p);
+  renderEditPhotos(event.photos || []);
   
+  // 过滤编辑界面字段（按类型）
+  const modal = document.getElementById('modalEventEdit');
+  modal.querySelectorAll('[data-dp-show]').forEach(el => {
+    const allowed = el.getAttribute('data-dp-show').split(',').map(s => s.trim());
+    el.style.display = allowed.includes(event.type) ? '' : 'none';
+  });
+  
+  // 已确认的事件，保存按钮置灰
+  if (event.status === 'confirmed') {
+    const saveBtn = modal.querySelector('.modal-footer .btn-primary');
+    if (saveBtn) saveBtn.disabled = true;
+    saveBtn.title = '已确认，不可编辑';
+  }
+
   closeModal('modalEventDetail');
   showModal('modalEventEdit');
 }
 
+function renderEditForm(type, p) {
+  const wrap = document.getElementById('editDynamicForm');
+  // 渲染工种编辑行（progress 类型专用）
+  const tradeRow = (l, i) => `
+    <div class="form-row" style="display:grid;grid-template-columns:2fr 1fr auto;gap:8px;align-items:end;margin-bottom:6px;">
+      <div class="form-group" style="margin:0;">
+        <label class="form-label" style="font-size:11px;">工种 ${i+1}</label>
+        <input class="form-input" type="text" id="edit-trade-${i}" value="${(l.trade||'').replace(/"/g,'&quot;')}" placeholder="如：木工">
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label class="form-label" style="font-size:11px;">人数</label>
+        <input class="form-input" type="number" id="edit-trade-count-${i}" value="${l.count||''}" min="0" placeholder="0">
+      </div>
+      <button type="button" class="btn btn-xs btn-ghost" onclick="this.parentElement.remove();" style="margin-bottom:2px;">✕</button>
+    </div>`;
+
+  let html = '';
+  switch (type) {
+    case 'progress':
+      const labor = p.laborRequirements || [];
+      html = `
+        <div class="form-row" style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;">
+          <div class="form-group">
+            <label class="form-label">工序/任务名称 <span class="req">*</span></label>
+            <input class="form-input" type="text" id="edit-task" value="${(p.taskName||'').replace(/"/g,'&quot;')}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">进度</label>
+            <input class="form-input" type="text" id="edit-progress" value="${(p.progress||'').replace(/"/g,'&quot;')}" placeholder="如：50%">
+          </div>
+          <div class="form-group">
+            <label class="form-label">负责人</label>
+            <input class="form-input" type="text" id="edit-owner" value="${(p.owner||'').replace(/"/g,'&quot;')}">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">工种明细 <span style="font-size:10px;color:#94a3b8;">（可加多行，每行 1 个工种）</span></label>
+          <div id="edit-trades-list">${labor.map((l, i) => tradeRow(l, i)).join('')}</div>
+          <button type="button" class="btn btn-xs btn-outline" onclick="addEditTradeRow()" style="margin-top:4px;">➕ 添加工种</button>
+        </div>
+        <div class="form-group">
+          <label class="form-label">描述</label>
+          <input class="form-input" type="text" id="edit-description" value="${(p.description||'').replace(/"/g,'&quot;')}" placeholder="描述信息">
+        </div>`;
+      break;
+    case 'material':
+      html = `
+        <div class="form-row" style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;gap:10px;">
+          <div class="form-group">
+            <label class="form-label">材料名称 <span class="req">*</span></label>
+            <input class="form-input" type="text" id="edit-material" value="${(p.materialName||'').replace(/"/g,'&quot;')}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">规格</label>
+            <input class="form-input" type="text" id="edit-spec" value="${(p.spec||'').replace(/"/g,'&quot;')}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">数量</label>
+            <input class="form-input" type="number" id="edit-quantity" value="${p.quantity||''}" min="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">单位</label>
+            <input class="form-input" type="text" id="edit-unit" value="${(p.unit||'件').replace(/"/g,'&quot;')}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">操作</label>
+            <select class="form-select" id="edit-action">
+              <option value="进场" ${p.action==='进场'?'selected':''}>进场</option>
+              <option value="退场" ${p.action==='退场'?'selected':''}>退场</option>
+              <option value="使用" ${p.action==='使用'?'selected':''}>使用</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">描述</label>
+          <textarea class="form-textarea" id="edit-description" rows="2">${(p.description||'').replace(/</g,'&lt;')}</textarea>
+        </div>`;
+      break;
+    case 'safety':
+      html = `
+        <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div class="form-group">
+            <label class="form-label">检查类型</label>
+            <input class="form-input" type="text" id="edit-checktype" value="${(p.checkType||'').replace(/"/g,'&quot;')}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">检查结果</label>
+            <input class="form-input" type="text" id="edit-result" value="${(p.result||'正常').replace(/"/g,'&quot;')}">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">问题（用分号分隔）</label>
+          <input class="form-input" type="text" id="edit-issues" value="${((p.issues||[]).join('；')).replace(/"/g,'&quot;')}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">描述</label>
+          <textarea class="form-textarea" id="edit-description" rows="2">${(p.description||'').replace(/</g,'&lt;')}</textarea>
+        </div>`;
+      break;
+    case 'coordination':
+      html = `
+        <div class="form-group">
+          <label class="form-label">协调主题 <span class="req">*</span></label>
+          <input class="form-input" type="text" id="edit-topic" value="${(p.topic||'').replace(/"/g,'&quot;')}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">参与方（用分号分隔）</label>
+          <input class="form-input" type="text" id="edit-parties" value="${((p.parties||[]).join('；')).replace(/"/g,'&quot;')}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">协调结论</label>
+          <textarea class="form-textarea" id="edit-summary" rows="2">${(p.summary||'').replace(/</g,'&lt;')}</textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">描述</label>
+          <textarea class="form-textarea" id="edit-description" rows="2">${(p.description||'').replace(/</g,'&lt;')}</textarea>
+        </div>`;
+      break;
+    case 'issue':
+      html = `
+        <div class="form-row" style="display:grid;grid-template-columns:2fr 1fr;gap:10px;">
+          <div class="form-group">
+            <label class="form-label">任务名称 <span class="req">*</span></label>
+            <input class="form-input" type="text" id="edit-task" value="${(p.taskName||'').replace(/"/g,'&quot;')}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">负责人</label>
+            <input class="form-input" type="text" id="edit-owner" value="${(p.owner||'').replace(/"/g,'&quot;')}">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">描述</label>
+          <textarea class="form-textarea" id="edit-description" rows="2">${(p.description||'').replace(/</g,'&lt;')}</textarea>
+        </div>`;
+      break;
+    case 'attendance':
+      html = `
+        <div class="form-row" style="display:grid;grid-template-columns:1fr 2fr;gap:10px;">
+          <div class="form-group">
+            <label class="form-label">应到人数 <span class="req">*</span></label>
+            <input class="form-input" type="number" id="edit-att-count" value="${p.headcount||''}" min="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">签到状态</label>
+            <input class="form-input" type="text" id="edit-att-status" value="${(p.status||'正常').replace(/"/g,'&quot;')}">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">描述</label>
+          <textarea class="form-textarea" id="edit-description" rows="2">${(p.description||'').replace(/</g,'&lt;')}</textarea>
+        </div>`;
+      break;
+    case 'drawing':
+      html = `
+        <div class="form-group">
+          <label class="form-label">计划事项 <span class="req">*</span></label>
+          <textarea class="form-textarea" id="edit-task" rows="2">${(p.taskName||'').replace(/</g,'&lt;')}</textarea>
+        </div>
+        <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div class="form-group">
+            <label class="form-label">负责人</label>
+            <input class="form-input" type="text" id="edit-owner" value="${(p.owner||'').replace(/"/g,'&quot;')}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">当前进度</label>
+            <input class="form-input" type="text" id="edit-progress" value="${(p.progress||'').replace(/"/g,'&quot;')}" placeholder="如：50%">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">描述</label>
+          <textarea class="form-textarea" id="edit-description" rows="2">${(p.description||'').replace(/</g,'&lt;')}</textarea>
+        </div>`;
+      break;
+  }
+  wrap.innerHTML = html;
+}
+
+function renderEditPhotos(photos) {
+  const sec = document.getElementById('editPhotosSection');
+  if (!sec) return;
+  if (!photos || photos.length === 0) { sec.innerHTML = ''; return; }
+  sec.innerHTML = `
+    <div class="form-group">
+      <label class="form-label">现场照片（${photos.length} 张）<span style="font-size:10px;color:#f59e0b;background:#fffbeb;padding:1px 6px;border-radius:8px;margin-left:6px;">关闭"报表显示"则周报 05 不展示该照片标签</span></label>
+      <div id="edit-photos-list" style="display:flex;flex-direction:column;gap:6px;">
+        ${photos.map((p, i) => {
+          const showCap = p.showInReport !== false;
+          const cap = (p.caption || '').replace(/</g,'&lt;');
+          return `
+          <div class="edit-photo-row" data-photo-id="${p.id}" style="display:grid;grid-template-columns:60px 1fr auto auto;gap:8px;align-items:center;padding:6px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;">
+            <div style="width:60px;height:60px;border-radius:4px;overflow:hidden;background:#fff;flex-shrink:0;border:1px solid #e2e8f0;">
+              ${p.data ? `<img src="${p.data}" style="width:100%;height:100%;object-fit:cover;display:block;cursor:zoom-in;" onclick="openPhotoLightbox('${p.id}')" />` : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:18px;">📷</div>'}
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;min-width:0;">
+              <input class="form-input" type="text" id="edit-photo-caption-${i}" value="${cap}" placeholder="照片描述/标签" style="font-size:12px;padding:3px 6px;">
+              <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#475569;cursor:pointer;">
+                <input type="checkbox" id="edit-photo-show-${i}" ${showCap ? 'checked' : ''} onchange="document.getElementById('edit-photo-row-${i}').style.opacity = this.checked ? '1' : '0.55'">
+                <span>在周报 05 中显示标签</span>
+              </label>
+            </div>
+            <div id="edit-photo-row-${i}" style="opacity:${showCap ? '1' : '0.55'};"></div>
+            <button type="button" class="btn btn-xs btn-ghost" onclick="removeEditPhoto('${p.id}')" style="font-size:11px;padding:2px 6px;" title="删除照片">🗑</button>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+}
+
+window.removeEditPhoto = function(photoId) {
+  const row = document.querySelector(`.edit-photo-row[data-photo-id="${photoId}"]`);
+  if (row) row.remove();
+};
+
+window.addEditTradeRow = function() {
+  const list = document.getElementById('edit-trades-list');
+  if (!list) return;
+  const i = list.children.length;
+  const row = document.createElement('div');
+  row.style.cssText = 'display:grid;grid-template-columns:2fr 1fr auto;gap:8px;align-items:end;margin-bottom:6px;';
+  row.innerHTML = `
+    <div class="form-group" style="margin:0;">
+      <label class="form-label" style="font-size:11px;">工种 ${i+1}</label>
+      <input class="form-input" type="text" id="edit-trade-${i}" placeholder="如：木工">
+    </div>
+    <div class="form-group" style="margin:0;">
+      <label class="form-label" style="font-size:11px;">人数</label>
+      <input class="form-input" type="number" id="edit-trade-count-${i}" min="0" placeholder="0">
+    </div>
+    <button type="button" class="btn btn-xs btn-ghost" onclick="this.parentElement.remove();" style="margin-bottom:2px;">✕</button>`;
+  list.appendChild(row);
+};
+
 function saveEventEdit() {
   const event = M.EVENTS.find(e => e.id === selectedEventId);
   if (!event) return;
-  
+
+  // 已确认事件不可编辑
+  if (event.status === 'confirmed') {
+    showToast('已确认事件不可编辑', 'warning');
+    return;
+  }
+
+  const type = document.getElementById('edit-type').value;
   const date = document.getElementById('edit-date').value;
   const time = document.getElementById('edit-time').value;
   const areaId = document.getElementById('edit-area').value;
-  
-  if (!date || !time || !areaId) {
-    showToast('请填写必填字段', 'error');
+  const planId = document.getElementById('edit-plan').value;
+  const completionType = document.getElementById('edit-completion-type').value;
+  const buildingNo = document.getElementById('edit-building-no').value;
+  const floorNo = document.getElementById('edit-floor-no').value;
+  const note = document.getElementById('edit-note').value;
+
+  if (!date || !time || (!areaId && type !== 'drawing')) {
+    showToast('请填写日期/时间/区域', 'error');
     return;
   }
-  
+
+  event.type = type;
   event.date = date;
   event.time = time;
   event.areaId = areaId;
+  event.planId = planId || undefined;
+  event.completionType = planId ? completionType : undefined;
+  event.buildingNo = buildingNo || undefined;
+  event.floorNo = floorNo || undefined;
+  event.note = note;
   event.payload = event.payload || {};
-  event.payload.taskName = document.getElementById('edit-task').value;
-  event.payload.owner = document.getElementById('edit-owner').value;
-  event.payload.progress = fixProgress(document.getElementById('edit-progress').value);
-  event.payload.headcount = parseInt(document.getElementById('edit-headcount').value) || 0;
-  event.note = document.getElementById('edit-note').value;
-  
+
+  // 按类型读动态字段
+  switch (type) {
+    case 'progress':
+      event.payload.taskName = document.getElementById('edit-task')?.value || '';
+      event.payload.progress = fixProgress(document.getElementById('edit-progress')?.value || '');
+      event.payload.owner = document.getElementById('edit-owner')?.value || '';
+      // 收集工种行
+      const tradeList = document.getElementById('edit-trades-list');
+      const laborRequirements = [];
+      if (tradeList) {
+        Array.from(tradeList.children).forEach(row => {
+          const trade = row.querySelector('input[id^="edit-trade-"]:not([id$="-count"])')?.value;
+          const cnt = parseInt(row.querySelector('input[id^="edit-trade-"][id$="-count-"], input[id^="edit-trade-count-"]')?.value) || 0;
+          if (trade && trade.trim()) laborRequirements.push({ trade: trade.trim(), count: cnt });
+        });
+      }
+      event.payload.laborRequirements = laborRequirements.length > 0 ? laborRequirements : undefined;
+      event.payload.laborStats = laborRequirements.length > 0
+        ? laborRequirements.reduce((acc, l) => { acc[l.trade] = (acc[l.trade] || 0) + l.count; return acc; }, {})
+        : undefined;
+      event.payload.headcount = laborRequirements.reduce((s, l) => s + l.count, 0);
+      event.payload.description = document.getElementById('edit-description')?.value || '';
+      break;
+    case 'material':
+      event.payload.materialName = document.getElementById('edit-material')?.value || '';
+      event.payload.spec = document.getElementById('edit-spec')?.value || '';
+      event.payload.quantity = parseInt(document.getElementById('edit-quantity')?.value) || 0;
+      event.payload.unit = document.getElementById('edit-unit')?.value || '件';
+      event.payload.action = document.getElementById('edit-action')?.value || '进场';
+      event.payload.description = document.getElementById('edit-description')?.value || '';
+      break;
+    case 'safety':
+      event.payload.checkType = document.getElementById('edit-checktype')?.value || '';
+      event.payload.result = document.getElementById('edit-result')?.value || '正常';
+      event.payload.issues = (document.getElementById('edit-issues')?.value || '').split(/[；;]/).map(s=>s.trim()).filter(Boolean);
+      event.payload.description = document.getElementById('edit-description')?.value || '';
+      break;
+    case 'coordination':
+      event.payload.topic = document.getElementById('edit-topic')?.value || '';
+      event.payload.parties = (document.getElementById('edit-parties')?.value || '').split(/[；;]/).map(s=>s.trim()).filter(Boolean);
+      event.payload.summary = document.getElementById('edit-summary')?.value || '';
+      event.payload.description = document.getElementById('edit-description')?.value || '';
+      break;
+    case 'issue':
+      event.payload.taskName = document.getElementById('edit-task')?.value || '';
+      event.payload.owner = document.getElementById('edit-owner')?.value || '';
+      event.payload.description = document.getElementById('edit-description')?.value || '';
+      break;
+    case 'attendance':
+      event.payload.headcount = parseInt(document.getElementById('edit-att-count')?.value) || 0;
+      event.payload.status = document.getElementById('edit-att-status')?.value || '正常';
+      event.payload.description = document.getElementById('edit-description')?.value || '';
+      break;
+    case 'drawing':
+      event.payload.taskName = document.getElementById('edit-task')?.value || '';
+      event.payload.owner = document.getElementById('edit-owner')?.value || '';
+      event.payload.progress = document.getElementById('edit-progress')?.value || '';
+      event.payload.description = document.getElementById('edit-description')?.value || '';
+      break;
+  }
+
+  // 图纸深化事件：同步到 DRAWING_DEEPENINGS
+  if (type === 'drawing') {
+    if (typeof M.DRAWING_DEEPENINGS === 'undefined') M.DRAWING_DEEPENINGS = [];
+    const existing = M.DRAWING_DEEPENINGS.find(d => d.eventId === event.id);
+    if (existing) {
+      existing.task = event.payload.taskName || '';
+      existing.owner = event.payload.owner || '';
+      existing.progress = event.payload.progress || '';
+      existing.areaId = areaId || null;
+      existing.planId = event.planId || null;
+    } else {
+      M.DRAWING_DEEPENINGS.push({
+        id: 'DD-E' + event.id,
+        projectId: currentProjectId,
+        task: event.payload.taskName || '',
+        owner: event.payload.owner || '',
+        progress: event.payload.progress || '',
+        areaId: areaId || null,
+        planId: event.planId || null,
+        eventId: event.id,
+        createdDate: event.date
+      });
+    }
+  }
+
+  // 同步照片（caption + showInReport），并删除用户移除的照片
+  if (event.photos && event.photos.length > 0) {
+    const kept = [];
+    const photoRows = document.querySelectorAll('.edit-photo-row');
+    const oldToNew = new Map();
+    photoRows.forEach((row, i) => {
+      const id = row.dataset.photoId;
+      const capEl = document.getElementById(`edit-photo-caption-${i}`);
+      const showEl = document.getElementById(`edit-photo-show-${i}`);
+      const orig = event.photos.find(p => p.id === id);
+      if (!orig) return;
+      orig.caption = capEl ? capEl.value.trim() : orig.caption;
+      orig.showInReport = showEl ? showEl.checked : true;
+      kept.push(orig);
+      oldToNew.set(id, orig);
+    });
+    event.photos = kept;
+  }
+
   // 同步关联计划
   if (event.planId) {
     const plans = M.PLANS[currentProjectId] || [];
@@ -720,7 +1418,7 @@ function saveEventEdit() {
       if (event.payload.progress) plan.progress = event.payload.progress;
     }
   }
-  M.savePlansToStorage();
+  if (M.savePlansToStorage) M.savePlansToStorage();
   if (M.saveEventsToStorage) M.saveEventsToStorage();
   closeModal('modalEventEdit');
   renderDailyPlanCard();
@@ -839,7 +1537,7 @@ function changeCalendarMonth(delta) {
 
 function toggleCalendarDate(dateStr, event) {
   event.preventDefault();
-  
+
   if (multiSelectMode) {
     const index = selectedDates.indexOf(dateStr);
     if (index > -1) {
@@ -850,10 +1548,11 @@ function toggleCalendarDate(dateStr, event) {
   } else {
     selectedDates = [dateStr];
   }
-  
+
   updateCalendar();
   updateHeaderDate();
   renderFilteredEvents();
+  renderDailyPlanCard();
 }
 
 function toggleMultiSelect() {
@@ -868,6 +1567,7 @@ function toggleMultiSelect() {
       updateCalendar();
       updateHeaderDate();
       renderFilteredEvents();
+      renderDailyPlanCard();
     }
     showToast('已切换为单选模式', 'info');
   }
@@ -877,17 +1577,18 @@ function selectAllDatesInMonth() {
   const year = currentCalendarDate.getFullYear();
   const month = currentCalendarDate.getMonth();
   const lastDay = new Date(year, month + 1, 0).getDate();
-  
+
   for (let day = 1; day <= lastDay; day++) {
     const dateStr = `${year}-${String(month+1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     if (!selectedDates.includes(dateStr)) {
       selectedDates.push(dateStr);
     }
   }
-  
+
   updateCalendar();
   updateHeaderDate();
   renderFilteredEvents();
+  renderDailyPlanCard();
   showToast('已全选本月所有日期', 'success');
 }
 
@@ -896,6 +1597,7 @@ function clearAllDates() {
   updateCalendar();
   updateHeaderDate();
   renderFilteredEvents();
+  renderDailyPlanCard();
   showToast('已清除所有选中日期', 'info');
 }
 
@@ -903,15 +1605,16 @@ function selectAllReportedDates() {
   const allEvents = [...M.EVENTS, ...M.HISTORY_EVENTS];
   const projectEvents = allEvents.filter(e => e.projectId === currentProjectId);
   const reportedDates = [...new Set(projectEvents.map(e => e.date))];
-  
+
   selectedDates = reportedDates;
-  
+
   const firstDate = new Date(Math.min(...reportedDates.map(d => new Date(d))));
   currentCalendarDate = new Date(firstDate.getFullYear(), firstDate.getMonth(), 1);
-  
+
   updateCalendar();
   updateHeaderDate();
   renderFilteredEvents();
+  renderDailyPlanCard();
   showToast(`已选中所有有日报的日期（共 ${reportedDates.length} 天）`, 'success');
 }
 
@@ -923,6 +1626,7 @@ function goToToday() {
   updateCalendar();
   updateHeaderDate();
   renderFilteredEvents();
+  renderDailyPlanCard();
   showToast('已定位到今天', 'success');
 }
 
@@ -937,7 +1641,8 @@ function togglePlanCard(id) {
 }
 
 function renderDailyPlanCard() {
-  const today = M.TODAY;
+  // 取选中的第一个日期，否则回退到今天。多选时取首日为主日。
+  const today = (selectedDates && selectedDates.length > 0) ? selectedDates[0] : M.TODAY;
   const todayPlans = (M.PLANS[currentProjectId] || []).filter(p => {
     if (p.status === 'cancelled') return false;
     if (p.startDate && p.endDate) return p.startDate <= today && p.endDate >= today;
@@ -955,6 +1660,9 @@ function renderDailyPlanCard() {
     return;
   }
 
+  // 统计口径切换：人数（默认） / 工日
+  const unit = localStorage.getItem(`page06_unit_${currentProjectId}`) || 'people';
+
   let html = '';
 
   todayPlans.forEach(plan => {
@@ -962,9 +1670,24 @@ function renderDailyPlanCard() {
     const collapsed = planCardCollapsed[plan.id];
     const laborList = plan.laborRequirements || plan.laborSchedule || [];
     const totalWorkers = laborList.reduce((sum, l) => sum + (l.count || 0), 0);
+    // 计划总工日 = sum(count) × plan天数；如果 plan.totalManDays 已存则用存值
+    const planStart = plan.startDate || plan.date;
+    const planEnd = plan.endDate || plan.startDate || plan.date;
+    const planDays = (planStart && planEnd) ? (Math.round((new Date(planEnd) - new Date(planStart)) / 86400000) + 1) : 0;
+    const planManDays = Number(plan.totalManDays) || (totalWorkers * planDays);
     const typeMeta = M.TYPE_META[plan.type || plan.eventType] || { icon: '📋', label: '计划', color: '#64748b' };
     const displayProcess = plan.taskName || plan.process || plan.description || '施工计划';
     const location = [plan.buildingNo, plan.floorNo].filter(Boolean).join(' · ');
+    // 区间日期展示：startDate~endDate、date、或空
+    const fmtMD = (s) => s ? s.replace(/^\d{4}-/, '').replace(/-/g, '.') : '';
+    let dateRange = '';
+    if (plan.startDate && plan.endDate && plan.startDate !== plan.endDate) {
+      dateRange = `${fmtMD(plan.startDate)} ~ ${fmtMD(plan.endDate)}`;
+    } else if (plan.startDate || plan.endDate) {
+      dateRange = fmtMD(plan.startDate || plan.endDate);
+    } else if (plan.date) {
+      dateRange = fmtMD(plan.date);
+    }
     // 获取关联完成记录
     const planEvents = M.EVENTS.filter(e => e.planId === plan.id);
 
@@ -974,9 +1697,11 @@ function renderDailyPlanCard() {
         <div style="display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none;" onclick="togglePlanCard('${plan.id}')">
           <span style="font-size:10px; color:#94a3b8; transition:transform .2s;">${collapsed ? '▶' : '▼'}</span>
           <span style="font-size:12px; font-weight:600; color:#334155; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${typeMeta.icon} ${displayProcess}</span>
+          ${dateRange ? `<span style="font-size:10px; color:#475569; white-space:nowrap; background:#e2e8f0;padding:1px 6px;border-radius:8px;">📅 ${dateRange}</span>` : ''}
           ${location ? `<span style="font-size:10px; color:#64748b; white-space:nowrap;"> 🏗️ ${location}</span>` : ''}
           ${plan.progress ? `<span style="font-size:10px; color:#00adef; white-space:nowrap;"> 📊 ${plan.progress}</span>` : ''}
           <div style="flex:1;"></div>
+          <span style="font-size:10px;color:#7c3aed;background:#ede9fe;padding:1px 6px;border-radius:8px;white-space:nowrap;">⚙ ${planManDays} 工日</span>
           ${(()=>{const p=parseInt(String(plan.progress||'0').replace('%',''));if(p>100)return '<span style="font-size:10px;padding:1px 6px;background:#f59e0b;color:#fff;border-radius:4px;white-space:nowrap;">🏆 超额完成</span>';if(plan.status==='completed'||p>=100)return '<span style="font-size:10px;padding:1px 6px;background:'+typeMeta.color+';color:#fff;border-radius:4px;white-space:nowrap;">已完成</span>';return '<span style="font-size:10px;padding:1px 6px;background:'+typeMeta.color+';color:#fff;border-radius:4px;white-space:nowrap;">进行中</span>';})()}
         </div>
         
@@ -1031,6 +1756,45 @@ function updateCalendarPlanMarks() {
   updateCalendar();
 }
 
+let _zoneImages = [];
+
+function previewZoneImages(event) {
+  const files = Array.from(event.target.files);
+  _zoneImages = [];
+  if (files.length === 0) { document.getElementById('dp-zone-images-preview').style.display = 'none'; return; }
+  let loaded = 0;
+  files.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      _zoneImages.push({ name: file.name, dataUrl: e.target.result });
+      loaded++;
+      if (loaded === files.length) renderZoneImagePreviews();
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderZoneImagePreviews() {
+  const container = document.getElementById('dp-zone-images-preview');
+  container.innerHTML = _zoneImages.map((img, i) =>
+    `<div style="border:1px solid #e2e8f0;border-radius:4px;overflow:hidden;background:#f8fafc;position:relative;">
+      <button onclick="removeZoneImage(${i})" style="position:absolute;top:2px;right:2px;width:18px;height:18px;border:none;border-radius:50%;background:#ef4444;color:#fff;font-size:10px;cursor:pointer;line-height:18px;text-align:center;padding:0;z-index:1;">✕</button>
+      <div style="height:90px;display:flex;align-items:center;justify-content:center;background:#f1f5f9;overflow:hidden;">
+        <img src="${img.dataUrl}" style="max-width:100%;max-height:90px;object-fit:contain;">
+      </div>
+      <div style="padding:3px 6px;font-size:10px;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-top:1px solid #e2e8f0;">${img.name}</div>
+    </div>`
+  ).join('');
+  container.style.display = 'grid';
+  container.style.gridTemplateColumns = 'repeat(auto-fill,minmax(120px,1fr))';
+}
+
+function removeZoneImage(index) {
+  _zoneImages.splice(index, 1);
+  if (_zoneImages.length === 0) { document.getElementById('dp-zone-images-preview').style.display = 'none'; document.getElementById('dp-zone-images').value = ''; }
+  else renderZoneImagePreviews();
+}
+
 // ============================================================
 // 表单操作
 // ============================================================
@@ -1068,8 +1832,45 @@ function populateAreaSelects() {
 }
 
 // ============================================================
-// 日计划表单
+// 工日/人数联动辅助
 // ============================================================
+
+// 计算 plan 总工日 = sum(count) * totalDays
+function _calcPlanManDays(plan) {
+  const startDate = plan.startDate || plan.date;
+  const endDate = plan.endDate || plan.startDate || plan.date;
+  if (!startDate || !endDate) return 0;
+  const totalDays = Math.round((new Date(endDate) - new Date(startDate)) / 86400000) + 1;
+  const list = plan.laborRequirements || plan.laborSchedule || [];
+  const totalCount = list.reduce((s, l) => s + (Number(l.count) || 0), 0);
+  return totalCount * totalDays;
+}
+
+// 根据新工日反向同步各工种人数
+// totalManDays: 新的总工日；按现有 count 占比分配
+function _syncPlanCountsByManDays(plan, newTotalManDays) {
+  const list = plan.laborRequirements || plan.laborSchedule || [];
+  const startDate = plan.startDate || plan.date;
+  const endDate = plan.endDate || plan.startDate || plan.date;
+  if (!startDate || !endDate || list.length === 0) return plan;
+  const totalDays = Math.round((new Date(endDate) - new Date(startDate)) / 86400000) + 1;
+  if (totalDays <= 0) return plan;
+  const oldTotal = list.reduce((s, l) => s + (Number(l.count) || 0), 0);
+  if (oldTotal <= 0) {
+    // 没有老人数则按平均分配
+    const each = newTotalManDays / totalDays / list.length;
+    list.forEach(l => { l.count = Math.max(0, Math.round(each * 10) / 10); });
+    return plan;
+  }
+  list.forEach(l => {
+    const ratio = (Number(l.count) || 0) / oldTotal;
+    l.count = Math.round((newTotalManDays / totalDays) * ratio * 10) / 10;
+    if (l.count < 0) l.count = 0;
+  });
+  return plan;
+}
+
+
 function openDailyPlanForm() {
   editingPlanId = null;
   laborRowCount = 1;
@@ -1096,6 +1897,10 @@ function openDailyPlanForm() {
   document.getElementById('dp-machinery').value = '';
   document.getElementById('dp-safety-notes').value = '';
   document.getElementById('dp-description').value = '';
+  _zoneImages = [];
+  document.getElementById('dp-zone-images-preview').style.display = 'none';
+  document.getElementById('dp-zone-images-preview').innerHTML = '';
+  document.getElementById('dp-zone-images').value = '';
   
   // 渲染区域选择
   renderAreaSelect('dp-area');
@@ -1103,31 +1908,95 @@ function openDailyPlanForm() {
   // 初始化工种行
   document.getElementById('laborRows').innerHTML = `
     <div class="form-row labor-row">
-      <div class="form-group">
+      <div class="form-group" style="flex:2;">
         <label class="form-label">工种</label>
-        <input class="form-input" type="text" id="labor-type-0" placeholder="如：木工、钢筋工">
+        <input class="form-input" type="text" id="labor-type-0" placeholder="如：木工、钢筋工" oninput="recalcPlanManDays()">
       </div>
-      <div class="form-group">
+      <div class="form-group" style="flex:1;">
         <label class="form-label">人数</label>
-        <input class="form-input" type="number" id="labor-count-0" value="0" min="0">
+        <input class="form-input" type="number" id="labor-count-0" value="0" min="0" oninput="recalcPlanManDays()">
+      </div>
+      <div class="form-group" style="flex:1;">
+        <label class="form-label">工日</label>
+        <input class="form-input dp-labor-mandays" type="number" id="labor-mandays-0" value="0" min="0" step="0.5" onchange="onLaborManDayChanged()">
       </div>
       <button class="btn btn-danger btn-sm" onclick="removeLaborRow(0)" style="margin-top:24px;">✕</button>
     </div>
   `;
   
   showModal('modalDailyPlan');
+  filterPlanFormByType();
+}
+
+// 根据 dp-event-type 切换日计划表单字段的可见性。
+// HTML 约定：需要在某些 type 下隐藏的 .form-section / .form-group 加 data-dp-show="type1,type2,..."。
+// 隐藏时清空内部 input/textarea 值，避免脏数据被保存。
+function filterPlanFormByType() {
+  const typeEl = document.getElementById('dp-event-type');
+  if (!typeEl) return;
+  const type = typeEl.value;
+  document.querySelectorAll('#modalDailyPlan [data-dp-show]').forEach(el => {
+    const allowed = el.getAttribute('data-dp-show').split(',').map(s => s.trim());
+    const visible = allowed.includes(type);
+    el.style.display = visible ? '' : 'none';
+    if (!visible) {
+      el.querySelectorAll('input, textarea').forEach(inp => {
+        if (inp.type === 'checkbox' || inp.type === 'radio') return;
+        if (inp.readOnly) return;
+        inp.value = '';
+      });
+    }
+  });
+  // 图纸深化：修改字段名称语义
+  const isDrawing = type === 'drawing';
+  const processLabel = document.getElementById('dp-process-label');
+  if (processLabel) {
+    if (isDrawing) {
+      processLabel.innerHTML = '计划事项 <span class="req">*</span>';
+    } else {
+      processLabel.innerHTML = '工序 <span class="req">*</span>';
+    }
+  }
+  const sectionTitle = document.getElementById('dp-form-title');
+  if (sectionTitle) {
+    sectionTitle.textContent = isDrawing ? '图纸深化' : '工序信息';
+  }
+}
+
+// 日报手动录入表单字段过滤（与 filterPlanFormByType 平行）
+function filterManualFormByType() {
+  const typeEl = document.getElementById('m-type');
+  if (!typeEl) return;
+  const type = typeEl.value;
+  const modal = document.getElementById('modalManual');
+  if (!modal) return;
+  modal.querySelectorAll('[data-dp-show]').forEach(el => {
+    const allowed = el.getAttribute('data-dp-show').split(',').map(s => s.trim());
+    const visible = allowed.includes(type);
+    el.style.display = visible ? '' : 'none';
+    if (!visible) {
+      el.querySelectorAll('input, textarea, select').forEach(inp => {
+        if (inp.type === 'checkbox' || inp.type === 'radio') return;
+        inp.value = '';
+      });
+    }
+  });
 }
 
 function addLaborRow() {
   const html = `
     <div class="form-row labor-row">
-      <div class="form-group">
+      <div class="form-group" style="flex:2;">
         <label class="form-label">工种</label>
-        <input class="form-input" type="text" id="labor-type-${laborRowCount}" placeholder="如：木工">
+        <input class="form-input" type="text" id="labor-type-${laborRowCount}" placeholder="如：木工" oninput="recalcPlanManDays()">
       </div>
-      <div class="form-group">
+      <div class="form-group" style="flex:1;">
         <label class="form-label">人数</label>
-        <input class="form-input" type="number" id="labor-count-${laborRowCount}" value="0" min="0">
+        <input class="form-input" type="number" id="labor-count-${laborRowCount}" value="0" min="0" oninput="recalcPlanManDays()">
+      </div>
+      <div class="form-group" style="flex:1;">
+        <label class="form-label">工日</label>
+        <input class="form-input dp-labor-mandays" type="number" id="labor-mandays-${laborRowCount}" value="0" min="0" step="0.5" onchange="onLaborManDayChanged()">
       </div>
       <button class="btn btn-danger btn-sm" onclick="removeLaborRow(${laborRowCount})" style="margin-top:24px;">✕</button>
     </div>
@@ -1174,6 +2043,71 @@ function removeAreaRow(index) {
   }
 }
 
+function recalcPlanManDays() {
+  const startDate = document.getElementById('dp-start-date').value;
+  const endDate = document.getElementById('dp-end-date').value;
+  if (!startDate || !endDate) return;
+  const totalDays = Math.round((new Date(endDate) - new Date(startDate)) / 86400000) + 1;
+  let totalManDays = 0;
+  document.querySelectorAll('.labor-row').forEach((row, index) => {
+    const countEl = document.getElementById(`labor-count-${index}`);
+    const mandaysEl = document.getElementById(`labor-mandays-${index}`);
+    const count = parseInt(countEl?.value) || 0;
+    if (mandaysEl && document.activeElement !== mandaysEl) {
+      const autoMandays = count * Math.max(totalDays, 1);
+      mandaysEl.value = autoMandays;
+    }
+    const rowMandays = parseFloat(mandaysEl?.value) || 0;
+    totalManDays += rowMandays;
+  });
+  const el = document.getElementById('dp-man-days');
+  if (el && document.activeElement !== el) el.value = totalManDays;
+}
+
+function onLaborManDayChanged() {
+  const startDate = document.getElementById('dp-start-date').value;
+  const endDate = document.getElementById('dp-end-date').value;
+  if (!startDate || !endDate) return;
+  const totalDays = Math.round((new Date(endDate) - new Date(startDate)) / 86400000) + 1;
+  if (totalDays <= 0) return;
+  document.querySelectorAll('.labor-row').forEach((row, index) => {
+    const mandaysEl = document.getElementById(`labor-mandays-${index}`);
+    const countEl = document.getElementById(`labor-count-${index}`);
+    const rowMandays = parseFloat(mandaysEl?.value) || 0;
+    if (countEl) countEl.value = Math.max(0, Math.round(rowMandays / Math.max(totalDays, 1) * 10) / 10);
+  });
+  // 重新汇总总工日
+  recalcPlanManDays();
+}
+
+function onPlanManDaysChanged() {
+  const el = document.getElementById('dp-man-days');
+  if (!el) return;
+  const newTotal = Number(el.value) || 0;
+  const rows = Array.from(document.querySelectorAll('.labor-row'));
+  if (rows.length === 0) return;
+  const oldMandays = rows.map((_, i) => parseFloat(document.getElementById(`labor-mandays-${i}`)?.value) || 0);
+  const oldTotalMandays = oldMandays.reduce((s, x) => s + x, 0);
+  const startDate = document.getElementById('dp-start-date').value;
+  const endDate = document.getElementById('dp-end-date').value;
+  const totalDays = Math.round((new Date(endDate) - new Date(startDate)) / 86400000) + 1;
+  if (totalDays <= 0) return;
+  rows.forEach((row, i) => {
+    const mandaysEl = document.getElementById(`labor-mandays-${i}`);
+    const countEl = document.getElementById(`labor-count-${i}`);
+    if (oldTotalMandays > 0) {
+      const ratio = oldMandays[i] / oldTotalMandays;
+      const newMandays = newTotal * ratio;
+      if (mandaysEl) mandaysEl.value = Math.round(newMandays * 10) / 10;
+    } else {
+      const each = newTotal / rows.length;
+      if (mandaysEl) mandaysEl.value = each;
+    }
+    const rowMandays = parseFloat(mandaysEl?.value) || 0;
+    if (countEl) countEl.value = Math.max(0, Math.round(rowMandays / Math.max(totalDays, 1) * 10) / 10);
+  });
+}
+
 function saveDailyPlan() {
   console.log('[日计划] saveDailyPlan 开始', { editingPlanId, projectId: currentProjectId });
   const startDate = document.getElementById('dp-start-date').value;
@@ -1190,25 +2124,31 @@ function saveDailyPlan() {
   const machinery = document.getElementById('dp-machinery').value;
   const safetyNotes = document.getElementById('dp-safety-notes').value;
   const description = document.getElementById('dp-description').value;
-  
+  const zoneImages = _zoneImages.length > 0 ? _zoneImages.map(z => ({ name: z.name, dataUrl: z.dataUrl })) : [];
+  const totalManDaysEl = document.getElementById('dp-man-days');
+  const totalManDays = totalManDaysEl ? Number(totalManDaysEl.value) || 0 : 0;
+
   const laborRequirements = [];
   document.querySelectorAll('.labor-row').forEach((row, index) => {
     const type = document.getElementById(`labor-type-${index}`)?.value;
     const count = parseInt(document.getElementById(`labor-count-${index}`)?.value) || 0;
+    const mandays = parseFloat(document.getElementById(`labor-mandays-${index}`)?.value) || 0;
     if (type && count > 0) {
-      laborRequirements.push({ trade: type, count });
+      laborRequirements.push({ trade: type, count, manDays: mandays });
     }
   });
-  
+
   if (!startDate || !endDate) {
     showToast('请选择日期范围', 'error');
     return;
   }
-  if (!process) {
+  // coordination / attendance 不需要工序；其他 type 必填
+  const needsProcess = !['coordination', 'attendance'].includes(eventType);
+  if (needsProcess && !process) {
     showToast('请填写工序', 'error');
     return;
   }
-  
+
   const plan = {
     projectId: currentProjectId,
     startDate,
@@ -1223,10 +2163,12 @@ function saveDailyPlan() {
     progress: fixProgress(progress) || '0%',
     status: parseInt(String(fixProgress(progress)).replace('%','')) >= 100 ? 'completed' : status,
     laborRequirements,
+    totalManDays,
     materials: materials ? materials.split('\n').filter(m => m.trim()) : [],
     machinery: machinery ? machinery.split('\n').filter(m => m.trim()) : [],
     safetyNotes,
-    description
+    description,
+    zoneImages
   };
   
   if (!M.PLANS[currentProjectId]) {
@@ -1256,7 +2198,7 @@ function saveDailyPlan() {
         if (plan.areaId) e.areaId = plan.areaId;
       }
     });
-    M.savePlansToStorage();
+    if (M.savePlansToStorage) M.savePlansToStorage();
     if (M.saveEventsToStorage) M.saveEventsToStorage();
     renderFilteredEvents();
     showToast('日计划已更新', 'success');
@@ -1270,7 +2212,7 @@ function saveDailyPlan() {
   
   console.log('[日计划] 保存后长度:', M.PLANS[currentProjectId].length, '计划ID:', plan.id);
   
-  M.savePlansToStorage();
+  if (M.savePlansToStorage) M.savePlansToStorage();
   localStorage.setItem('daily_plans', JSON.stringify(M.PLANS));
   
   updateCalendarPlanMarks();
@@ -1302,21 +2244,43 @@ function editDailyPlan(planId) {
   document.getElementById('dp-machinery').value = (plan.machinery || []).join('\n');
   document.getElementById('dp-safety-notes').value = plan.safetyNotes || '';
   document.getElementById('dp-description').value = plan.description || '';
-  
+  _zoneImages = (plan.zoneImages || []).map(z => ({ name: z.name, dataUrl: z.dataUrl }));
+  if (_zoneImages.length > 0) renderZoneImagePreviews();
+  else document.getElementById('dp-zone-images-preview').style.display = 'none';
+  document.getElementById('dp-zone-images').value = '';
+  // 总工日：用户存的值优先，没存则用 sum(count)*天数
+  const computedManDays = (() => {
+    const start = plan.startDate || plan.date;
+    const end = plan.endDate || plan.startDate || plan.date;
+    if (!start || !end) return 0;
+    const totalDays = Math.round((new Date(end) - new Date(start)) / 86400000) + 1;
+    const list = plan.laborRequirements || plan.laborSchedule || [];
+    const totalCount = list.reduce((s, l) => s + (Number(l.count) || 0), 0);
+    return totalCount * Math.max(totalDays, 1);
+  })();
+  const mdEl = document.getElementById('dp-man-days');
+  if (mdEl) mdEl.value = plan.totalManDays || computedManDays;
+
   const laborList = plan.laborRequirements || plan.laborSchedule || [];
   if (laborList.length > 0) {
     laborRowCount = laborList.length;
     document.getElementById('laborRows').innerHTML = laborList.map((l, i) => {
       const trade = l.trade || l.laborType;
+      const count = l.count || 0;
+      const mandays = l.manDays || 0;
       return `
         <div class="form-row labor-row">
-          <div class="form-group">
+          <div class="form-group" style="flex:2;">
             <label class="form-label">工种</label>
-            <input class="form-input" type="text" id="labor-type-${i}" value="${trade || ''}" placeholder="如：木工">
+            <input class="form-input" type="text" id="labor-type-${i}" value="${trade || ''}" placeholder="如：木工" oninput="recalcPlanManDays()">
           </div>
-          <div class="form-group">
+          <div class="form-group" style="flex:1;">
             <label class="form-label">人数</label>
-            <input class="form-input" type="number" id="labor-count-${i}" value="${l.count || 0}" min="0">
+            <input class="form-input" type="number" id="labor-count-${i}" value="${count}" min="0" oninput="recalcPlanManDays()">
+          </div>
+          <div class="form-group" style="flex:1;">
+            <label class="form-label">工日</label>
+            <input class="form-input dp-labor-mandays" type="number" id="labor-mandays-${i}" value="${mandays}" min="0" step="0.5" onchange="onLaborManDayChanged()">
           </div>
           <button class="btn btn-danger btn-sm" onclick="removeLaborRow(${i})" style="margin-top:24px;">✕</button>
         </div>
@@ -1325,13 +2289,17 @@ function editDailyPlan(planId) {
   } else {
     document.getElementById('laborRows').innerHTML = `
       <div class="form-row labor-row">
-        <div class="form-group">
+        <div class="form-group" style="flex:2;">
           <label class="form-label">工种</label>
-          <input class="form-input" type="text" id="labor-type-0" placeholder="如：木工、钢筋工">
+          <input class="form-input" type="text" id="labor-type-0" placeholder="如：木工、钢筋工" oninput="recalcPlanManDays()">
         </div>
-        <div class="form-group">
+        <div class="form-group" style="flex:1;">
           <label class="form-label">人数</label>
-          <input class="form-input" type="number" id="labor-count-0" value="0" min="0">
+          <input class="form-input" type="number" id="labor-count-0" value="0" min="0" oninput="recalcPlanManDays()">
+        </div>
+        <div class="form-group" style="flex:1;">
+          <label class="form-label">工日</label>
+          <input class="form-input dp-labor-mandays" type="number" id="labor-mandays-0" value="0" min="0" step="0.5" onchange="onLaborManDayChanged()">
         </div>
         <button class="btn btn-danger btn-sm" onclick="removeLaborRow(0)" style="margin-top:24px;">✕</button>
       </div>
@@ -1341,8 +2309,9 @@ function editDailyPlan(planId) {
   
   document.querySelector('#modalDailyPlan .modal-title').textContent = '✏️ 编辑日计划';
   document.querySelector('#modalDailyPlan .modal-footer .btn-primary').textContent = '更新计划';
-  
+
   showModal('modalDailyPlan');
+  filterPlanFormByType();
 }
 
 async function deleteDailyPlan(planId) {
@@ -1393,6 +2362,8 @@ function initCustomAreas() {
       }
     }
   } catch (e) { /* ignore */ }
+  // 暴露给 mock-data.js 的 getPage05Photos/getPage04Data 等函数做区域名查找
+  if (window.MockData) window.MockData.customAreas = customAreas;
 }
 function saveCustomAreas() {
   try {
@@ -1664,6 +2635,7 @@ function applyVoiceParseResult(parsed) {
   document.getElementById('vp-headcount').value = parsed.payload?.headcount || '';
   document.getElementById('vp-caption').value = parsed.caption || parsed.payload?.caption || '';
   document.getElementById('vp-confidence').textContent = `${((parsed.confidence || 0) * 100).toFixed(0)}%`;
+  document.getElementById('vp-planId').value = parsed.planId || '';
 
   // 关键：处理 LLM 识别出的"区域"——可能是名字（"VIP 接待室"）也可能是 ID（"A1"）
   const areaRef = parsed.areaId || parsed.areaName || '';
@@ -1791,6 +2763,7 @@ function saveVoiceEvent() {
     time: time || new Date().toTimeString().slice(0, 5),
     type: type,
     areaId: areaId,
+    planId: document.getElementById('vp-planId').value || undefined,
     payload: {
       taskName: document.getElementById('vp-task').value,
       owner: document.getElementById('vp-owner').value,
@@ -1934,6 +2907,7 @@ async function parseVoiceTextForPhoto() {
     document.getElementById('pp-owner').value = result.payload?.owner || '';
     document.getElementById('pp-progress').value = result.payload?.progress || '';
     document.getElementById('pp-headcount').value = result.payload?.headcount || '';
+    document.getElementById('pp-planId').value = result.planId || '';
     if (!document.getElementById('pp-caption').value) {
       document.getElementById('pp-caption').value = result.caption || voiceText;
     }
@@ -1959,6 +2933,7 @@ async function parseVoiceTextForPhoto() {
     document.getElementById('pp-owner').value = parsed.payload?.owner || '';
     document.getElementById('pp-progress').value = parsed.payload?.progress || '';
     document.getElementById('pp-headcount').value = parsed.payload?.headcount || '';
+    document.getElementById('pp-planId').value = parsed.planId || '';
     if (!document.getElementById('pp-caption').value) {
       document.getElementById('pp-caption').value = parsed.caption || voiceText;
     }
@@ -2326,16 +3301,16 @@ function mockOptimizeText(text) {
 function handlePhotoUpload(event) {
   const file = event.target.files[0];
   if (!file) return;
-  
+
   // 验证文件类型
   if (!file.type.startsWith('image/')) {
     showToast('请选择图片文件', 'error');
     return;
   }
-  
+
   // 隐藏选择菜单
   closePhotoOptions();
-  
+
   // 显示预览
   const reader = new FileReader();
   reader.onload = function(e) {
@@ -2344,15 +3319,20 @@ function handlePhotoUpload(event) {
     document.getElementById('vlm-photo').src = previewUrl;
     document.getElementById('photoUploadZone').style.display = 'none';
     document.getElementById('photoPreviewArea').style.display = 'block';
-    
-    // 显示VLM可视化动画
+    // 立即显示 VLM 可视化（照片 + 动画同框）
+    const vlmVis = document.getElementById('vlm-visualization');
+    if (vlmVis) vlmVis.style.display = 'block';
+    const simple = document.getElementById('simple-preview');
+    if (simple) simple.style.display = 'none';
     showVLMVisualization();
-    
+    const hint = document.getElementById('pp-hint');
+    if (hint) hint.textContent = '⏳ AI 正在识别...';
+
     // 上传到后端进行 AI 识别
     uploadAndParsePhoto(file);
   };
   reader.readAsDataURL(file);
-  
+
   // 清空 input 值，允许重复选择同一文件
   event.target.value = '';
 }
@@ -2706,6 +3686,7 @@ function savePhotoEvent() {
     time: formTime || new Date().toTimeString().slice(0, 5),
     type,
     areaId,
+    planId: document.getElementById('pp-planId').value || undefined,
     payload: {
       taskName: taskName || caption || '拍照记录',
       owner,
@@ -2749,8 +3730,21 @@ function openUnifiedInput(mode = 'manual', planId) {
 
   document.getElementById('m-date').value = defaultDate;
   document.getElementById('m-time').value = nowStr;
-  document.getElementById('m-type').value = 'progress';
+  // 如果指定了 planId，从计划推断事件类型
+  if (planId) {
+    const projectPlans = (M.PLANS && M.PLANS[currentProjectId]) || [];
+    const plan = projectPlans.find(p => p.id === planId);
+    if (plan && plan.type) {
+      document.getElementById('m-type').value = plan.type;
+    } else {
+      document.getElementById('m-type').value = 'progress';
+    }
+  } else {
+    document.getElementById('m-type').value = 'progress';
+  }
   document.getElementById('m-note').value = '';
+  if (document.getElementById('m-building-no')) document.getElementById('m-building-no').value = '';
+  if (document.getElementById('m-floor-no')) document.getElementById('m-floor-no').value = '';
 
   // 清空共享文本区
   document.getElementById('uSharedText').value = '';
@@ -2762,6 +3756,17 @@ function openUnifiedInput(mode = 'manual', planId) {
   document.getElementById('unifiedVoiceSection').style.display = 'none';
   document.getElementById('unifiedPhotoSection').style.display = 'none';
   document.getElementById('uConfidenceRow').style.display = 'none';
+
+  // 清空照片预览残留
+  if (typeof vlmAnimationRunning !== 'undefined' && vlmAnimationRunning) hideVLMVisualization();
+  if (document.getElementById('uPhotoUploadZone')) document.getElementById('uPhotoUploadZone').style.display = 'block';
+  if (document.getElementById('uPhotoPreviewArea')) document.getElementById('uPhotoPreviewArea').style.display = 'none';
+  if (document.getElementById('uPhotoPreviewImg')) document.getElementById('uPhotoPreviewImg').src = '';
+  if (document.getElementById('vlm-photo')) document.getElementById('vlm-photo').src = '';
+  window._uPhotoBase64 = null;
+  if (document.getElementById('uPhotoCaption')) document.getElementById('uPhotoCaption').value = '';
+  if (document.getElementById('uPhotoShowInReport')) document.getElementById('uPhotoShowInReport').checked = true;
+  if (document.getElementById('uPhotoParseHint')) document.getElementById('uPhotoParseHint').textContent = '';
   document.getElementById('uVoiceToggleBtn').classList.remove('btn-primary');
   document.getElementById('uVoiceToggleBtn').classList.add('btn-outline');
   document.getElementById('uPhotoToggleBtn').classList.remove('btn-primary');
@@ -3036,6 +4041,15 @@ function showOptimizationPopup() {
   const planSelected = document.getElementById('m-plan')?.value;
   const showPlanPicker = hasPlanField && !planSelected && plans.length > 0;
 
+  // 收集所有劳动力行（动态行，工种/人数）
+  const laborRows = [];
+  document.querySelectorAll('[id^="m-labor-type-"]').forEach(tEl => {
+    const idx = tEl.id.replace('m-labor-type-', '');
+    const cEl = document.getElementById('m-labor-count-' + idx);
+    if (cEl) laborRows.push({ idx, type: tEl, count: cEl });
+  });
+  const hasLabor = laborRows.length > 0;
+
   // 检查是否有任何字段缺失或可选计划，都没有则跳过
   const anyMissing = expected.some(id => {
     const el = document.getElementById(id);
@@ -3043,7 +4057,8 @@ function showOptimizationPopup() {
     if (el.type === 'select-one') return !el.value || !el.querySelector('option:checked')?.value;
     return !el.value;
   });
-  if (!anyMissing && !showPlanPicker) return;
+  const laborMissing = laborRows.some(r => !r.type.value.trim());
+  if (!anyMissing && !showPlanPicker && !laborMissing) return;
 
   const overlay = document.createElement('div');
   overlay.className = 'opt-popup-overlay';
@@ -3074,7 +4089,15 @@ function showOptimizationPopup() {
     const el = document.getElementById(id);
     if (!el) return;
     const curVal = el.value;
-    const label = el?.previousElementSibling?.textContent || id.replace('m-', '').replace(/-/g, ' ');
+    const FIELD_LABELS = {
+      'm-task': '工序/任务名称', 'm-owner': '负责人', 'm-progress': '进度', 'm-headcount': '人数',
+      'm-area': '所属区域', 'm-building-no': '楼号/施工段', 'm-floor-no': '层号',
+      'm-material': '材料名称', 'm-spec': '规格', 'm-quantity': '数量', 'm-unit': '单位', 'm-action': '操作',
+      'm-checktype': '检查类型', 'm-result': '检查结果', 'm-issues': '问题（用分号分隔）',
+      'm-topic': '协调主题', 'm-parties': '参与方（用分号分隔）', 'm-summary': '协调结论',
+      'm-att-count': '应到人数', 'm-att-status': '签到状态'
+    };
+    const label = el?.previousElementSibling?.textContent || FIELD_LABELS[id] || id.replace('m-', '').replace(/-/g, ' ');
     const inputId = 'opt-fill-' + id;
     const isEmpty = el.type === 'select-one' ? (!curVal || !el.querySelector('option:checked')?.value) : !curVal;
     const borderStyle = isEmpty ? 'border-color:#ef4444;' : '';
@@ -3093,6 +4116,26 @@ function showOptimizationPopup() {
         <input id="${inputId}" placeholder="请输入${label}" value="${curVal}" style="${borderStyle}"></div>`;
     }
   });
+
+  // 劳动力行（工种 + 人数），所有已有行都列出
+  if (hasLabor) {
+    const laborMissingCnt = laborRows.filter(r => !r.type.value.trim()).length;
+    html += `<div class="opt-popup-row" style="display:block;">
+      <label>劳动力（工种 / 人数）${laborMissingCnt > 0 ? ` <span style="color:#ef4444;">（${laborMissingCnt} 个工种未填）</span>` : ''}</label>
+      <div style="display:flex;flex-direction:column;gap:6px;">`;
+    laborRows.forEach(r => {
+      const tradeVal = r.type.value || '';
+      const countVal = r.count.value || 0;
+      const isEmpty = !tradeVal.trim();
+      const borderStyle = isEmpty ? 'border-color:#ef4444;' : '';
+      html += `<div style="display:flex;gap:6px;align-items:center;">
+        <input class="form-input" id="opt-fill-${r.type.id}" placeholder="工种（如：木工）" value="${tradeVal}" style="flex:1;${borderStyle}" list="opt-trade-list-${r.idx}">
+        <input class="form-input" type="number" id="opt-fill-${r.count.id}" min="0" value="${countVal}" style="width:70px;">
+        <datalist id="opt-trade-list-${r.idx}">${(M.STANDARD_TRADES || []).map(t => `<option value="${t.tradeName}">`).join('')}</datalist>
+      </div>`;
+    });
+    html += `</div></div>`;
+  }
 
   // 劳动力预览（计划选中后显示）
   html += `<div class="opt-popup-row" id="opt-labor-row" style="display:none;">
@@ -3251,10 +4294,23 @@ function highlightField(id) {
 function highlightFieldUnmatched(id) {
   const el = document.getElementById(id);
   if (!el) return;
-  el.classList.remove('field-highlight', 'field-unmatched');
+  el.classList.remove('field-highlight', 'field-unmatched', 'field-unmatched-pulse');
   void el.offsetWidth;
-  el.classList.add('field-unmatched');
-  setTimeout(() => el.classList.remove('field-unmatched'), 15000);
+  el.classList.add('field-unmatched', 'field-unmatched-pulse');
+  // 5s 后停止脉冲动画，但保留红框提示色（提示色一直保留直到用户输入数据）
+  setTimeout(() => el.classList.remove('field-unmatched-pulse'), 5000);
+  // 用户开始输入即清除提示色
+  if (!el.dataset._unmatchedListenerBound) {
+    el.dataset._unmatchedListenerBound = '1';
+    const clear = () => {
+      el.classList.remove('field-unmatched', 'field-unmatched-pulse');
+      el.removeEventListener('input', clear);
+      el.removeEventListener('change', clear);
+      delete el.dataset._unmatchedListenerBound;
+    };
+    el.addEventListener('input', clear);
+    el.addEventListener('change', clear);
+  }
 }
 
 function getExpectedFields(type) {
@@ -3317,6 +4373,11 @@ function applyUnifiedParseResult(parsed, sourceMode) {
   if (parsed.caption || parsed.payload?.caption) {
     const el = document.getElementById('m-caption');
     if (el) { el.value = parsed.caption || parsed.payload?.caption; highlightField('m-caption'); }
+    // 同步到照片描述框（可编辑）+ 开关默认开
+    const capEl = document.getElementById('uPhotoCaption');
+    if (capEl) capEl.value = parsed.caption || parsed.payload?.caption;
+    const showEl = document.getElementById('uPhotoShowInReport');
+    if (showEl) showEl.checked = true;
   }
 
   // 显示置信度
@@ -3465,7 +4526,7 @@ async function onCompletionTypeChange() {
         if (document.getElementById('m-caption')) document.getElementById('m-caption').value = '';
         window._mPlanLabor = null;
         const lr = document.getElementById('m-labor-rows');
-        if (lr) lr.innerHTML = `<div class="form-row labor-row"><div class="form-group"><label class="form-label">工种</label><input class="form-input" type="text" id="m-labor-type-0" placeholder="如：木工" oninput="checkManualLaborDiff()"></div><div class="form-group"><label class="form-label">人数</label><input class="form-input" type="number" id="m-labor-count-0" value="0" min="0" oninput="checkManualLaborDiff()"></div></div>`;
+        if (lr) lr.innerHTML = `<div class="form-row labor-row"><div class="form-group"><label class="form-label">工种</label><input class="form-input" type="text" id="m-labor-type-0" placeholder="如：木工" oninput="checkManualLaborDiff()"></div><div class="form-group"><label class="form-label">人数</label><input class="form-input" type="number" id="m-labor-count-0" value="0" min="0" oninput="checkManualLaborDiff()"></div><button class="btn btn-danger btn-sm" onclick="removeManualLaborRow(0)" style="margin-top:24px;">✕</button></div>`;
         window._mlr = 1;
         clearFieldDiffWarnings();
       }
@@ -3542,31 +4603,272 @@ function handleSharedTextPaste(e) {
 }
 
 function handleUnifiedPhotoUpload(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-  if (!file.type.startsWith('image/')) { showToast('请选择图片文件', 'error'); return; }
-
+  const files = Array.from(event.target.files || []);
+  if (files.length === 0) return;
   // 清空 input 值，允许重复选择同一文件
   if (event.target.tagName === 'INPUT') event.target.value = '';
 
+  const valid = files.filter(f => f.type.startsWith('image/'));
+  if (valid.length === 0) { showToast('请选择图片文件', 'error'); return; }
+  if (valid.length > 1) {
+    startPhotoWizard(valid);
+    return;
+  }
+  handleUnifiedSinglePhotoUpload(valid[0]);
+}
+
+function handleUnifiedSinglePhotoUpload(file) {
   const reader = new FileReader();
   reader.onload = function(e) {
     const previewUrl = e.target.result;
     // 设置 VLM 和普通预览的图片
     document.getElementById('vlm-photo').src = previewUrl;
-    document.getElementById('uPhotoPreviewImg').src = previewUrl;
+    const previewImg = document.getElementById('uPhotoPreviewImg');
+    previewImg.src = previewUrl;
+    previewImg.style.cursor = 'zoom-in';
+    previewImg.setAttribute('onclick', `openPhotoLightboxSrc('${previewUrl}', '拍照预览')`);
     window._uPhotoBase64 = previewUrl;
 
     document.getElementById('uPhotoUploadZone').style.display = 'none';
     document.getElementById('uPhotoPreviewArea').style.display = 'block';
+    document.getElementById('uPhotoWizardPanel').style.display = 'none';
 
-    // 显示 VLM 动画
+    // 立即显示 VLM 可视化（照片在左，动画在右；照片 = vlm-photo，立刻可见）
+    const vlmVis = document.getElementById('vlm-visualization');
+    if (vlmVis) vlmVis.style.display = 'block';
+    const simple = document.getElementById('simple-preview');
+    if (simple) simple.style.display = 'none';
+    // 启动注意力热力图 + Transformer 动画
     showVLMVisualization();
+    const hint = document.getElementById('uPhotoParseHint');
+    if (hint) hint.textContent = '⏳ AI 正在识别...';
 
     // 上传并解析
     uploadUnifiedPhoto(file);
   };
   reader.readAsDataURL(file);
+}
+
+// ============================================================
+// 多张照片上传向导：每张照片 = 1 条独立事件
+// ============================================================
+function _readFileAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+
+async function startPhotoWizard(files) {
+  const validFiles = files.filter(f => f.type.startsWith('image/'));
+  if (validFiles.length === 0) { showToast('请选择图片文件', 'error'); return; }
+
+  _photoWizard = { queue: [], index: 0, savedCount: 0 };
+
+  // 立即显示预览区 + 向导面板（给用户即时反馈，再读文件）
+  document.getElementById('uPhotoUploadZone').style.display = 'none';
+  document.getElementById('uPhotoPreviewArea').style.display = 'block';
+  document.getElementById('uPhotoWizardPanel').style.display = 'block';
+  const viz = document.getElementById('vlm-visualization');
+  if (viz) viz.style.display = 'none';
+  const simple = document.getElementById('simple-preview');
+  if (simple) simple.style.display = 'block';
+  const mainImg = document.getElementById('uPhotoPreviewImg');
+  mainImg.removeAttribute('src');
+  mainImg.style.display = 'none';
+  const hint = document.getElementById('uPhotoParseHint');
+  if (hint) hint.textContent = `⏳ 正在加载 0/${validFiles.length} 张照片...`;
+  document.getElementById('uPhotoWizardCounter').textContent =
+    `📷 第 0 / ${validFiles.length} 张（加载中）`;
+
+  // 并行读取所有文件（总时间 = max 而非 sum）
+  const readPromises = validFiles.map((file) => _readFileAsDataURL(file).then(data => ({ data, file })).catch(() => null));
+  // 每读完一张就即时更新缩略图条与主图
+  let loaded = 0;
+  const onOneLoaded = (result) => {
+    if (!result) return;
+    _photoWizard.queue.push(result);
+    loaded++;
+    // 主图：第 1 张时立即显示
+    if (loaded === 1) {
+      mainImg.src = result.data;
+      mainImg.style.display = 'block';
+      mainImg.style.cursor = 'zoom-in';
+      mainImg.onclick = () => openPhotoLightboxSrc(result.data, '拍照预览');
+    }
+    // 缩略图条
+    _renderWizardStrip();
+    document.getElementById('uPhotoWizardCounter').textContent =
+      `📷 加载中 ${loaded}/${validFiles.length} 张`;
+    if (hint) hint.textContent = loaded < validFiles.length
+      ? `⏳ 正在加载 ${loaded}/${validFiles.length} 张照片...`
+      : '✅ 加载完成';
+  };
+  // 用 Promise.all 跟踪完成
+  const allResults = await Promise.all(readPromises);
+  for (const r of allResults) onOneLoaded(r);
+
+  if (_photoWizard.queue.length === 0) { showToast('没有有效的图片', 'warning'); return; }
+
+  // 全部加载完，进入正常向导流程
+  renderPhotoWizardStep();
+}
+
+function _renderWizardStrip() {
+  if (!_photoWizard) return;
+  const strip = document.getElementById('uPhotoWizardStrip');
+  if (!strip) return;
+  strip.innerHTML = _photoWizard.queue.map((q, i) => {
+    let borderColor = '#e2e8f0';
+    let badge = '';
+    if (i < _photoWizard.index) { borderColor = '#16a34a'; badge = '<span style="position:absolute;top:-4px;right:-4px;background:#16a34a;color:#fff;border-radius:50%;width:14px;height:14px;font-size:9px;display:flex;align-items:center;justify-content:center;">✓</span>'; }
+    else if (i === _photoWizard.index) { borderColor = '#00adef'; badge = '<span style="position:absolute;top:-4px;right:-4px;background:#00adef;color:#fff;border-radius:50%;width:14px;height:14px;font-size:9px;display:flex;align-items:center;justify-content:center;">●</span>'; }
+    return `<div style="position:relative;width:48px;height:48px;border-radius:6px;overflow:hidden;border:2px solid ${borderColor};flex-shrink:0;cursor:${i < _photoWizard.index ? 'zoom-in' : 'default'};" onclick="${i < _photoWizard.index ? `openPhotoLightboxSrc('${q.data}', '已保存照片')` : ''}">
+      <img src="${q.data}" style="width:100%;height:100%;object-fit:cover;display:block;" />
+      ${badge}
+    </div>`;
+  }).join('');
+}
+
+function _clearWizardFormFields() {
+  // 清空字段（保留 m-date / m-time 沿用初始设定）
+  if (document.getElementById('m-task')) document.getElementById('m-task').value = '';
+  if (document.getElementById('m-owner')) document.getElementById('m-owner').value = '';
+  if (document.getElementById('m-progress')) document.getElementById('m-progress').value = '';
+  if (document.getElementById('m-headcount')) document.getElementById('m-headcount').value = '';
+  if (document.getElementById('m-area')) document.getElementById('m-area').value = '';
+  if (document.getElementById('m-building-no')) document.getElementById('m-building-no').value = '';
+  if (document.getElementById('m-floor-no')) document.getElementById('m-floor-no').value = '';
+  if (document.getElementById('m-plan')) document.getElementById('m-plan').value = '';
+  if (document.getElementById('m-note')) document.getElementById('m-note').value = '';
+  if (document.getElementById('uPhotoParseHint')) document.getElementById('uPhotoParseHint').textContent = '';
+}
+
+function renderPhotoWizardStep() {
+  if (!_photoWizard) return;
+  const cur = _photoWizard.queue[_photoWizard.index];
+  const isLast = _photoWizard.index === _photoWizard.queue.length - 1;
+
+  // 更新主图
+  const previewImg = document.getElementById('uPhotoPreviewImg');
+  previewImg.src = cur.data;
+  previewImg.style.cursor = 'zoom-in';
+  previewImg.onclick = () => openPhotoLightboxSrc(cur.data, `第 ${_photoWizard.index + 1} 张预览`);
+  window._uPhotoBase64 = cur.data;
+  if (document.getElementById('vlm-photo')) document.getElementById('vlm-photo').src = cur.data;
+  // 重置照片描述 + 报表显示开关（待 LLM 解析后回填）
+  if (document.getElementById('uPhotoCaption')) document.getElementById('uPhotoCaption').value = '';
+  if (document.getElementById('uPhotoShowInReport')) document.getElementById('uPhotoShowInReport').checked = true;
+
+  // 计数器
+  document.getElementById('uPhotoWizardCounter').textContent =
+    `📷 第 ${_photoWizard.index + 1} / ${_photoWizard.queue.length} 张`;
+  document.getElementById('uPhotoWizardSavedBadge').textContent =
+    _photoWizard.savedCount > 0 ? `已保存 ${_photoWizard.savedCount} 条` : '';
+
+  // 缩略图条（复用 _renderWizardStrip）
+  _renderWizardStrip();
+
+  // 按钮文案
+  const saveBtn = document.getElementById('uPhotoWizardSaveBtn');
+  saveBtn.textContent = isLast ? '✅ 完成' : '📥 保存并继续下一张 →';
+
+  // 清空字段（不继承上次的值）
+  _clearWizardFormFields();
+
+  // 触发 LLM 解析当前图（不再显示 VLM 动画，让大照片立即可见）
+  uploadUnifiedPhoto(cur.file);
+}
+
+async function savePhotoWizardAndNext() {
+  if (!_photoWizard) return;
+  const cur = _photoWizard.queue[_photoWizard.index];
+
+  // 查重
+  const dup = findDuplicatePhoto(cur.data);
+  if (dup) {
+    const dupType = M.TYPE_META[dup.type];
+    const msg =
+      `⚠️ 这张照片与已存在的事件重复：\n\n` +
+      `📅 ${dup.date} ${dup.time}\n` +
+      `📋 ${dupType?.icon || ''} ${dupType?.label || dup.type}\n` +
+      `🏷 ${dup.taskName}\n` +
+      `👷 ${dup.owner}\n` +
+      `📊 状态：${dup.status === 'confirmed' ? '已确认' : '草稿'}\n\n` +
+      `是否仍要保存为新事件？`;
+    const ok = await showConfirm(msg, '⚠️ 重复照片', '⚠️');
+    if (!ok) return; // 用户取消 → 留在当前照片
+  }
+
+  // 更新时间字段为当前保存时间
+  const now = new Date();
+  const nowStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+  document.getElementById('m-time').value = nowStr;
+  window._uPhotoBase64 = cur.data;
+  _unifiedMode = 'photo';
+
+  // 保存事件（不关弹窗，让 wizard 继续）
+  const lenBefore = M.EVENTS.length;
+  saveUnifiedEvent({ skipCloseModal: true });
+  if (M.EVENTS.length === lenBefore) return; // 保存失败（缺字段等），留在当前照片
+
+  _photoWizard.savedCount++;
+
+  // 推进
+  if (_photoWizard.index < _photoWizard.queue.length - 1) {
+    _photoWizard.index++;
+    renderPhotoWizardStep();
+  } else {
+    finishPhotoWizard();
+  }
+}
+
+function skipPhotoWizard() {
+  if (!_photoWizard) return;
+  showToast('已跳过当前照片', 'info');
+  if (_photoWizard.index < _photoWizard.queue.length - 1) {
+    _photoWizard.index++;
+    renderPhotoWizardStep();
+  } else {
+    finishPhotoWizard();
+  }
+}
+
+function cancelPhotoWizard() {
+  if (!_photoWizard) return;
+  const saved = _photoWizard.savedCount;
+  _photoWizard = null;
+  _closeWizardAndReset();
+  showToast(`已取消，已保存 ${saved} 条事件`, 'info');
+}
+
+function finishPhotoWizard() {
+  if (!_photoWizard) return;
+  const saved = _photoWizard.savedCount;
+  const total = _photoWizard.queue.length;
+  _photoWizard = null;
+  _closeWizardAndReset();
+  showToast(`批量上传完成：保存 ${saved}/${total} 条事件`, 'success');
+}
+
+function _closeWizardAndReset() {
+  closeModal('modalManual');
+  // 重置照片区
+  document.getElementById('uPhotoUploadZone').style.display = 'block';
+  document.getElementById('uPhotoPreviewArea').style.display = 'none';
+  document.getElementById('uPhotoWizardPanel').style.display = 'none';
+  document.getElementById('uPhotoPreviewImg').src = '';
+  document.getElementById('vlm-photo').src = '';
+  document.getElementById('uPhotoParseHint').textContent = '';
+  window._uPhotoBase64 = null;
+  if (document.getElementById('uPhotoCaption')) document.getElementById('uPhotoCaption').value = '';
+  if (document.getElementById('uPhotoShowInReport')) document.getElementById('uPhotoShowInReport').checked = true;
+  // 刷新时间线
+  renderFilteredEvents();
+  renderStats();
+  if (typeof updateCalendar === 'function') updateCalendar();
 }
 
 async function uploadUnifiedPhoto(file) {
@@ -3614,6 +4916,11 @@ async function uploadUnifiedPhoto(file) {
 
   // 识别完成，隐藏 VLM 动画
   hideVLMVisualization();
+
+  // 识别完成后，自动检查缺失字段 → 弹出优化补全窗口
+  setTimeout(() => {
+    try { showOptimizationPopup(); } catch (e) { console.warn('[auto-opt-popup]', e); }
+  }, 400);
 }
 
 function clearUnifiedPhoto() {
@@ -3623,10 +4930,13 @@ function clearUnifiedPhoto() {
   document.getElementById('uPhotoPreviewImg').src = '';
   document.getElementById('vlm-photo').src = '';
   window._uPhotoBase64 = null;
+  // 重置照片描述 + 报表显示开关
+  if (document.getElementById('uPhotoCaption')) document.getElementById('uPhotoCaption').value = '';
+  if (document.getElementById('uPhotoShowInReport')) document.getElementById('uPhotoShowInReport').checked = true;
 }
 
 // 统一保存
-function saveUnifiedEvent() {
+function saveUnifiedEvent(opts = {}) {
   const type = document.getElementById('m-type').value;
   const time = document.getElementById('m-time').value;
   const areaId = document.getElementById('m-area').value;
@@ -3638,7 +4948,7 @@ function saveUnifiedEvent() {
   const floorNo = document.getElementById('m-floor-no').value;
   const mainOwner = document.getElementById('m-owner') ? document.getElementById('m-owner').value : '';
 
-  if (!areaId) { showToast('请选择区域', 'error'); return; }
+  if (!areaId && type !== 'drawing') { showToast('请选择区域', 'error'); return; }
   if (!eventDate) { showToast('请选择日期', 'error'); return; }
 
   let payload = {};
@@ -3713,6 +5023,14 @@ function saveUnifiedEvent() {
         status: document.getElementById('m-att-status') ? document.getElementById('m-att-status').value : '正常'
       };
       break;
+    case 'drawing':
+      payload = {
+        taskName: document.getElementById('m-task') ? document.getElementById('m-task').value : '',
+        owner: mainOwner,
+        progress: document.getElementById('m-progress') ? document.getElementById('m-progress').value : '',
+        description: document.getElementById('m-caption') ? document.getElementById('m-caption').value : ''
+      };
+      break;
   }
 
   const event = {
@@ -3737,7 +5055,18 @@ function saveUnifiedEvent() {
 
   // 添加照片数据（仅拍照模式）
   if (_unifiedMode === 'photo' && window._uPhotoBase64) {
-    event.photos = [{ id: `P${String(Date.now()).slice(-3)}`, caption: payload.description || '现场照片', area: areaId, data: window._uPhotoBase64 }];
+    const photoCaption = document.getElementById('uPhotoCaption')?.value?.trim()
+      || payload.description || '现场照片';
+    const showInReport = document.getElementById('uPhotoShowInReport')
+      ? document.getElementById('uPhotoShowInReport').checked !== false
+      : true;
+    event.photos = [{ 
+      id: `P${String(Date.now()).slice(-3)}`, 
+      caption: photoCaption, 
+      area: areaId, 
+      data: window._uPhotoBase64,
+      showInReport
+    }];
   }
 
   // 添加原始文本（语音/拍照模式）
@@ -3746,6 +5075,25 @@ function saveUnifiedEvent() {
   }
 
   M.EVENTS.unshift(event);
+
+  // 图纸深化事件：同步写入 DRAWING_DEEPENINGS（双写以兼容既有 8 条 seed 数据的展示逻辑）
+  if (type === 'drawing') {
+    if (typeof M.DRAWING_DEEPENINGS === 'undefined') M.DRAWING_DEEPENINGS = [];
+    const exists = M.DRAWING_DEEPENINGS.find(d => d.eventId === event.id);
+    const record = {
+      id: exists ? exists.id : ('DD-E' + event.id),
+      projectId: currentProjectId,
+      task: payload.taskName || '',
+      owner: payload.owner || '',
+      progress: payload.progress || '',
+      areaId: areaId || null,
+      planId: planId || null,
+      eventId: event.id,
+      createdDate: eventDate
+    };
+    if (exists) Object.assign(exists, record);
+    else M.DRAWING_DEEPENINGS.push(record);
+  }
 
   // 同步关联计划
   if (planId) {
@@ -3756,10 +5104,10 @@ function saveUnifiedEvent() {
       if (payload.progress) plan.progress = payload.progress;
     }
   }
-  M.savePlansToStorage();
+  if (M.savePlansToStorage) M.savePlansToStorage();
   if (M.saveEventsToStorage) M.saveEventsToStorage();
 
-  closeModal('modalManual');
+  if (!opts.skipCloseModal) closeModal('modalManual');
   renderDailyPlanCard();
   renderFilteredEvents();
   renderStats();
@@ -3776,9 +5124,10 @@ function openManualInput(planId) {
 
 // 渲染计划选择列表
 function renderPlanSelect(dateStr) {
+  const typeEl = document.getElementById('m-type');
+  const eventType = typeEl ? typeEl.value : 'progress';
   const projectPlans = M.PLANS[currentProjectId] || [];
   
-  // 筛选出当天有效的计划
   const dayPlans = projectPlans.filter(p => {
     if (p.status === 'cancelled') return false;
     if (p.startDate && p.endDate) return p.startDate <= dateStr && p.endDate >= dateStr;
@@ -3786,8 +5135,13 @@ function renderPlanSelect(dateStr) {
     return false;
   });
   
+  const filteredPlans = dayPlans.filter(p => {
+    const planType = p.type || 'progress';
+    return planType === eventType;
+  });
+  
   let html = '<option value="">无（计划外工作）</option>';
-  dayPlans.forEach(plan => {
+  filteredPlans.forEach(plan => {
     html += `<option value="${plan.id}">📋 ${plan.taskName || plan.process}${plan.buildingNo ? ' · ' + plan.buildingNo : ''}${plan.floorNo ? ' · ' + plan.floorNo : ''}</option>`;
   });
   
@@ -3865,14 +5219,47 @@ function renderManualLaborRows(laborList, plan) {
     container.innerHTML = `<div class="form-row labor-row">
       <div class="form-group"><label class="form-label">工种</label><input class="form-input" type="text" id="m-labor-type-0" placeholder="如：木工" oninput="checkManualLaborDiff()"></div>
       <div class="form-group"><label class="form-label">人数</label><input class="form-input" type="number" id="m-labor-count-0" value="0" min="0" oninput="checkManualLaborDiff()"></div>
+      <button class="btn btn-danger btn-sm" onclick="removeManualLaborRow(0)" style="margin-top:24px;">✕</button>
     </div>`;
+    window._mlr = 1;
     return;
   }
   container.innerHTML = laborList.map((l, i) => `<div class="form-row labor-row">
     <div class="form-group"><label class="form-label">工种</label><input class="form-input" type="text" id="m-labor-type-${i}" value="${(l.trade||l.laborType||'')}" placeholder="如：木工" oninput="checkManualLaborDiff()"></div>
     <div class="form-group"><label class="form-label">人数</label><input class="form-input" type="number" id="m-labor-count-${i}" value="${l.count || 0}" min="0" oninput="checkManualLaborDiff()"></div>
+    <button class="btn btn-danger btn-sm" onclick="removeManualLaborRow(${i})" style="margin-top:24px;">✕</button>
   </div>`).join('');
   window._mlr = laborList.length;
+  checkManualLaborDiff();
+}
+
+// 删除某行劳动力，删除后重新编号所有后续行的 id，并同步 _mlr 计数
+function removeManualLaborRow(index) {
+  const container = document.getElementById('m-labor-rows');
+  if (!container) return;
+  const rows = container.querySelectorAll('.labor-row');
+  if (rows.length <= 1) {
+    // 至少保留一行：清空内容而不是删除
+    const typeEl = document.getElementById('m-labor-type-0');
+    const countEl = document.getElementById('m-labor-count-0');
+    if (typeEl) typeEl.value = '';
+    if (countEl) countEl.value = 0;
+    showToast('至少保留一行，已清空该行内容', 'info');
+    checkManualLaborDiff();
+    return;
+  }
+  rows[index].remove();
+  // 重新给剩余行编号 id（m-labor-type-X, m-labor-count-X）
+  const remaining = container.querySelectorAll('.labor-row');
+  remaining.forEach((row, i) => {
+    const t = row.querySelector('input[id^="m-labor-type-"]');
+    const c = row.querySelector('input[id^="m-labor-count-"]');
+    const btn = row.querySelector('button[onclick*="removeManualLaborRow"]');
+    if (t) t.id = 'm-labor-type-' + i;
+    if (c) c.id = 'm-labor-count-' + i;
+    if (btn) btn.setAttribute('onclick', `removeManualLaborRow(${i})`);
+  });
+  window._mlr = remaining.length;
   checkManualLaborDiff();
 }
 
@@ -3883,7 +5270,7 @@ function addManualLaborRow() {
   container.insertAdjacentHTML('beforeend', `<div class="form-row labor-row">
     <div class="form-group"><label class="form-label">工种</label><input class="form-input" type="text" id="m-labor-type-${idx}" placeholder="如：木工" oninput="checkManualLaborDiff()"></div>
     <div class="form-group"><label class="form-label">人数</label><input class="form-input" type="number" id="m-labor-count-${idx}" value="0" min="0" oninput="checkManualLaborDiff()"></div>
-    <button class="btn btn-danger btn-sm" onclick="this.closest('.labor-row').remove();checkManualLaborDiff()" style="margin-top:24px;">✕</button>
+    <button class="btn btn-danger btn-sm" onclick="removeManualLaborRow(${idx})" style="margin-top:24px;">✕</button>
   </div>`);
   window._mlr = idx + 1;
   checkManualLaborDiff();
@@ -3982,6 +5369,7 @@ function renderManualForm() {
           <div class="form-row labor-row">
             <div class="form-group"><label class="form-label">工种</label><input class="form-input" type="text" id="m-labor-type-0" placeholder="如：木工" oninput="checkManualLaborDiff()"></div>
             <div class="form-group"><label class="form-label">人数</label><input class="form-input" type="number" id="m-labor-count-0" value="0" min="0" oninput="checkManualLaborDiff()"></div>
+            <button class="btn btn-danger btn-sm" onclick="removeManualLaborRow(0)" style="margin-top:24px;">✕</button>
           </div>
         </div>
         <button class="btn btn-ghost btn-sm" onclick="addManualLaborRow()" style="margin:4px 0 8px;font-size:11px;padding:2px 10px;">+ 添加工种</button>
@@ -4096,9 +5484,32 @@ function renderManualForm() {
         </div>
       `;
       break;
+    case 'drawing':
+      html = `
+        <div class="form-group">
+          <label class="form-label">计划事项 <span class="req">*</span></label>
+          <textarea class="form-textarea" id="m-task" rows="2" placeholder="如：1-2号咖啡厅样板段策划整理"></textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">负责人</label>
+            <input class="form-input" type="text" id="m-owner" placeholder="如：李欢">
+          </div>
+          <div class="form-group">
+            <label class="form-label">当前进度</label>
+            <input class="form-input" type="text" id="m-progress" placeholder="如：50%">
+          </div>
+        </div>
+      `;
+      break;
   }
   
   document.getElementById('manualDynamicForm').innerHTML = html;
+  // 先保存 m-plan 选中值（filterManualFormByType 会清空被隐藏的 select）
+  const _savedPlanId = document.getElementById('m-plan')?.value;
+  filterManualFormByType();
+  renderPlanSelect(M.TODAY);
+  if (_savedPlanId) document.getElementById('m-plan').value = _savedPlanId;
 }
 
 function saveManualEvent() {
@@ -4106,50 +5517,531 @@ function saveManualEvent() {
 }
 
 // ============================================================
-// 事项台账表单
+// 协调事宜表单
 // ============================================================
-function openIssueForm() {
+let _editingIssueId = null;
+
+function openIssueForm(issueId) {
+  _editingIssueId = issueId || null;
   document.getElementById('i-title').value = '';
-  document.getElementById('i-owner').value = '';
-  document.getElementById('i-deadline').value = '';
-  document.getElementById('i-description').value = '';
+  document.getElementById('i-propose').value = '';
+  document.getElementById('i-cooperate').value = '';
+  document.querySelector('#modalIssue .modal-title').textContent = _editingIssueId ? '🤝 编辑协调' : '🤝 新建协调';
+  document.querySelector('#modalIssue .modal-footer .btn-primary').textContent = '保存';
+  if (_editingIssueId) {
+    const issue = M.ISSUES.find(i => i.id === _editingIssueId);
+    if (issue) {
+      document.getElementById('i-title').value = issue.title || '';
+      document.getElementById('i-propose').value = issue.proposeDept || '';
+      document.getElementById('i-cooperate').value = issue.cooperateDept || '';
+    }
+  }
   showModal('modalIssue');
 }
 
-function saveIssue() {
-  const issue = {
-    id: `I${String(Date.now()).slice(-3)}`,
-    projectId: currentProjectId,
-    type: document.getElementById('i-type').value,
-    priority: document.getElementById('i-priority').value,
-    title: document.getElementById('i-title').value,
-    areaId: document.getElementById('i-area').value,
-    owner: document.getElementById('i-owner').value,
-    deadline: document.getElementById('i-deadline').value,
-    description: document.getElementById('i-description').value,
-    status: 'open',
-    createdDate: M.TODAY,
-    resolution: '',
-    photos: []
-  };
-  
-  if (!issue.title || !issue.areaId || !issue.owner || !issue.deadline || !issue.description) {
+async function saveIssue() {
+  const title = document.getElementById('i-title').value.trim();
+  const proposeDept = document.getElementById('i-propose').value.trim();
+  const cooperateDept = document.getElementById('i-cooperate').value.trim();
+
+  if (!title || !proposeDept || !cooperateDept) {
     showToast('请填写必填字段', 'error');
     return;
   }
-  
-  M.ISSUES.unshift(issue);
-  
+
+  const isEdit = !!_editingIssueId;
+  if (isEdit) {
+    const issue = M.ISSUES.find(i => i.id === _editingIssueId);
+    if (issue) {
+      issue.title = title;
+      issue.proposeDept = proposeDept;
+      issue.cooperateDept = cooperateDept;
+      issue.updatedAt = new Date().toISOString();
+    }
+  } else {
+    const issue = {
+      id: `I${String(Date.now()).slice(-3)}`,
+      projectId: currentProjectId,
+      type: 'coordination',
+      title,
+      proposeDept,
+      cooperateDept,
+      status: 'open',
+      createdDate: M.TODAY
+    };
+    M.ISSUES.unshift(issue);
+  }
+
+  _editingIssueId = null;
   closeModal('modalIssue');
   renderIssues();
-  showToast('事项已创建', 'success');
+  showToast(isEdit ? '已更新' : '协调已创建', 'success');
+
+  // 同步到 PostgreSQL（dr_issues 表）
+  if (M.saveIssuesToStorage) {
+    try { await M.saveIssuesToStorage(); } catch(e) { console.warn('[协调] 同步后端失败:', e.message); }
+  }
 }
 
 function openIssueDetail(issueId) {
-  const issue = M.ISSUES.find(i => i.id === issueId);
-  if (!issue) return;
-  
-  showToast(`查看事项: ${issue.title}`, 'info');
+  openIssueForm(issueId);
+}
+
+// ============================================================
+// ECC 销项管理
+// ============================================================
+function openEccEditor() {
+  document.getElementById('eccFilterStatus').value = 'all';
+  switchEccTab('summary');
+  renderEccList();
+  const mode = localStorage.getItem(`ecc_summary_mode_${currentProjectId}`) || 'auto';
+  setEccSummaryMode(mode, false);
+  showModal('modalEcc');
+}
+
+function switchEccTab(tab) {
+  const entryTab = document.getElementById('eccTabEntry');
+  const sumTab = document.getElementById('eccTabSummary');
+  const entryPanel = document.getElementById('eccEntryPanel');
+  const sumPanel = document.getElementById('eccSummaryPanel');
+  if (tab === 'summary') {
+    entryTab.classList.remove('active');
+    sumTab.classList.add('active');
+    entryPanel.style.display = 'none';
+    sumPanel.style.display = 'flex';
+    renderEccSummary();
+  } else {
+    sumTab.classList.remove('active');
+    entryTab.classList.add('active');
+    sumPanel.style.display = 'none';
+    entryPanel.style.display = 'flex';
+    renderEccList();
+  }
+}
+
+function setEccSummaryMode(mode, rerender = true) {
+  localStorage.setItem(`ecc_summary_mode_${currentProjectId}`, mode);
+  const radio = document.querySelector(`input[name="eccSummaryMode"][value="${mode}"]`);
+  if (radio) radio.checked = true;
+  const hint = document.getElementById('eccSummaryModeHint');
+  if (hint) {
+    hint.textContent = mode === 'auto'
+      ? '📊 自动从录入的 ECC 列表实时汇总'
+      : '✏️ 手动输入汇总值，与录入数据无关';
+  }
+  if (rerender) renderEccSummary();
+}
+
+function renderEccSummary() {
+  const mode = localStorage.getItem(`ecc_summary_mode_${currentProjectId}`) || 'auto';
+  const box = document.getElementById('eccSummaryContent');
+  if (!box) return;
+  const auto = _calcEccAutoSummary();
+  if (mode === 'auto') {
+    box.innerHTML = _renderEccAutoSummary(auto);
+  } else {
+    const manual = _loadEccManualSummary();
+    box.innerHTML = _renderEccManualSummary(manual, auto);
+  }
+}
+
+function _calcEccAutoSummary() {
+  const items = (M.ECC_ITEMS || []).filter(e => e.projectId === currentProjectId && e.id !== 'ECC099');
+  const total = items.length;
+  const closed = items.filter(e => e.status === 'closed').length;
+  const closing = items.filter(e => e.status === 'closing').length;
+  const open = items.filter(e => e.status === 'open').length;
+  const rate = total > 0 ? ((closed / total) * 100).toFixed(2) + '%' : '—';
+  return { total, closed, closing, open, rate };
+}
+
+function _loadEccManualSummary() {
+  if (!M.ECC_SUMMARIES) M.ECC_SUMMARIES = {};
+  const cur = M.ECC_SUMMARIES[currentProjectId] || { total: 0, closed: 0, closing: 0, open: 0, rate: '—', photos: [] };
+  if (!cur.photos) cur.photos = [];
+  return cur;
+}
+
+function _renderEccPhotoGrid(photos) {
+  const list = photos || [];
+  const imgs = list.map((p, i) => `
+    <div style="position:relative;aspect-ratio:1;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;overflow:hidden;">
+      <img src="${p}" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in;" onclick="enlargeEccSummaryPhoto(${i})">
+      <button onclick="removeEccSummaryPhoto(${i})" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:11px;line-height:1;">✕</button>
+    </div>
+  `).join('');
+  return `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:10px 14px;">${
+    list.length === 0
+      ? '<div style="grid-column:1/-1;text-align:center;color:#94a3b8;font-size:12px;padding:12px;">暂无汇总照片，点击右上方"📷 上传"添加</div>'
+      : imgs
+  }</div>`;
+}
+
+function _renderEccPhotoToolbar() {
+  return `<div style="padding:8px 14px;background:#f8fafc;border-top:1px solid #e2e8f0;display:flex;align-items:center;gap:8px;">
+    <input type="file" id="ecc-summary-photo-input" accept="image/*" multiple style="display:none" onchange="handleEccSummaryPhotoUpload(event)">
+    <button type="button" class="btn btn-sm btn-secondary" onclick="document.getElementById('ecc-summary-photo-input').click()">📷 上传图片</button>
+    <span style="font-size:11px;color:#94a3b8;">汇总照片，与数据源无关</span>
+    <span id="eccSummaryPhotoCount" style="margin-left:auto;font-size:11px;color:#94a3b8;"></span>
+  </div>`;
+}
+
+function _renderEccAutoSummary(s) {
+  const photos = _loadEccManualSummary().photos || [];
+  return `
+    <div style="background:#fff;border:1px solid #cbd5e1;border-radius:6px;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.05);">
+      <div style="padding:10px 14px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;font-size:13px;font-weight:600;color:#475569;">📊 自动汇总（实时来自录入数据）</div>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;">
+        <thead>
+          <tr style="background:#fff;">
+            <th style="padding:10px;border-right:1px solid #cbd5e1;border-bottom:2px solid #cbd5e1;width:80px;">序号</th>
+            <th style="padding:10px;border-right:1px solid #cbd5e1;border-bottom:2px solid #cbd5e1;">问题总数</th>
+            <th style="padding:10px;border-right:1px solid #cbd5e1;border-bottom:2px solid #cbd5e1;">已关闭</th>
+            <th style="padding:10px;border-right:1px solid #cbd5e1;border-bottom:2px solid #cbd5e1;">流程关闭中</th>
+            <th style="padding:10px;border-right:1px solid #cbd5e1;border-bottom:2px solid #cbd5e1;">未关闭</th>
+            <th style="padding:10px;border-bottom:2px solid #cbd5e1;">关闭率</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="padding:10px;border-right:1px solid #cbd5e1;border-bottom:1px solid #cbd5e1;text-align:center;">1</td>
+            <td style="padding:10px;border-right:1px solid #cbd5e1;border-bottom:1px solid #cbd5e1;text-align:center;font-weight:700;font-size:18px;color:#0ea5e9;">${s.total}</td>
+            <td style="padding:10px;border-right:1px solid #cbd5e1;border-bottom:1px solid #cbd5e1;text-align:center;font-weight:700;font-size:18px;color:#059669;">${s.closed}</td>
+            <td style="padding:10px;border-right:1px solid #cbd5e1;border-bottom:1px solid #cbd5e1;text-align:center;font-weight:700;font-size:18px;color:#f59e0b;">${s.closing}</td>
+            <td style="padding:10px;border-right:1px solid #cbd5e1;border-bottom:1px solid #cbd5e1;text-align:center;font-weight:700;font-size:18px;color:#ef4444;">${s.open}</td>
+            <td style="padding:10px;border-bottom:1px solid #cbd5e1;text-align:center;font-weight:700;font-size:18px;color:#059669;">${s.rate}</td>
+          </tr>
+        </tbody>
+      </table>
+      ${_renderEccPhotoGrid(photos)}
+      ${_renderEccPhotoToolbar()}
+    </div>
+    <div style="margin-top:8px;padding:8px 12px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:4px;font-size:12px;color:#78350f;">
+      💡 提示：录入 TAB 修改 ECC 后，汇总数字会立即更新。汇总照片可随时上传，保存后周报 07 即可展示。
+    </div>`;
+}
+
+function _renderEccManualSummary(m, auto) {
+  return `
+    <div style="background:#fff;border:1px solid #cbd5e1;border-radius:6px;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.05);">
+      <div style="padding:10px 14px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;font-size:13px;font-weight:600;color:#475569;display:flex;align-items:center;gap:8px;">
+        ✏️ 手动汇总
+        <span style="font-size:11px;color:#94a3b8;font-weight:400;">（自动值参考：总数 ${auto.total} / 已关闭 ${auto.closed}）</span>
+        <button class="btn btn-xs btn-secondary" onclick="fillEccManualFromAuto()" style="margin-left:auto;">📥 填入自动值</button>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;">
+        <thead>
+          <tr style="background:#fff;">
+            <th style="padding:10px;border-right:1px solid #cbd5e1;border-bottom:2px solid #cbd5e1;width:80px;">序号</th>
+            <th style="padding:10px;border-right:1px solid #cbd5e1;border-bottom:2px solid #cbd5e1;">问题总数</th>
+            <th style="padding:10px;border-right:1px solid #cbd5e1;border-bottom:2px solid #cbd5e1;">已关闭</th>
+            <th style="padding:10px;border-right:1px solid #cbd5e1;border-bottom:2px solid #cbd5e1;">流程关闭中</th>
+            <th style="padding:10px;border-right:1px solid #cbd5e1;border-bottom:2px solid #cbd5e1;">未关闭</th>
+            <th style="padding:10px;border-bottom:2px solid #cbd5e1;">关闭率</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="padding:10px;border-right:1px solid #cbd5e1;border-bottom:1px solid #cbd5e1;text-align:center;">1</td>
+            <td style="padding:6px;border-right:1px solid #cbd5e1;border-bottom:1px solid #cbd5e1;"><input class="form-input ecc-sum-input" type="number" id="eccSumTotal" value="${m.total || 0}" min="0" oninput="recalcEccSummaryRate()"></td>
+            <td style="padding:6px;border-right:1px solid #cbd5e1;border-bottom:1px solid #cbd5e1;"><input class="form-input ecc-sum-input" type="number" id="eccSumClosed" value="${m.closed || 0}" min="0" oninput="recalcEccSummaryRate()"></td>
+            <td style="padding:6px;border-right:1px solid #cbd5e1;border-bottom:1px solid #cbd5e1;"><input class="form-input ecc-sum-input" type="number" id="eccSumClosing" value="${m.closing || 0}" min="0" oninput="recalcEccSummaryRate()"></td>
+            <td style="padding:6px;border-right:1px solid #cbd5e1;border-bottom:1px solid #cbd5e1;"><input class="form-input ecc-sum-input" type="number" id="eccSumOpen" value="${m.open || 0}" min="0" oninput="recalcEccSummaryRate()"></td>
+            <td style="padding:10px;border-bottom:1px solid #cbd5e1;text-align:center;font-weight:700;font-size:18px;color:#059669;" id="eccSumRate">${m.rate || '—'}</td>
+          </tr>
+        </tbody>
+      </table>
+      ${_renderEccPhotoGrid(m.photos || [])}
+      ${_renderEccPhotoToolbar()}
+      <div style="padding:10px 14px;background:#f8fafc;border-top:1px solid #e2e8f0;display:flex;justify-content:flex-end;gap:8px;">
+        <button class="btn btn-sm btn-ghost" onclick="resetEccManualSummary()">重置</button>
+        <button class="btn btn-sm btn-primary" onclick="saveEccManualSummary()">💾 保存手动值</button>
+      </div>
+    </div>
+    <div style="margin-top:8px;padding:8px 12px;background:#dbeafe;border-left:3px solid #0ea5e9;border-radius:4px;font-size:12px;color:#0c4a6e;">
+      💡 手动保存后，周报 07 ECC 销项页将优先使用这里的值（数字 + 汇总照片），不受录入数据变化影响。
+    </div>`;
+}
+
+function handleEccSummaryPhotoUpload(ev) {
+  const files = Array.from(ev.target.files || []);
+  ev.target.value = '';
+  const MAX = 5 * 1024 * 1024;
+  const promises = files.map(f => new Promise((resolve, reject) => {
+    if (f.size > MAX) return reject(new Error(`${f.name} 超过 5MB`));
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('读取失败'));
+    reader.readAsDataURL(f);
+  }));
+  Promise.all(promises).then(datas => {
+    const cur = _loadEccManualSummary();
+    cur.photos = (cur.photos || []).concat(datas);
+    if (!M.ECC_SUMMARIES[currentProjectId]) M.ECC_SUMMARIES[currentProjectId] = cur;
+    M.ECC_SUMMARIES[currentProjectId].photos = cur.photos;
+    renderEccSummary();
+    showToast(`已添加 ${datas.length} 张照片`, 'success');
+  }).catch(err => showToast(err.message, 'error'));
+}
+
+function removeEccSummaryPhoto(idx) {
+  const cur = _loadEccManualSummary();
+  cur.photos.splice(idx, 1);
+  if (!M.ECC_SUMMARIES[currentProjectId]) M.ECC_SUMMARIES[currentProjectId] = cur;
+  M.ECC_SUMMARIES[currentProjectId].photos = cur.photos;
+  renderEccSummary();
+}
+
+function enlargeEccSummaryPhoto(idx) {
+  const photos = _loadEccManualSummary().photos || [];
+  const overlay = document.getElementById('photoEnlargeOverlay');
+  document.getElementById('photoEnlargeImg').src = photos[idx];
+  overlay.style.display = 'flex';
+}
+
+function fillEccManualFromAuto() {
+  const a = _calcEccAutoSummary();
+  document.getElementById('eccSumTotal').value = a.total;
+  document.getElementById('eccSumClosed').value = a.closed;
+  document.getElementById('eccSumClosing').value = a.closing;
+  document.getElementById('eccSumOpen').value = a.open;
+  recalcEccSummaryRate();
+  showToast('已填入自动值', 'success');
+}
+
+function recalcEccSummaryRate() {
+  const total = Number(document.getElementById('eccSumTotal').value) || 0;
+  const closed = Number(document.getElementById('eccSumClosed').value) || 0;
+  const rate = total > 0 ? ((closed / total) * 100).toFixed(2) + '%' : '—';
+  document.getElementById('eccSumRate').textContent = rate;
+}
+
+function resetEccManualSummary() {
+  if (!M.ECC_SUMMARIES) M.ECC_SUMMARIES = {};
+  delete M.ECC_SUMMARIES[currentProjectId];
+  renderEccSummary();
+  showToast('已重置', 'info');
+}
+
+async function saveEccManualSummary() {
+  if (!M.ECC_SUMMARIES) M.ECC_SUMMARIES = {};
+  const cur = M.ECC_SUMMARIES[currentProjectId] || { photos: [] };
+  const item = {
+    total: Number(document.getElementById('eccSumTotal').value) || 0,
+    closed: Number(document.getElementById('eccSumClosed').value) || 0,
+    closing: Number(document.getElementById('eccSumClosing').value) || 0,
+    open: Number(document.getElementById('eccSumOpen').value) || 0,
+    rate: document.getElementById('eccSumRate').textContent,
+    photos: cur.photos || []
+  };
+  M.ECC_SUMMARIES[currentProjectId] = item;
+  try {
+    await fetch('http://localhost:3010/api/ecc-summary', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: currentProjectId, ...item })
+    });
+    showToast('手动汇总已保存', 'success');
+  } catch (e) {
+    showToast('已保存到本地，后端同步失败：' + e.message, 'error');
+  }
+}
+
+function _eccFiltered() {
+  const filter = document.getElementById('eccFilterStatus')?.value || 'all';
+  const all = (M.ECC_ITEMS || []).filter(e => e.projectId === currentProjectId && e.id !== 'ECC099');
+  if (filter === 'all') return all;
+  return all.filter(e => e.status === filter);
+}
+
+function _eccStatusLabel(s) {
+  return { open: '未关闭', closing: '流程关闭中', closed: '已关闭' }[s] || s;
+}
+
+function _eccStatusColor(s) {
+  return { open: '#ef4444', closing: '#f59e0b', closed: '#059669' }[s] || '#64748b';
+}
+
+function _eccAreaName(areaId) {
+  const a = (M.AREAS[currentProjectId] || []).find(x => x.id === areaId);
+  return a ? a.name : (areaId || '—');
+}
+
+function renderEccList() {
+  const items = _eccFiltered();
+  const container = document.getElementById('eccListContainer');
+  if (items.length === 0) {
+    container.innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;font-size:13px;">暂无 ECC 销项数据，点击右上「+ 新增 ECC」开始录入</div>';
+    return;
+  }
+  container.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+      <thead>
+        <tr style="background:#f1f5f9;color:#475569;position:sticky;top:0;z-index:2;box-shadow:0 1px 0 #cbd5e1;">
+          <th style="padding:6px 8px;border:1px solid #e2e8f0;width:50px;text-align:center;">序</th>
+          <th style="padding:6px 8px;border:1px solid #e2e8f0;">问题描述</th>
+          <th style="padding:6px 8px;border:1px solid #e2e8f0;width:90px;">区域</th>
+          <th style="padding:6px 8px;border:1px solid #e2e8f0;width:90px;">发现日</th>
+          <th style="padding:6px 8px;border:1px solid #e2e8f0;width:90px;">关闭日</th>
+          <th style="padding:6px 8px;border:1px solid #e2e8f0;width:80px;">状态</th>
+          <th style="padding:6px 8px;border:1px solid #e2e8f0;width:70px;">照片</th>
+          <th style="padding:6px 8px;border:1px solid #e2e8f0;width:110px;text-align:center;">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${items.map((e, i) => {
+          const photoCount = (e.photos || []).length;
+          return `
+          <tr data-ecc-id="${e.id}">
+            <td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:center;">${i + 1}</td>
+            <td style="padding:6px 8px;border:1px solid #e2e8f0;">${escapeHtml(e.title || '')}</td>
+            <td style="padding:6px 8px;border:1px solid #e2e8f0;">${escapeHtml(_eccAreaName(e.areaId))}</td>
+            <td style="padding:6px 8px;border:1px solid #e2e8f0;">${e.discoveredDate || '—'}</td>
+            <td style="padding:6px 8px;border:1px solid #e2e8f0;">${e.closedDate || '—'}</td>
+            <td style="padding:6px 8px;border:1px solid #e2e8f0;color:${_eccStatusColor(e.status)};font-weight:600;">${_eccStatusLabel(e.status)}</td>
+            <td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:center;">${photoCount > 0 ? `📷 ${photoCount}` : '—'}</td>
+            <td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:center;">
+              <button class="btn btn-xs btn-ghost" onclick="openEccItemForm('${e.id}')" style="color:#0ea5e9;">✏️</button>
+              <button class="btn btn-xs btn-ghost" onclick="deleteEccItem('${e.id}')" style="color:#ef4444;">🗑</button>
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+}
+
+function openEccItemForm(id) {
+  const areaSel = document.getElementById('ecc-area');
+  areaSel.innerHTML = '<option value="">— 请选择 —</option>' +
+    (M.AREAS[currentProjectId] || []).map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
+  document.getElementById('eccFormTitle').textContent = id ? '编辑 ECC' : '新增 ECC';
+  _eccFormPhotos = [];
+  renderEccPhotoPreview();
+  if (id) {
+    const e = (M.ECC_ITEMS || []).find(x => x.id === id);
+    if (!e) { showToast('未找到 ECC 记录', 'error'); return; }
+    document.getElementById('ecc-id').value = e.id;
+    document.getElementById('ecc-title').value = e.title || '';
+    document.getElementById('ecc-area').value = e.areaId || '';
+    document.getElementById('ecc-status').value = e.status || 'open';
+    document.getElementById('ecc-discovered-date').value = e.discoveredDate || '';
+    document.getElementById('ecc-closed-date').value = e.closedDate || '';
+    _eccFormPhotos = (e.photos || []).slice();
+    renderEccPhotoPreview();
+  } else {
+    document.getElementById('ecc-id').value = '';
+    document.getElementById('ecc-title').value = '';
+    document.getElementById('ecc-area').value = '';
+    document.getElementById('ecc-status').value = 'open';
+    document.getElementById('ecc-discovered-date').value = M.TODAY;
+    document.getElementById('ecc-closed-date').value = '';
+  }
+  showModal('modalEccItem');
+}
+
+function closeEccItemForm() {
+  closeModal('modalEccItem');
+  _eccFormPhotos = [];
+}
+
+let _eccFormPhotos = [];
+
+function handleEccPhotoUpload(ev) {
+  const files = Array.from(ev.target.files || []);
+  ev.target.value = '';
+  const MAX = 5 * 1024 * 1024;
+  const promises = files.map(f => new Promise((resolve, reject) => {
+    if (f.size > MAX) return reject(new Error(`${f.name} 超过 5MB`));
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('读取失败'));
+    reader.readAsDataURL(f);
+  }));
+  Promise.all(promises).then(datas => {
+    datas.forEach(d => _eccFormPhotos.push(d));
+    renderEccPhotoPreview();
+  }).catch(err => showToast(err.message, 'error'));
+}
+
+function renderEccPhotoPreview() {
+  const box = document.getElementById('ecc-photo-preview');
+  if (!_eccFormPhotos.length) {
+    box.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#94a3b8;font-size:12px;padding:16px;">暂无照片</div>';
+    return;
+  }
+  box.innerHTML = _eccFormPhotos.map((p, i) => `
+    <div style="position:relative;aspect-ratio:1;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;overflow:hidden;">
+      <img src="${p}" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in;" onclick="enlargeEccPhoto(${i})">
+      <button onclick="removeEccFormPhoto(${i})" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:11px;line-height:1;">✕</button>
+    </div>
+  `).join('');
+}
+
+function removeEccFormPhoto(idx) {
+  _eccFormPhotos.splice(idx, 1);
+  renderEccPhotoPreview();
+}
+
+function enlargeEccPhoto(idx) {
+  const overlay = document.getElementById('photoEnlargeOverlay');
+  document.getElementById('photoEnlargeImg').src = _eccFormPhotos[idx];
+  overlay.style.display = 'flex';
+}
+
+async function saveEccItem() {
+  const title = document.getElementById('ecc-title').value.trim();
+  if (!title) { showToast('请填写问题描述', 'error'); return; }
+  const status = document.getElementById('ecc-status').value;
+  const discoveredDate = document.getElementById('ecc-discovered-date').value;
+  let closedDate = document.getElementById('ecc-closed-date').value;
+  if (status === 'closed' && !closedDate) closedDate = M.TODAY;
+  if (status !== 'closed') closedDate = '';
+  const id = document.getElementById('ecc-id').value || `ECC${String(Date.now()).slice(-6)}`;
+  const item = {
+    id,
+    projectId: currentProjectId,
+    title,
+    areaId: document.getElementById('ecc-area').value,
+    discoveredDate,
+    status,
+    closedDate,
+    photos: _eccFormPhotos.slice()
+  };
+  // 写内存
+  if (!M.ECC_ITEMS) M.ECC_ITEMS = [];
+  const idx = M.ECC_ITEMS.findIndex(e => e.id === id);
+  if (idx > -1) M.ECC_ITEMS[idx] = item;
+  else M.ECC_ITEMS.unshift(item);
+  // 同步到后端
+  try {
+    const r = await fetch('http://localhost:3010/api/ecc-items', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item)
+    });
+    if (!r.ok) throw new Error('保存失败');
+    showToast(idx > -1 ? 'ECC 已更新' : 'ECC 已创建', 'success');
+  } catch (e) {
+    showToast('已保存到本地，但后端同步失败：' + e.message, 'error');
+  }
+  renderEccList();
+  closeEccItemForm();
+}
+
+async function deleteEccItem(id) {
+  const confirmed = await showConfirm('确定删除此 ECC 销项？', '删除 ECC', '🗑');
+  if (!confirmed) return;
+  if (!M.ECC_ITEMS) M.ECC_ITEMS = [];
+  M.ECC_ITEMS = M.ECC_ITEMS.filter(e => e.id !== id);
+  try {
+    await fetch(`http://localhost:3010/api/ecc-items/${currentProjectId}/${id}`, { method: 'DELETE' });
+    showToast('已删除', 'success');
+  } catch (e) {
+    showToast('已从本地删除，后端同步失败：' + e.message, 'error');
+  }
+  renderEccList();
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 // ============================================================
@@ -4199,9 +6091,36 @@ function openWeeklyReport() {
         <div style="margin-top:8px; white-space:pre-wrap; font-size:13px; color:#475569;">${report.issuesSummary.details}</div>
       </div>
     </div>
-    
+
     <div class="weekly-section">
-      <div class="weekly-section-title">四、安全与材料</div>
+      <div class="weekly-section-title">四、协调事宜（未闭环）</div>
+      <div style="padding:0 14px;">
+        ${report.coordinationIssues && report.coordinationIssues.length > 0 ? `
+        <table style="width:100%; border-collapse:collapse; font-size:12px; border:1px solid #bae6fd;">
+          <thead>
+            <tr style="background:#0ea5e9; color:#fff;">
+              <th style="padding:6px; border:1px solid #bae6fd; width:40px;">序号</th>
+              <th style="padding:6px; border:1px solid #bae6fd;">需协调事宜</th>
+              <th style="padding:6px; border:1px solid #bae6fd; width:110px;">提出部门</th>
+              <th style="padding:6px; border:1px solid #bae6fd; width:110px;">配合部门</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${report.coordinationIssues.map((c, i) => `
+            <tr style="background:${i % 2 === 0 ? '#dbeafe' : '#eff6ff'};">
+              <td style="padding:6px; border:1px solid #bae6fd; text-align:center;">${c.seq}</td>
+              <td style="padding:6px; border:1px solid #bae6fd;">${c.title || '—'}</td>
+              <td style="padding:6px; border:1px solid #bae6fd; text-align:center;">${c.proposeDept}</td>
+              <td style="padding:6px; border:1px solid #bae6fd; text-align:center;">${c.cooperateDept}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+        ` : `<div style="text-align:center; padding:20px; color:#94a3b8; font-size:13px;">本周无未闭环的协调事宜</div>`}
+      </div>
+    </div>
+
+    <div class="weekly-section">
+      <div class="weekly-section-title">五、安全与材料</div>
       <div class="weekly-section-content">
         🔍 安全巡检：${report.safetyStats.checkCount} 次（发现隐患 ${report.safetyStats.issueCount} 项）<br>
         📦 材料进场：${report.materialStats.inboundCount} 批次
@@ -4209,7 +6128,7 @@ function openWeeklyReport() {
     </div>
     
     <div class="weekly-section">
-      <div class="weekly-section-title">五、下周计划</div>
+      <div class="weekly-section-title">六、下周计划</div>
       <div class="weekly-section-content" style="list-style-type:decimal; padding-left:20px;">
         ${report.nextWeekPlan.map((item, i) => `<li>${item}</li>`).join('')}
       </div>
@@ -4256,15 +6175,14 @@ function openWeeklyReportMapping() {
 const PAGE_HEADERS = {
   '02':   { title:'目录/Contents',        subtitle:'',                 pad:100 },
   '03':   { title:'一、组织架构',          subtitle:'到岗管理人员名单', pad:130 },
-  '0301': { title:'项目重要节点一览表',    subtitle:'项目重要节点',     pad:125 },
-  '04':   { title:'二、上周工作完成情况',  subtitle:'2.1 上周重要工作完成', pad:130 },
-  '05':   { title:'二、上周工作',          subtitle:'2.2 高管层现场工作', pad:130 },
-  '06':   { title:'二、上周工作',          subtitle:'2.12 现场工作：人员统计', pad:130 },
-  '07':   { title:'二、上周工作',          subtitle:'2.13 ECC销项情况', pad:130 },
-  '08':   { title:'二、上周工作',          subtitle:'2.14 图纸深化情况', pad:130 },
-  '09':   { title:'三、下周计划',          subtitle:'3.1 周工作计划', pad:130 },
-  '10':   { title:'四、工作计划',          subtitle:'4.1 食堂区施工段划分图', pad:130 },
-  '11':   { title:'四、工作计划',          subtitle:'4.1 食堂区5月份施工计划', pad:130 },
+  '04':   { title:'项目重要节点一览表',    subtitle:'项目重要节点',     pad:125 },
+  '05':   { title:'二、上周工作完成情况',  subtitle:'2.1 上周重要工作完成', pad:130 },
+  '06':   { title:'二、上周工作',          subtitle:'2.2 高管层现场工作', pad:130 },
+  '07':   { title:'二、上周工作',          subtitle:'2.12 现场工作：人员统计', pad:130 },
+  '08':   { title:'二、上周工作',          subtitle:'2.13 ECC销项情况', pad:130 },
+  '09':   { title:'二、上周工作',          subtitle:'2.14 图纸深化情况', pad:130 },
+  '10':   { title:'三、下周计划',          subtitle:'3.1 周工作计划', pad:130 },
+  '11':   { title:'四、工作计划',          subtitle:'', pad:130 },
   '12':   { title:'五、协调事宜',          subtitle:'5.1 协调事宜', pad:130 }
 };
 
@@ -4277,15 +6195,14 @@ function switchMappingTab(page) {
     '01': renderMappingPage01,
     '02': renderMappingPage02,
     '03': renderMappingPage03,
-    '0301': renderMappingPage0301,
-    '04': renderMappingPage04,
-    '05': renderMappingPage05,
-    '06': renderMappingPage06,
-    '07': renderMappingPage07,
-    '08': renderMappingPage08,
-    '09': renderMappingPage09,
-    '10': renderMappingPage10,
-    '11': renderMappingPage11,
+    '04': renderMappingPage0301,
+    '05': renderMappingPage04,
+    '06': renderMappingPage05,
+    '07': renderMappingPage06,
+    '08': renderMappingPage07,
+    '09': renderMappingPage08,
+    '10': renderMappingPage09,
+    '11': renderMappingPage10,
     '12': renderMappingPage12
   };
   (map[page] || renderMappingPage04)();
@@ -4302,16 +6219,47 @@ function switchMappingTab(page) {
     const titleHtml = ph && ph.title
       ? `<div style="position:absolute;top:20px;left:72px;font-size:30px;font-weight:700;color:${hc};z-index:2;letter-spacing:2px;">${ph.title}</div>`
       : '';
-    // 0301 分页按钮嵌入副标题右侧（attendance-toggle-bar 使打印时隐藏）
-    const is0301Split = page === '0301' && _milestonePages.length > 1;
+    // 04 重要节点分页按钮嵌入副标题右侧（attendance-toggle-bar 使打印时隐藏）
+    const is0301Split = page === '04' && _milestonePages.length > 1;
     const totalP = _milestonePages.length;
-    const subBtnHtml = is0301Split
+    let subBtnHtml = is0301Split
       ? `<div class="attendance-toggle-bar" style="position:absolute;top:82px;left:365px;height:38px;line-height:38px;z-index:3;display:flex;align-items:center;gap:4px;">
-          ${_milestonePage > 0 ? `<button style="background:rgba(255,255,255,0.85);color:#374151;border:1px solid #d1d5db;border-radius:4px;padding:1px 10px;cursor:pointer;font-size:12px;font-weight:600;" onclick="_milestonePage=${_milestonePage-1};switchMappingTab('0301')">← 前页</button>` : ''}
+          ${_milestonePage > 0 ? `<button style="background:rgba(255,255,255,0.85);color:#374151;border:1px solid #d1d5db;border-radius:4px;padding:1px 10px;cursor:pointer;font-size:12px;font-weight:600;" onclick="_milestonePage=${_milestonePage-1};switchMappingTab('04')">← 前页</button>` : ''}
           <span style="color:#1f2937;font-size:12px;font-weight:600;">${_milestonePage+1}/${totalP}</span>
-          ${_milestonePage < totalP - 1 ? `<button style="background:rgba(255,255,255,0.85);color:#374151;border:1px solid #d1d5db;border-radius:4px;padding:1px 10px;cursor:pointer;font-size:12px;font-weight:600;" onclick="_milestonePage=${_milestonePage+1};switchMappingTab('0301')">后页 →</button>` : ''}
+          ${_milestonePage < totalP - 1 ? `<button style="background:rgba(255,255,255,0.85);color:#374151;border:1px solid #d1d5db;border-radius:4px;padding:1px 10px;cursor:pointer;font-size:12px;font-weight:600;" onclick="_milestonePage=${_milestonePage+1};switchMappingTab('04')">后页 →</button>` : ''}
         </div>`
       : '';
+    // 05 工作完成分页按钮（沿用重要节点模板）
+    const is04Split = page === '05' && _page04Pages.length > 1;
+    const totalP04 = _page04Pages.length;
+    if (is04Split) {
+      subBtnHtml = `<div class="attendance-toggle-bar" style="position:absolute;top:82px;left:365px;height:38px;line-height:38px;z-index:3;display:flex;align-items:center;gap:4px;">
+          ${_page04Page > 0 ? `<button style="background:rgba(255,255,255,0.85);color:#374151;border:1px solid #d1d5db;border-radius:4px;padding:1px 10px;cursor:pointer;font-size:12px;font-weight:600;" onclick="_page04Page=${_page04Page-1};switchMappingTab('05')">← 前页</button>` : ''}
+          <span style="color:#1f2937;font-size:12px;font-weight:600;">${_page04Page+1}/${totalP04}</span>
+          ${_page04Page < totalP04 - 1 ? `<button style="background:rgba(255,255,255,0.85);color:#374151;border:1px solid #d1d5db;border-radius:4px;padding:1px 10px;cursor:pointer;font-size:12px;font-weight:600;" onclick="_page04Page=${_page04Page+1};switchMappingTab('05')">后页 →</button>` : ''}
+        </div>`;
+    }
+    // 06 现场照片分页按钮（沿用重要节点模板）
+    const is05Split = page === '06' && _page05Pages.length > 1;
+    const totalP05 = _page05Pages.length;
+    if (is05Split) {
+      subBtnHtml = `<div class="attendance-toggle-bar" style="position:absolute;top:82px;left:365px;height:38px;line-height:38px;z-index:3;display:flex;align-items:center;gap:4px;">
+          ${_page05Page > 0 ? `<button style="background:rgba(255,255,255,0.85);color:#374151;border:1px solid #d1d5db;border-radius:4px;padding:1px 10px;cursor:pointer;font-size:12px;font-weight:600;" onclick="_page05Page=${_page05Page-1};switchMappingTab('06')">← 前页</button>` : ''}
+          <span style="color:#1f2937;font-size:12px;font-weight:600;">${_page05Page+1}/${totalP05}</span>
+          ${_page05Page < totalP05 - 1 ? `<button style="background:rgba(255,255,255,0.85);color:#374151;border:1px solid #d1d5db;border-radius:4px;padding:1px 10px;cursor:pointer;font-size:12px;font-weight:600;" onclick="_page05Page=${_page05Page+1};switchMappingTab('06')">后页 →</button>` : ''}
+        </div>`;
+    }
+    // 10 分页按钮：按楼栋/施工段 sub-page 切换（每 section 2 个 sub-page：图、表交替）
+    const sections10 = (M.getPageSectionsData(currentProjectId) || []);
+    const is10Split = page === '11' && sections10.length > 0;
+    const totalP10 = sections10.length * 2;
+    if (is10Split) {
+      subBtnHtml += `<div class="attendance-toggle-bar" style="position:absolute;top:82px;left:520px;height:38px;line-height:38px;z-index:3;display:flex;align-items:center;gap:4px;">
+          ${_page10Page > 0 ? `<button style="background:rgba(255,255,255,0.85);color:#374151;border:1px solid #d1d5db;border-radius:4px;padding:1px 10px;cursor:pointer;font-size:12px;font-weight:600;" onclick="_page10Page=${_page10Page-1};switchMappingTab('11')">← 前页</button>` : ''}
+          <span style="color:#1f2937;font-size:12px;font-weight:600;">${_page10Page+1}/${totalP10}</span>
+          ${_page10Page < totalP10 - 1 ? `<button style="background:rgba(255,255,255,0.85);color:#374151;border:1px solid #d1d5db;border-radius:4px;padding:1px 10px;cursor:pointer;font-size:12px;font-weight:600;" onclick="_page10Page=${_page10Page+1};switchMappingTab('11')">后页 →</button>` : ''}
+        </div>`;
+    }
     const subHtml = ph && ph.subtitle
       ? `<div style="position:absolute;top:82px;left:72px;width:285px;height:38px;background:linear-gradient(to right,#facc15,#f43f5e);z-index:2;border-radius:0 2px 2px 0;"></div>
          <div style="position:absolute;top:82px;left:72px;height:38px;line-height:38px;padding-left:12px;color:#fff;font-size:16px;font-weight:700;z-index:3;letter-spacing:1px;">${ph.subtitle}</div>
@@ -4356,18 +6304,21 @@ function renderMappingPage01() {
   if (!data) { renderEmptyPage('暂无项目数据'); return; }
   const hc = _getHeaderColor();
   const bg = _getBgCss();
-  const bgStyle = bg !== 'none' ? bg : 'linear-gradient(135deg,#f0f4f8,#e2e8f0)';
   const el = document.getElementById('mappingContent');
-  el.style.background = '';
+  el.style.background = bg;
+  // 恢复 .frame-content 的固定 720 高度（避免被 06 页设置的 height:auto 污染）
+  el.style.height = '720px';
+  el.style.minHeight = '';
+  el.style.overflow = 'hidden';
   el.innerHTML = `
-<div style="width:100%;height:100%;background:${bgStyle};display:flex;flex-direction:column;font-family:'Microsoft YaHei','PingFang SC',sans-serif;">
-  <header style="padding:32px 48px 0;flex-shrink:0;">
+<div style="width:100%;height:100%;background:${bg};display:flex;flex-direction:column;font-family:'Microsoft YaHei','PingFang SC',sans-serif;">
+  <header style="padding:32px 0 0 48px;flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:16px;">
       <h1 style="color:#0081cc;font-size:24px;font-weight:700;letter-spacing:0.2em;margin:0;">中建三局集团（深圳）有限公司</h1>
       <div style="flex:1;height:16px;background:${hc};margin-top:4px;"></div>
     </div>
   </header>
-  <section style="flex:1;display:flex;align-items:center;justify-content:center;padding:0 48px;">
+  <section style="flex:1;display:flex;align-items:center;justify-content:center;">
     <div style="width:100%;background:${hc};padding:64px 48px;position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,0.15);">
       <div style="position:absolute;inset:0;background:linear-gradient(to right,transparent,rgba(255,255,255,0.08),transparent);"></div>
       <div style="position:relative;z-index:10;text-align:center;">
@@ -4380,7 +6331,7 @@ function renderMappingPage01() {
       </div>
     </div>
   </section>
-  <footer style="padding:0 48px 32px;flex-shrink:0;">
+  <footer style="padding:0 48px 32px 0;flex-shrink:0;">
     <div style="display:flex;align-items:flex-end;justify-content:space-between;">
       <div style="width:66%;height:16px;background:${hc};margin-bottom:8px;"></div>
       <div style="text-align:right;">
@@ -4680,7 +6631,7 @@ async function s0301DelRow(major, row) {
 function s0301Save() {
   M.saveMilestoneData(_milestoneData);
   const activeBtn = document.querySelector('#reportPageNav button.active[data-page]');
-  if (activeBtn && activeBtn.dataset.page === '0301') switchMappingTab('0301');
+  if (activeBtn && activeBtn.dataset.page === '04') switchMappingTab('04');
 }
 
 function _smartWrap(text) {
@@ -4716,6 +6667,15 @@ function _smartWrap(text) {
 
 let _milestonePage = 0;
 let _milestonePages = []; // [{html, months}]
+
+let _page04Page = 0;
+let _page04Pages = []; // [[row, row, ...], ...]
+
+let _page05Page = 0;
+let _page05Pages = []; // [[photo, photo, ...], ...]
+let _page05Subtitle = '2.2 高管层现场工作'; // 动态：本周涉及区域
+
+let _page10Page = 0;  // 10 按楼栋/施工段排序的 sub-page 索引
 
 function _estimateTextWidth(text, fontSize) {
   if (!text) return 0;
@@ -4857,20 +6817,7 @@ function renderMappingPage0301() {
   el.innerHTML = _milestonePages[_milestonePage] ? _milestonePages[_milestonePage].html : '<div style="padding:40px;text-align:center;color:#94a3b8;">暂无数据</div>';
 }
 
-function renderMappingPage04() {
-  const { weekStart, weekEnd } = getWeekRange();
-  const rows = M.getPage04Data(currentProjectId, weekStart, weekEnd);
-
-  if (rows.length === 0) {
-    document.getElementById('mappingContent').innerHTML = `
-      <div style="text-align:center; padding:40px 0; color:#94a3b8;">
-        <div style="font-size:40px;">📋</div>
-        <p style="margin-top:12px;">本周（${weekStart} ~ ${weekEnd}）暂无已确认的进度事件</p>
-        <p style="font-size:12px; margin-top:4px;">请先在日报中录入并确认事件</p>
-      </div>`;
-    return;
-  }
-
+function _renderPage04Table(rows) {
   let html = `
     <div style="background:rgba(255,255,255,0.9);border-radius:8px;overflow:hidden;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);border:1px solid #005e00;">
       <table style="width:100%;border-collapse:collapse;font-size:13px;">
@@ -4900,90 +6847,476 @@ function renderMappingPage04() {
     }
   });
   html += `</tbody></table></div>`;
-  document.getElementById('mappingContent').innerHTML = html;
+  return html;
+}
+
+function renderMappingPage04() {
+  const { weekStart, weekEnd } = getWeekRange();
+  const allRows = M.getPage04Data(currentProjectId, weekStart, weekEnd);
+
+  if (allRows.length === 0) {
+    document.getElementById('mappingContent').innerHTML = `
+      <div style="text-align:center; padding:40px 0; color:#94a3b8;">
+        <div style="font-size:40px;">📋</div>
+        <p style="margin-top:12px;">本周（${weekStart} ~ ${weekEnd}）暂无已确认的进度事件</p>
+        <p style="font-size:12px; margin-top:4px;">请先在日报中录入并确认事件</p>
+      </div>`;
+    _page04Pages = [];
+    return;
+  }
+
+  // 每页最多放 12 行（header + detail 混合计数）
+  const ROWS_PER_PAGE = 12;
+  _page04Pages = [];
+  for (let i = 0; i < allRows.length; i += ROWS_PER_PAGE) {
+    _page04Pages.push(allRows.slice(i, i + ROWS_PER_PAGE));
+  }
+  if (_page04Page >= _page04Pages.length) _page04Page = 0;
+
+  document.getElementById('mappingContent').innerHTML = _renderPage04Table(_page04Pages[_page04Page]);
+}
+
+function _renderPage05Grid(photos) {
+  if (!photos || photos.length === 0) return '';
+  const count = photos.length;
+  // 自适应列数：1→1, 2→2, 3→3, 4→2 (2x2 平衡), 5→3 (3+2), 6→3 (3x2)
+  let cols;
+  if (count <= 1) cols = 1;
+  else if (count === 2) cols = 2;
+  else if (count === 4) cols = 2;
+  else cols = Math.min(count, 3);  // 3, 5, 6 张都用 3 列
+  const capRatio = count === 1 ? 0.35 : (count <= 3 ? 0.4 : 0.32);  // 1张图说明多占些
+  const html = `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:8px;height:100%;align-content:center;justify-items:stretch;">`;
+  let inner = '';
+  for (const p of photos) {
+    const showCap = p.showInReport !== false;
+    const capHtml = showCap
+      ? `<div style="flex-shrink:0;padding:5px 8px;font-size:11px;color:#0f172a;line-height:1.35;background:#fff;border-top:1px solid #e2e8f0;max-height:60px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;">${p.caption || '现场照片'}</div>`
+      : '';
+    const body = p.data
+      ? `<img src="${p.data}" style="max-width:100%;max-height:100%;object-fit:contain;display:block;" />`
+      : `<div style="display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:12px;">🖼️ 暂无图片</div>`;
+    inner += `
+      <div style="display:flex;flex-direction:column;border:1px solid #ccc;background:#fff;overflow:hidden;max-width:100%;max-height:100%;">
+        <div style="flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;background:#f8fafc;overflow:hidden;padding:2px;">
+          ${body}
+        </div>
+        ${capHtml}
+      </div>`;
+  }
+  return html + inner + `</div>`;
 }
 
 function renderMappingPage05() {
   const { weekStart, weekEnd } = getWeekRange();
-  const photos = M.getPage05Photos(currentProjectId, weekStart, weekEnd);
-  const count = Math.min(photos.length, 6);
+  const result = M.getPage05Photos(currentProjectId, weekStart, weekEnd, 9999);
+  const allItems = result.items;
 
-  if (count === 0) {
+  // 按区域聚合照片
+  const byArea = {};  // { areaName: [photoObj, ...] }
+  let curArea = null;
+  for (const it of allItems) {
+    if (it.type === 'header') { curArea = it.text; byArea[curArea] = []; }
+    else if (curArea) byArea[curArea].push(it);
+  }
+  const areaNames = Object.keys(byArea);
+  // 每个区域 = 1 个 sub-page（不再有"界面其它位置"的区域内容）
+  _page05Pages = areaNames.map(name => byArea[name]);
+  if (_page05Page >= _page05Pages.length) _page05Page = 0;
+
+  // 副标题 = 当前 sub-page 的区域名
+  const curSubtitle = areaNames[_page05Page] || '本周暂无照片';
+  if (typeof PAGE_HEADERS !== 'undefined') {
+    if (!PAGE_HEADERS['05']) PAGE_HEADERS['05'] = {};
+    PAGE_HEADERS['05'].subtitle = curSubtitle;
+  }
+
+  if (allItems.length === 0) {
     document.getElementById('mappingContent').innerHTML = `
       <div style="text-align:center; padding:40px 0; color:#94a3b8;">
         <div style="font-size:40px;">📷</div>
         <p style="margin-top:12px;">本周（${weekStart} ~ ${weekEnd}）暂无照片数据</p>
         <p style="font-size:12px; margin-top:4px;">请先在日报中通过拍照录入</p>
       </div>`;
+    _page05Pages = [];
+    if (typeof PAGE_HEADERS !== 'undefined' && PAGE_HEADERS['05']) PAGE_HEADERS['05'].subtitle = '本周暂无照片';
     return;
   }
 
-  const cols = Math.min(count, 3);
-  let html = `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:12px;height:100%;">`;
-  for (let i = 0; i < count; i++) {
-    const p = photos[i];
-    html += `
-      <div style="border:1px solid #ccc;overflow:hidden;background:#fff;">
-        <div style="height:100%;display:flex;align-items:center;justify-content:center;background:#f1f5f9;color:#94a3b8;font-size:12px;min-height:140px;">
-          🖼️ ${p.caption || '现场照片'}
-        </div>
-      </div>`;
-  }
-  html += `</div>`;
-  document.getElementById('mappingContent').innerHTML = html;
+  document.getElementById('mappingContent').innerHTML = _renderPage05Grid(_page05Pages[_page05Page]);
 }
 
 function renderMappingPage06() {
   const { weekStart, weekEnd } = getWeekRange();
-  const rows = M.getPage06Data(currentProjectId, weekStart, weekEnd);
-  const s06photo = M.S06_PHOTO || { src: '', caption: '防高坠专项安全会' };
-  document.getElementById('mappingContent').innerHTML = `
-    <div style="display:flex;gap:24px;height:100%;">
-      <div style="flex:1;display:flex;flex-direction:column;gap:16px;">
-        <div style="background:#fff;padding:8px;border:1px solid #d1d5db;border-radius:2px;flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;">
-          <div style="width:100%;aspect-ratio:4/3;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:13px;">
-            🖼️ ${s06photo.src || '施工现场'}
-          </div>
-        </div>
-        <div style="background:#48a0f8;color:#fff;padding:8px 24px;text-align:center;font-size:14px;font-weight:700;width:fit-content;margin:0 auto;border-radius:0;">
-          ${s06photo.caption}
-        </div>
-      </div>
-      <div style="flex:1;display:flex;flex-direction:column;gap:12px;">
-        <div style="background:#fff;border:1px solid #005e00;border-radius:4px;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.06);flex:1;">
-          <table style="width:100%;border-collapse:collapse;font-size:12px;">
-            <thead>
-              <tr style="background:#00a2ff;color:#fff;">
-                <th style="padding:6px;border-right:1px solid #005e00;border-bottom:2px solid #005e00;width:36px;">序号</th>
-                <th style="padding:6px;border-right:1px solid #005e00;border-bottom:2px solid #005e00;">工种</th>
-                <th style="padding:6px;border-right:1px solid #005e00;border-bottom:2px solid #005e00;width:72px;">本周人数</th>
-                <th style="padding:6px;border-bottom:2px solid #005e00;width:72px;">下周人数</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows.map((r,i) => {
-                const isTotal = r.trade === '合计';
-                const bg = isTotal ? 'rgba(0,162,255,0.1)' : (i%2===0?'#cbe0ff':'#e7f0ff');
-                const fw = isTotal ? '700' : '400';
-                return `<tr style="background:${bg};">
-                  <td style="padding:4px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;text-align:center;font-weight:${fw};">${r.seq}</td>
-                  <td style="padding:4px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;text-align:center;font-weight:${fw};">${r.trade}</td>
-                  <td style="padding:4px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;text-align:center;">${r.thisWeek}</td>
-                  <td style="padding:4px;border-bottom:1px solid #005e00;text-align:center;">${r.nextWeek}</td>
-                </tr>`;
-              }).join('')}
-            </tbody>
-          </table>
-        </div>
-        <div style="background:#48a0f8;color:#fff;padding:6px 20px;text-align:center;font-size:13px;font-weight:700;width:fit-content;margin:0 auto;border-radius:0;">
-          全部人员在场情况
-        </div>
-      </div>
-    </div>`;
+  const mode = localStorage.getItem(`page06_mode_${currentProjectId}`) || 'dynamic';
+  const displayField = localStorage.getItem(`page06_displayField_${currentProjectId}`) || 'tradeName';
+  const unit = localStorage.getItem(`page06_unit_${currentProjectId}`) || 'people';
+  const rows = M.getPage06Data(currentProjectId, weekStart, weekEnd, mode, displayField, unit);
+  const thisLabel = unit === 'manDays' ? '本周工日' : '本周人数';
+  const nextLabel = unit === 'manDays' ? '下周工日' : '下周人数';
+  const photos = M.PAGE06_PHOTOS || [];
+  console.log('[Page06] render, currentProjectId:', currentProjectId, 'photos:', photos.length);
+  const photoCards = photos.map(p => {
+    const cardHtml = '<div style="border:1px solid #e2e8f0;border-radius:4px;overflow:hidden;background:#f8fafb;min-height:120px;">' +
+      '<div style="width:100%;height:120px;overflow:hidden;background:#f1f5f9;display:flex;align-items:center;justify-content:center;cursor:pointer;" onclick="enlargePage06Photo(\'' + p.id + '\')">' +
+      '<img src="' + p.src + '" style="width:100%;height:100%;object-fit:contain;"></div>' +
+      '<div style="padding:4px;font-size:11px;color:#64748b;">' + (p.caption || '无说明') +
+      (p.tradeId ? '<br><span style="color:#00adef;">' + p.tradeId + '</span>' : '') + '</div></div>';
+    return cardHtml;
+  }).join('');
+  const photoPanel = photos.length > 0 ? '<div style="margin-top:16px;background:#fff;border:1px solid #d1d5db;border-radius:4px;padding:12px;">' +
+    '<div style="font-size:13px;font-weight:600;color:#374151;margin-bottom:8px;">📷 现场照片（共 ' + photos.length + ' 张）</div>' +
+    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;">' + photoCards + '</div></div>' : '';
+  const plansCount = (M.getPlansForProject ? M.getPlansForProject(currentProjectId) : []).length;
+  console.log('[Page06] currentProjectId:', currentProjectId, 'plans count:', plansCount, 'photos:', photos.length);
+  const hasPhotos = photos.length > 0;
+  const leftCol = hasPhotos ? '<div style="flex:1;display:flex;flex-direction:column;gap:16px;min-width:0;">' +
+    '<div style="background:#fff;padding:8px;border:1px solid #d1d5db;border-radius:2px;flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;min-height:0;">' +
+    '<img src="' + photos[0].src + '" style="width:100%;height:100%;object-fit:contain;cursor:pointer;" onclick="enlargePage06Photo(\'' + photos[0].id + '\')">' +
+    '</div>' +
+    '<div style="background:#48a0f8;color:#fff;padding:8px 24px;text-align:center;font-size:14px;font-weight:700;width:fit-content;margin:0 auto;border-radius:0;">' +
+    (photos[0].caption || '无说明') + '</div></div>' : '';
+  const gap = hasPhotos ? '<div style="width:24px;flex-shrink:0;"></div>' : '';
+  const tableStyle = hasPhotos ? 'flex:1;display:flex;flex-direction:column;gap:12px;min-width:0;' : 'display:flex;flex-direction:column;gap:12px;';
+  const fullHtml = '<div style="display:flex;gap:0;height:100%;">' + leftCol + gap +
+    '<div style="' + tableStyle + '">' +
+    '<div style="background:#fff;border:1px solid #005e00;border-radius:4px;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.06);flex:1;">' +
+    '<table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="background:#00a2ff;color:#fff;">' +
+    '<th style="padding:6px;border-right:1px solid #005e00;border-bottom:2px solid #005e00;width:36px;">序号</th>' +
+    '<th style="padding:6px;border-right:1px solid #005e00;border-bottom:2px solid #005e00;">工种</th>' +
+    '<th style="padding:6px;border-right:1px solid #005e00;border-bottom:2px solid #005e00;width:72px;">' + thisLabel + '</th>' +
+    '<th style="padding:6px;border-bottom:2px solid #005e00;width:72px;">' + nextLabel + '</th></tr></thead><tbody>' +
+    rows.map((r,i) => {
+      const isTotal = r.trade === '合计';
+      const bg = isTotal ? 'rgba(0,162,255,0.1)' : (i%2===0?'#cbe0ff':'#e7f0ff');
+      const fw = isTotal ? '700' : '400';
+      return '<tr style="background:' + bg + ';">' +
+        '<td style="padding:4px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;text-align:center;font-weight:' + fw + ';">' + r.seq + '</td>' +
+        '<td style="padding:4px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;text-align:center;font-weight:' + fw + ';">' + r.trade + '</td>' +
+        '<td style="padding:4px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;text-align:center;">' + r.thisWeek + '</td>' +
+        '<td style="padding:4px;border-bottom:1px solid #005e00;text-align:center;">' + r.nextWeek + '</td></tr>';
+    }).join('') + '</tbody></table></div>' +
+    '<div style="background:#48a0f8;color:#fff;padding:6px 20px;text-align:center;font-size:13px;font-weight:700;width:fit-content;margin:0 auto;border-radius:0;">全部人员在场情况</div>' +
+    '</div></div>' + photoPanel;
+  console.log('[Page06] photoPanel.length:', photoPanel.length, 'fullHtml.length:', fullHtml.length);
+  const el = document.getElementById('mappingContent');
+  el.style.overflow = 'auto';
+  el.style.height = 'auto';
+  el.style.minHeight = '720px';
+  el.innerHTML = fullHtml;
+  console.log('[Page06] children:', el.children.length, 'all divs:', el.querySelectorAll('div').length);
 }
+
+// 切换 06 页数据源模式（按项目保存）
+window.setPage06Mode = function(mode) {
+  const key = `page06_mode_${currentProjectId}`;
+  localStorage.setItem(key, mode);
+  renderMappingPage06();
+};
+
+// 打开标准工种管理（嵌入到签到弹窗的"工人管理" Tab）
+window.openStandardTradesManager = async function() {
+  showModal('modalAttendance');
+  switchAttendanceTab('workers');
+  await renderStandardTradesList();
+};
+
+// 工人管理 tab 关闭后刷新周报 06
+const _origCloseModal = window.closeModal;
+window.closeModal = function(modalId) {
+  if (typeof _origCloseModal === 'function') _origCloseModal(modalId);
+  if (modalId === 'modalAttendance') {
+    // 关闭签到弹窗后，如果当前在 06 页面，刷新它（应用最新数据）
+    setTimeout(() => {
+      const nav = document.querySelector('#reportPageNav button.active[data-page="06"]');
+      if (nav) renderMappingPage06();
+    }, 100);
+  }
+};
+
+// 切换签到弹窗内的 Tab（attendance | workers）
+window.switchAttendanceTab = function(tab) {
+  ['attendance', 'workers'].forEach(t => {
+    const btn = document.getElementById(`attTabBtn-${t}`);
+    const content = document.getElementById(`attTabContent-${t}`);
+    if (!btn || !content) return;
+    if (t === tab) {
+      btn.style.background = '#fff';
+      btn.style.color = '#00adef';
+      btn.style.borderBottom = '2px solid #00adef';
+      content.style.display = 'block';
+    } else {
+      btn.style.background = 'transparent';
+      btn.style.color = '#64748b';
+      btn.style.borderBottom = '2px solid transparent';
+      content.style.display = 'none';
+    }
+  });
+  // 切换底部按钮
+  const saveBtn = document.getElementById('attendanceFooterSave');
+  const doneBtn = document.getElementById('attendanceFooterDone');
+  const title = document.getElementById('attendanceModalTitle');
+  if (tab === 'workers') {
+    if (saveBtn) saveBtn.style.display = 'none';
+    if (doneBtn) doneBtn.style.display = '';
+    if (title) title.textContent = '👷 工人管理（标准工种模板）';
+    // 关键：切到 workers tab 时立即渲染列表（避免空表）
+    renderStandardTradesList();
+  } else {
+    if (saveBtn) saveBtn.style.display = '';
+    if (doneBtn) doneBtn.style.display = 'none';
+    if (title) title.textContent = '✓ 管理人员签到';
+  }
+};
+
+// 渲染标准工种列表
+async function renderStandardTradesList() {
+  const listEl = document.getElementById('standardTradesList');
+  if (!listEl) return;
+  // 优先用内存 M.STANDARD_TRADES，否则从 API 拉
+  let trades = M.STANDARD_TRADES || [];
+  if (trades.length === 0) {
+    try {
+      const r = await fetch('http://localhost:3010/api/standard-trades');
+      trades = await r.json();
+      M.STANDARD_TRADES = trades;
+    } catch (e) { console.warn('[标准工种] 拉取失败:', e); }
+  }
+  if (trades.length === 0) {
+    listEl.innerHTML = `<div style="text-align:center;padding:20px;color:#94a3b8;">暂无数据，请点击「+ 新增工种」添加</div>`;
+    return;
+  }
+  // 取出当前周 (weekStart) 的本周/下周手工数据
+  const { weekStart } = getWeekRange();
+  const manualMap = {};
+  (M.WEEKLY_LABOR_DATA || []).forEach(w => {
+    if (w.projectId === currentProjectId && w.weekStart === weekStart) {
+      manualMap[w.tradeId] = { thisWeek: w.thisWeekCount || 0, nextWeek: w.nextWeekCount || 0 };
+    }
+  });
+  // 当前模式
+  const mode = localStorage.getItem(`page06_mode_${currentProjectId}`) || 'dynamic';
+  const showLaborInputs = (mode === 'fixed');
+
+  // 同步按钮样式
+  const fixedBtn = document.getElementById('attWorkerModeBtn-fixed');
+  const dynBtn = document.getElementById('attWorkerModeBtn-dynamic');
+  const hint = document.getElementById('attWorkerModeHint');
+  if (fixedBtn) {
+    fixedBtn.style.background = showLaborInputs ? '#00adef' : '#fff';
+    fixedBtn.style.color = showLaborInputs ? '#fff' : '#475569';
+    fixedBtn.style.borderColor = showLaborInputs ? '#0081cc' : '#cbd5e1';
+  }
+  if (dynBtn) {
+    dynBtn.style.background = !showLaborInputs ? '#00adef' : '#fff';
+    dynBtn.style.color = !showLaborInputs ? '#fff' : '#475569';
+    dynBtn.style.borderColor = !showLaborInputs ? '#0081cc' : '#cbd5e1';
+  }
+  if (hint) {
+    hint.textContent = showLaborInputs
+      ? '使用「固定模板」：在下方「本周人数」「下周人数」手工录入，周报 06 直接显示该数据'
+      : '使用「动态获取」：周报 06 自动从已确认的施工进度事件 + 下周计划汇总';
+  }
+
+  // 显示字段切换（仅动态模式）
+  const displayFieldRow = document.getElementById('attDisplayFieldRow');
+  const displayField = localStorage.getItem(`page06_displayField_${currentProjectId}`) || 'tradeName';
+  const isMapFromDisplay = !showLaborInputs && displayField === 'mapFrom';
+  if (displayFieldRow) {
+    displayFieldRow.style.display = showLaborInputs ? 'none' : 'flex';
+  }
+  // 同步显示字段按钮样式
+  const dfTradeBtn = document.getElementById('attDisplayFieldBtn-tradeName');
+  const dfMapBtn = document.getElementById('attDisplayFieldBtn-mapFrom');
+  if (dfTradeBtn) {
+    const active = !isMapFromDisplay;
+    dfTradeBtn.style.background = active ? '#00adef' : '#fff';
+    dfTradeBtn.style.color = active ? '#fff' : '#475569';
+    dfTradeBtn.style.borderColor = active ? '#0081cc' : '#cbd5e1';
+  }
+  if (dfMapBtn) {
+    dfMapBtn.style.background = isMapFromDisplay ? '#00adef' : '#fff';
+    dfMapBtn.style.color = isMapFromDisplay ? '#fff' : '#475569';
+    dfMapBtn.style.borderColor = isMapFromDisplay ? '#0081cc' : '#cbd5e1';
+  }
+
+  listEl.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+      <thead>
+        <tr style="background:#f1f5f9;">
+          <th style="padding:6px;border:1px solid #e2e8f0;width:40px;">序</th>
+          <th style="padding:6px;border:1px solid #e2e8f0;">${isMapFromDisplay ? '映射来源名称' : '工种名称'}</th>
+          ${showLaborInputs ? '' : '<th style="padding:6px;border:1px solid #e2e8f0;">映射来源</th>'}
+          ${showLaborInputs ? '<th style="padding:6px;border:1px solid #e2e8f0;width:60px;">本周人数</th><th style="padding:6px;border:1px solid #e2e8f0;width:60px;">下周人数</th>' : ''}
+          <th style="padding:6px;border:1px solid #e2e8f0;width:60px;">排序</th>
+          <th style="padding:6px;border:1px solid #e2e8f0;width:130px;">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${trades.map((t, i) => {
+          const manual = manualMap[t.id] || { thisWeek: 0, nextWeek: 0 };
+          const nameVal = isMapFromDisplay ? (t.mapFrom||'') : (t.tradeName||'');
+          return `
+          <tr data-trade-id="${t.id}">
+            <td style="padding:4px;border:1px solid #e2e8f0;text-align:center;">${t.sortOrder || i + 1}</td>
+            <td style="padding:4px;border:1px solid #e2e8f0;"><input class="form-input" data-field="${isMapFromDisplay ? 'mapFrom' : 'tradeName'}" value="${nameVal.replace(/"/g,'&quot;')}" style="width:100%;font-size:12px;padding:2px 6px;"></td>
+            ${showLaborInputs ? '' : `<td style="padding:4px;border:1px solid #e2e8f0;"><input class="form-input" data-field="${isMapFromDisplay ? 'tradeName' : 'mapFrom'}" value="${(isMapFromDisplay ? t.tradeName||'' : t.mapFrom||'').replace(/"/g,'&quot;')}" placeholder="可空" style="width:100%;font-size:12px;padding:2px 6px;"></td>`}
+            ${showLaborInputs ? `
+              <td style="padding:4px;border:1px solid #e2e8f0;text-align:center;"><input class="form-input" type="number" data-field="thisWeek" data-trade-id="${t.id}" value="${manual.thisWeek}" min="0" style="width:100%;font-size:12px;padding:2px 6px;text-align:center;"></td>
+              <td style="padding:4px;border:1px solid #e2e8f0;text-align:center;"><input class="form-input" type="number" data-field="nextWeek" data-trade-id="${t.id}" value="${manual.nextWeek}" min="0" style="width:100%;font-size:12px;padding:2px 6px;text-align:center;"></td>
+            ` : ''}
+            <td style="padding:4px;border:1px solid #e2e8f0;text-align:center;"><input class="form-input" type="number" data-field="sortOrder" value="${t.sortOrder || i + 1}" style="width:100%;font-size:12px;padding:2px 6px;"></td>
+            <td style="padding:4px;border:1px solid #e2e8f0;text-align:center;">
+              <button class="btn btn-xs btn-ghost" onclick="saveStandardTrade(${t.id})" style="font-size:10px;padding:2px 6px;color:#059669;">💾</button>
+              <button class="btn btn-xs btn-ghost" onclick="deleteStandardTrade(${t.id})" style="font-size:10px;padding:2px 6px;color:#ef4444;">🗑</button>
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
+  // 渲染照片网格
+  renderPage06PhotoGrid();
+}
+
+// 切换工人管理数据源模式（与周报 06 共用 localStorage key）
+window.setWorkersMode = function(mode) {
+  localStorage.setItem(`page06_mode_${currentProjectId}`, mode);
+  renderStandardTradesList();
+};
+
+// 切换周报 06 显示字段（模板名称 / 映射来源名称）
+window.setPage06DisplayField = function(field) {
+  localStorage.setItem(`page06_displayField_${currentProjectId}`, field);
+  renderStandardTradesList();
+  renderMappingPage06();
+};
+
+// 切换周报 06 统计口径（人数 / 工日）
+window.setPage06Unit = function(unit) {
+  localStorage.setItem(`page06_unit_${currentProjectId}`, unit);
+  // 同步按钮样式
+  const btnP = document.getElementById('planUnitBtn-people');
+  const btnM = document.getElementById('planUnitBtn-manDays');
+  if (btnP) {
+    const active = (unit === 'people');
+    btnP.style.background = active ? '#00adef' : '#fff';
+    btnP.style.color = active ? '#fff' : '#475569';
+    btnP.style.borderColor = active ? '#0081cc' : '#cbd5e1';
+  }
+  if (btnM) {
+    const active = (unit === 'manDays');
+    btnM.style.background = active ? '#00adef' : '#fff';
+    btnM.style.color = active ? '#fff' : '#475569';
+    btnM.style.borderColor = active ? '#0081cc' : '#cbd5e1';
+  }
+  renderDailyPlanCard();
+  renderMappingPage06();
+};
+
+// 保存本周/下周人数到 DB
+window.saveWeeklyLaborData = async function() {
+  const { weekStart } = getWeekRange();
+  const rows = [];
+  document.querySelectorAll('#standardTradesList tr[data-trade-id]').forEach(tr => {
+    const tid = tr.dataset.tradeId;
+    if (!tid) return;
+    const thisEl = tr.querySelector('[data-field="thisWeek"]');
+    const nextEl = tr.querySelector('[data-field="nextWeek"]');
+    if (thisEl || nextEl) {
+      rows.push({
+        projectId: currentProjectId,
+        weekStart,
+        tradeId: parseInt(tid),
+        thisWeekCount: parseInt(thisEl?.value) || 0,
+        nextWeekCount: parseInt(nextEl?.value) || 0
+      });
+    }
+  });
+  if (rows.length === 0) {
+    showToast('请先切到「固定模板」模式录入数据', 'info');
+    return;
+  }
+  try {
+    await fetch('http://localhost:3010/api/weekly-labor', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows })
+    });
+    // 更新内存 M.WEEKLY_LABOR_DATA
+    const weekData = (M.WEEKLY_LABOR_DATA || []).filter(w => !(w.projectId === currentProjectId && w.weekStart === weekStart));
+    M.WEEKLY_LABOR_DATA = [...weekData, ...rows];
+    showToast(`已保存 ${rows.length} 条本周/下周人数（项目：${currentProjectId}，周：${weekStart}）`, 'success');
+  } catch (e) {
+    showToast('保存失败：' + e.message, 'error');
+  }
+};
+
+window.addStandardTradeRow = async function() {
+  const trades = M.STANDARD_TRADES || [];
+  const newSort = (trades.length > 0 ? Math.max(...trades.map(t => t.sortOrder || 0)) : 0) + 1;
+  try {
+    const r = await fetch('http://localhost:3010/api/standard-trades', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: null, tradeName: '新工种', mapFrom: '', sortOrder: newSort })
+    });
+    const result = await r.json();
+    M.STANDARD_TRADES = [...trades, { id: result.id, projectId: null, tradeName: '新工种', mapFrom: '', sortOrder: newSort }];
+    await renderStandardTradesList();
+  } catch (e) { showToast('新增失败：' + e.message, 'error'); }
+};
+
+window.saveStandardTrade = async function(id) {
+  const row = document.querySelector(`#standardTradesList tr[data-trade-id="${id}"]`);
+  if (!row) return;
+  const tradeName = row.querySelector('[data-field="tradeName"]').value.trim();
+  const mapFrom = row.querySelector('[data-field="mapFrom"]').value.trim();
+  const sortOrder = parseInt(row.querySelector('[data-field="sortOrder"]').value) || 0;
+  if (!tradeName) { showToast('工种名称不能为空', 'error'); return; }
+  try {
+    await fetch('http://localhost:3010/api/standard-trades', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, tradeName, mapFrom, sortOrder })
+    });
+    // 更新内存
+    const trades = M.STANDARD_TRADES || [];
+    const idx = trades.findIndex(t => t.id === id);
+    if (idx > -1) trades[idx] = { ...trades[idx], tradeName, mapFrom, sortOrder };
+    showToast('已保存', 'success');
+  } catch (e) { showToast('保存失败：' + e.message, 'error'); }
+};
+
+window.deleteStandardTrade = async function(id) {
+  const confirmed = await showConfirm('确定删除此工种？', '删除工种', '🗑️');
+  if (!confirmed) return;
+  try {
+    await fetch(`http://localhost:3010/api/standard-trades/${id}`, { method: 'DELETE' });
+    M.STANDARD_TRADES = (M.STANDARD_TRADES || []).filter(t => t.id !== id);
+    await renderStandardTradesList();
+    showToast('已删除', 'success');
+  } catch (e) { showToast('删除失败：' + e.message, 'error'); }
+};
 
 function renderMappingPage07() {
   const stats = M.getPage07Data(currentProjectId);
+  const items = (M.ECC_ITEMS || []).filter(e => e.projectId === currentProjectId && e.id !== 'ECC099');
+  // 各 ECC 录入的照片
+  const itemPhotos = items.flatMap(e => (e.photos || []).map(src => ({ src, title: e.title, type: 'item' })));
+  // 汇总照片（来自 ECC_SUMMARIES）
+  const summaryPhotos = ((M.ECC_SUMMARIES || {})[currentProjectId] || {}).photos || [];
+  const summaryTagged = summaryPhotos.map(src => ({ src, title: '汇总照片', type: 'summary' }));
+  const allPhotos = itemPhotos.concat(summaryTagged);
+  const photoBlock = allPhotos.length > 0
+    ? `<div style="background:#fff;border:1px solid #005e00;border-radius:4px;overflow:hidden;">
+        <div style="padding:6px 10px;background:#f1f5f9;font-size:12px;color:#475569;font-weight:600;border-bottom:1px solid #005e00;">
+          📷 ECC 销项照片（${itemPhotos.length} 张录入 + ${summaryPhotos.length} 张汇总，共 ${allPhotos.length} 张）
+        </div>
+        <div style="height:300px;overflow:hidden;display:grid;grid-template-columns:repeat(${Math.min(allPhotos.length, 4)}, 1fr);gap:2px;padding:2px;">
+          ${allPhotos.slice(0, 16).map(p => `<div style="position:relative;overflow:hidden;">
+            <img src="${p.src}" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in;" onclick="enlargePage07Photo('${p.src}','${(p.title || '').replace(/'/g, '')}')">
+          </div>`).join('')}
+        </div>
+      </div>`
+    : `<div style="background:#fff;border:1px dashed #cbd5e1;border-radius:4px;height:300px;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:13px;">🖼️ 暂无 ECC 销项照片（请在快速录入 → ECC 中上传）</div>`;
   document.getElementById('mappingContent').innerHTML = `
     <div style="font-size:18px;font-weight:700;color:#000;text-align:center;margin-bottom:16px;">北京清尚ECC质量整改统计表</div>
     <div style="background:#fff;border:1px solid #005e00;border-radius:4px;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.06);margin-bottom:12px;">
@@ -5010,9 +7343,13 @@ function renderMappingPage07() {
         </tbody>
       </table>
     </div>
-    <div style="background:#fff;border:1px solid #005e00;border-radius:4px;height:320px;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:13px;overflow:hidden;">
-      🖼️ ECC 销项截图（../../07上周工作ECC.png）
-    </div>`;
+    ${photoBlock}`;
+}
+
+function enlargePage07Photo(src, caption) {
+  const overlay = document.getElementById('photoEnlargeOverlay');
+  document.getElementById('photoEnlargeImg').src = src;
+  overlay.style.display = 'flex';
 }
 
 function renderMappingPage08() {
@@ -5025,18 +7362,19 @@ function renderMappingPage08() {
             <th style="padding:6px;border-right:1px solid #005e00;border-bottom:2px solid #005e00;width:10%;">序号</th>
             <th style="padding:6px;border-right:1px solid #005e00;border-bottom:2px solid #005e00;width:60%;">计划事项</th>
             <th style="padding:6px;border-right:1px solid #005e00;border-bottom:2px solid #005e00;width:15%;">责任人</th>
-            <th style="padding:6px;border-bottom:2px solid #005e00;width:15%;">完成情况</th>
+            <th style="padding:6px;border-bottom:2px solid #005e00;width:15%;">当前进度</th>
           </tr>
         </thead>
         <tbody>
           ${rows.map((r,i) => {
             const bg = i%2===0?'#cbe0ff':'#e7f0ff';
-            const statusColor = r.status === '已完成' ? '#059669' : '#d97706';
+            const progress = r.progress || r.status || '—';
+            const progressColor = progress === '已完成' || progress === '100%' ? '#059669' : (progress === '—' ? '#94a3b8' : '#d97706');
             return `<tr style="background:${bg};">
               <td style="padding:6px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;text-align:center;">${r.seq}</td>
               <td style="padding:6px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;">${r.task}</td>
               <td style="padding:6px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;text-align:center;">${r.owner}</td>
-              <td style="padding:6px;border-bottom:1px solid #005e00;text-align:center;font-weight:600;color:${statusColor};">${r.status}</td>
+              <td style="padding:6px;border-bottom:1px solid #005e00;text-align:center;font-weight:600;color:${progressColor};">${progress}</td>
             </tr>`;
           }).join('')}
         </tbody>
@@ -5045,11 +7383,45 @@ function renderMappingPage08() {
 }
 
 function renderMappingPage09() {
-  const items = M.getPage09Data();
-  const areas = [...new Set(items.map(i => i.area))];
+  // 根据周报区间计算"下周"周一~周日
   const dayLabels = ['周一','周二','周三','周四','周五','周六','周日'];
-  const wr = getWeekRange();
-  const monday = new Date(wr.weekStart);
+  let mondayStr, sundayStr, monday;
+  if (_reportRangeEnd) {
+    const nextMon = new Date(_reportRangeEnd);
+    nextMon.setDate(nextMon.getDate() + 1); // _reportRangeEnd 是周日，+1 = 下周一
+    const nextSun = new Date(nextMon);
+    nextSun.setDate(nextMon.getDate() + 6);
+    const fmt = (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+    mondayStr = fmt(nextMon);
+    sundayStr = fmt(nextSun);
+    monday = nextMon;
+  } else {
+    const nextMonday = new Date();
+    nextMonday.setDate(nextMonday.getDate() + ((1 + 7 - nextMonday.getDay()) % 7 || 7));
+    const wr = typeof getWeekRangeForDate === 'function'
+      ? getWeekRangeForDate(nextMonday.toISOString().slice(0, 10))
+      : (() => {
+          const d = new Date(nextMonday);
+          const day = d.getDay();
+          const diff = day === 0 ? -6 : 1 - day;
+          const m = new Date(d);
+          m.setDate(d.getDate() + diff);
+          const s = new Date(m);
+          s.setDate(m.getDate() + 6);
+          const f = (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+          return { weekStart: f(m), weekEnd: f(s) };
+        })();
+    mondayStr = wr.weekStart;
+    sundayStr = wr.weekEnd;
+    monday = new Date(mondayStr);
+  }
+
+  const items = M.getPage09Data(currentProjectId, mondayStr, sundayStr);
+  if (items.length === 0) {
+    document.getElementById('mappingContent').innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;">暂无下周计划数据，请先在日计划中创建下周计划</div>';
+    return;
+  }
+  const areas = [...new Set(items.map(i => i.area))];
   const dateLabels = dayLabels.map((_, i) => {
     const d = new Date(monday);
     d.setDate(d.getDate() + i);
@@ -5065,11 +7437,11 @@ function renderMappingPage09() {
         <tr>
           <th rowspan="2" style="border:1px solid #005e00;padding:2px;background:#fff;width:26px;font-weight:700;font-size:10px;">序<br/>号</th>
           <th rowspan="2" style="border:1px solid #005e00;padding:2px;background:#fff;width:45px;font-weight:700;font-size:10px;">区域</th>
-          <th rowspan="2" style="border:1px solid #005e00;padding:2px;background:#fff;font-weight:700;font-size:10px;">工作内容</th>
+          <th rowspan="2" style="border:1px solid #005e00;padding:2px;background:#fff;min-width:120px;font-weight:700;font-size:10px;">工作内容</th>
           <th rowspan="2" style="border:1px solid #005e00;padding:2px;background:#fff;width:32px;font-weight:700;font-size:9px;writing-mode:vertical-rl;text-orientation:mixed;">工作天数</th>
-          ${dayLabels.map(d => `<th style="border:1px solid #005e00;padding:2px;background:#fff;width:22px;font-weight:700;font-size:9px;">${d}</th>`).join('')}
-          <th rowspan="2" style="border:1px solid #005e00;padding:2px;background:#fff;width:45px;font-weight:700;font-size:9px;writing-mode:vertical-rl;text-orientation:mixed;">劳动力需求</th>
-          <th rowspan="2" style="border:1px solid #005e00;padding:2px;background:#fff;width:40px;font-weight:700;font-size:9px;writing-mode:vertical-rl;text-orientation:mixed;">材料准备</th>
+          ${dayLabels.map(d => `<th style="border:1px solid #005e00;padding:2px;background:#fff;width:36px;font-weight:700;font-size:9px;">${d}</th>`).join('')}
+          <th rowspan="2" style="border:1px solid #005e00;padding:2px;background:#fff;width:60px;font-weight:700;font-size:9px;">劳动力需求</th>
+          <th rowspan="2" style="border:1px solid #005e00;padding:2px;background:#fff;width:50px;font-weight:700;font-size:9px;">材料准备</th>
         </tr>
         <tr>
           ${dateLabels.map(d => `<th style="border:1px solid #005e00;padding:2px;background:#fff;font-weight:700;font-size:9px;">${d}</th>`).join('')}
@@ -5086,7 +7458,7 @@ function renderMappingPage09() {
         <td style="border:1px solid #005e00;padding:2px;">${item.task}</td>
         <td style="border:1px solid #005e00;padding:2px;text-align:center;">${item.durationDays}</td>
         ${(item.schedule || []).map(active =>
-          `<td style="border:1px solid #005e00;padding:0;width:22px;height:18px;background:${active ? '#00b0f0' : '#fff'};"></td>`
+          `<td style="border:1px solid #005e00;padding:0;width:36px;height:18px;background:${active ? '#00b0f0' : '#fff'};"></td>`
         ).join('')}
         <td style="border:1px solid #005e00;padding:2px;text-align:center;">${item.labor}</td>
         <td style="border:1px solid #005e00;padding:2px;text-align:center;">${item.material}</td>
@@ -5097,64 +7469,100 @@ function renderMappingPage09() {
   document.getElementById('mappingContent').innerHTML = html;
 }
 
-function renderMappingPage10() {
-  const items = M.getPage10Data();
-  const cols = Math.min(items.length, 3);
-  document.getElementById('mappingContent').innerHTML = `
-    <div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:20px;height:100%;padding-top:12px;">
-      ${items.map(item => `
-        <div style="display:flex;flex-direction:column;align-items:center;">
-          <div style="width:100%;flex:1;background:#fff;border:1px solid #d1d5db;display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:13px;color:#9ca3af;min-height:220px;">
-            🖼️ ${item.image}
-          </div>
-          <div style="margin-top:12px;font-size:18px;font-weight:700;color:#000;">${item.label}</div>
-        </div>
-      `).join('')}
-    </div>`;
+// 表格标题按当前周报日期取年月："26年5月施工进度计划跟踪表"
+function _getScheduleTableTitle() {
+  const base = _reportDate || (typeof M !== 'undefined' && M.TODAY) || '';
+  if (!base) return '施工进度计划跟踪表';
+  const m = base.match(/^(\d{4})-(\d{1,2})/);
+  if (!m) return '施工进度计划跟踪表';
+  return `${m[1].slice(2)}年${parseInt(m[2])}月施工进度计划跟踪表`;
 }
 
-function renderMappingPage11() {
-  const items = M.getPage11Data();
-  const floorHeaders = [
-    { name: '一层', color: '#f4b084' },
-    { name: '二层', color: '#a9d08e' },
-    { name: 'B1层（1）', color: '#9dc3e6' },
-    { name: 'B1层（2）', color: '#9dc3e6' }
-  ];
-  document.getElementById('mappingContent').innerHTML = `
-    <div style="overflow-x:auto;">
-    <table style="width:100%;border-collapse:collapse;font-size:10px;border:1px solid #999;">
-      <thead>
-        <tr>
-          <th colspan="4" style="border:1px solid #999;padding:4px;background:#f2f2f2;font-size:14px;text-align:center;">26年5月施工进度计划跟踪表</th>
-          ${floorHeaders.map(f => `<th colspan="3" style="border:1px solid #999;padding:4px;text-align:center;font-size:10px;background:${f.color};color:#000;">${f.name}</th>`).join('')}
-        </tr>
-        <tr>
-          <th style="border:1px solid #999;padding:2px;width:28px;">序号</th>
-          <th style="border:1px solid #999;padding:2px;width:36px;">楼栋</th>
-          <th style="border:1px solid #999;padding:2px;width:36px;">部位</th>
-          <th style="border:1px solid #999;padding:2px;">工序</th>
-          ${floorHeaders.flatMap(() => ['开始时间','完成时间','日历天']).map(h => `<th style="border:1px solid #999;padding:2px;width:42px;">${h}</th>`).join('')}
-        </tr>
-      </thead>
-      <tbody>
-        ${items.map((item, i) => {
-          const bg = i % 2 === 0 ? '#f8fafc' : '#fff';
-          const highlight = (i === 4 || i === 8) ? 'background:#ffff00;font-weight:700;' : '';
-          return `<tr style="background:${bg};">
-            <td style="border:1px solid #999;padding:2px;text-align:center;">${i+1}</td>
-            <td style="border:1px solid #999;padding:2px;text-align:center;">${item.building}</td>
-            <td style="border:1px solid #999;padding:2px;text-align:center;">${item.location}</td>
-            <td style="border:1px solid #999;padding:2px;${highlight}">${item.process}</td>
-            ${item.floors.flatMap(f => [
-              `<td style="border:1px solid #999;padding:2px;text-align:center;">${f.startDate}</td>`,
-              `<td style="border:1px solid #999;padding:2px;text-align:center;">${f.endDate}</td>`,
-              `<td style="border:1px solid #999;padding:2px;text-align:center;">${f.days}</td>`
-            ]).join('')}
-          </tr>`;
-        }).join('')}
-      </tbody>
-    </table></div>`;
+function renderMappingPage10() {
+  const sections = M.getPageSectionsData(currentProjectId);
+  if (sections.length === 0) {
+    document.getElementById('mappingContent').innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;">暂无数据</div>';
+    return;
+  }
+  // 2N sub-pages：偶数下标 = 施工段划分（图片），奇数下标 = 施工计划（表格）
+  const totalSubs = sections.length * 2;
+  if (_page10Page >= totalSubs) _page10Page = 0;
+  const sectionIdx = Math.floor(_page10Page / 2);
+  const isImage = _page10Page % 2 === 0;
+  const sec = sections[sectionIdx];
+  const sectionNum = sectionIdx + 1;
+  if (typeof PAGE_HEADERS !== 'undefined') {
+    if (!PAGE_HEADERS['11']) PAGE_HEADERS['11'] = {};
+    PAGE_HEADERS['11'].subtitle = `4.${sectionNum} ${sec.name} ${isImage ? '施工段划分' : '施工计划'}`;
+  }
+
+  if (isImage) {
+    const validImages = (sec.items || []).filter(it => it.image);
+    let body;
+    if (validImages.length > 0) {
+      const count = validImages.length;
+      // 列数：单图 1 列（铺满），2-3 张用 2 列（更宽更大），4+ 张用 3 列
+      let cols;
+      if (count <= 1) cols = 1;
+      else if (count <= 3) cols = 2;
+      else if (count === 4) cols = 2;
+      else cols = Math.min(count, 3);
+      const imgs = validImages.map(p =>
+        `<div style="border:1px solid #ccc;background:#fff;overflow:hidden;display:flex;flex-direction:column;height:100%;">
+          <div style="flex:1;min-height:0;display:flex;align-items:center;justify-content:center;background:#f8fafc;overflow:hidden;padding:6px;">
+            <img src="${(p.image.startsWith('data:') ? p.image : p.image)}" style="max-width:100%;max-height:100%;object-fit:contain;display:block;">
+          </div>
+          <div style="padding:4px 8px;font-size:12px;color:#0f172a;background:#fff;border-top:1px solid #e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0;">${p.label || '现场照片'}</div>
+        </div>`
+      ).join('');
+      body = `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:16px;height:100%;padding:12px;">${imgs}</div>`;
+    } else {
+      body = `<div style="text-align:center;padding:80px 20px;color:#94a3b8;">暂无施工段图片</div>`;
+    }
+    document.getElementById('mappingContent').innerHTML = `<div style="height:100%;padding-top:8px;">${body}</div>`;
+  } else {
+    const floorHeaders = sec.floorHeaders || [
+      { name: '一层', color: '#f4b084' },
+      { name: '二层', color: '#a9d08e' }
+    ];
+    let body;
+    if ((sec.rows || []).length === 0) {
+      body = `<div style="text-align:center;padding:80px 20px;color:#94a3b8;">暂无施工计划</div>`;
+    } else {
+      let header1 = `<th colspan="4" style="border:1px solid #999;padding:4px;background:#f2f2f2;font-size:14px;text-align:center;">${_getScheduleTableTitle()}</th>`;
+      header1 += floorHeaders.map(f => `<th colspan="3" style="border:1px solid #999;padding:4px;text-align:center;font-size:10px;background:${f.color};color:#000;">${f.name}</th>`).join('');
+      let header2 = `<th style="border:1px solid #999;padding:2px;width:28px;">序号</th>`;
+      header2 += `<th style="border:1px solid #999;padding:2px;width:36px;">楼栋</th>`;
+      header2 += `<th style="border:1px solid #999;padding:2px;width:36px;">部位</th>`;
+      header2 += `<th style="border:1px solid #999;padding:2px;">工序</th>`;
+      header2 += floorHeaders.flatMap(() => ['开始时间','完成时间','日历天']).map(h => `<th style="border:1px solid #999;padding:2px;width:42px;">${h}</th>`).join('');
+      const rows = sec.rows.map((item, i) => {
+        const bg = i % 2 === 0 ? '#f8fafc' : '#fff';
+        const highlight = (i === 4 || i === 8) ? 'background:#ffff00;font-weight:700;' : '';
+        return `<tr style="background:${bg};">
+          <td style="border:1px solid #999;padding:2px;text-align:center;">${i+1}</td>
+          <td style="border:1px solid #999;padding:2px;text-align:center;">${item.building}</td>
+          <td style="border:1px solid #999;padding:2px;text-align:center;">${item.location}</td>
+          <td style="border:1px solid #999;padding:2px;${highlight}">${item.process}</td>
+          ${item.floors.flatMap(f => [
+            `<td style="border:1px solid #999;padding:2px;text-align:center;">${f.startDate}</td>`,
+            `<td style="border:1px solid #999;padding:2px;text-align:center;">${f.endDate}</td>`,
+            `<td style="border:1px solid #999;padding:2px;text-align:center;">${f.days}</td>`
+          ]).join('')}
+        </tr>`;
+      }).join('');
+      body = `<div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:10px;border:1px solid #999;">
+          <thead>
+            <tr>${header1}</tr>
+            <tr>${header2}</tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+    }
+    document.getElementById('mappingContent').innerHTML = `<div style="height:100%;padding-top:8px;">${body}</div>`;
+  }
 }
 
 function renderMappingPage12() {
@@ -5163,7 +7571,7 @@ function renderMappingPage12() {
 
   let html = `
     <div style="margin-bottom:12px; font-size:13px; color:#64748b;">
-      数据源：事项台账中的协调类型
+      数据源：协调事宜登记（未闭环）
       <span style="margin-left:12px; font-weight:600; color:#0f172a;">${items.length} 项未闭环</span>
       <span style="margin-left:8px; font-size:12px; color:#94a3b8;">（共 ${M.ISSUES.filter(i => i.projectId === currentProjectId && i.type === 'coordination').length} 项）</span>
     </div>
@@ -5364,7 +7772,7 @@ async function testLLMConnection() {
 // 周报模版 / 导出 / 打印功能
 // ============================================================
 
-const _REPORT_PAGES = ['01','02','03','0301','04','05','06','07','08','09','10','11','12'];
+const _REPORT_PAGES = ['01','02','03','04','05','06','07','08','09','10','11','12'];
 
 const TEMPLATES = {
   cscec:  { name:'中建三局集团', headerColor:'#37a3eb', bg:'背景.png', projectId:'baicaoyuan' },
@@ -5382,20 +7790,25 @@ let _attendanceMode = 'full'; // 'full'=按满勤 'actual'=按实际出勤
 let _s03Photo = '';   // 管理人员合影照片 dataURL
 let _s03PhotoCaption = '管理人员合影';
 
+// 周报 06 照片持久化（使用 PostgreSQL）
+async function _loadPage06Photos() {
+  await loadPage06Photos();
+}
+
 function _pageFn(page) {
   const m = {
     '01':renderMappingPage01,'02':renderMappingPage02,'03':renderMappingPage03,
-    '0301':renderMappingPage0301,'04':renderMappingPage04,'05':renderMappingPage05,
-    '06':renderMappingPage06,'07':renderMappingPage07,'08':renderMappingPage08,
-    '09':renderMappingPage09,'10':renderMappingPage10,'11':renderMappingPage11,'12':renderMappingPage12
+    '04':renderMappingPage0301,'05':renderMappingPage04,'06':renderMappingPage05,
+    '07':renderMappingPage06,'08':renderMappingPage07,'09':renderMappingPage08,
+    '10':renderMappingPage09,'11':renderMappingPage10,'12':renderMappingPage12
   };
   return m[page];
 }
 
 function _pageTitle(page) {
-  const t = {'01':'工程概况','02':'本周完成工作','03':'下周计划','0301':'重要节点',
-  '04':'时间轴·生产周报','05':'现场照片','06':'施工人员统计','07':'ECC销项',
-  '08':'图纸深化','09':'生产进度曲线','10':'材料进场','11':'施工段计划','12':'协调事宜'};
+  const t = {'01':'工程概况','02':'本周完成工作','03':'下周计划','04':'重要节点',
+  '05':'时间轴·生产周报','06':'现场照片','07':'施工人员统计','08':'ECC销项',
+  '09':'图纸深化','10':'生产进度曲线','11':'施工段划分与计划','12':'协调事宜'};
   return t[page] || page;
 }
 
@@ -5421,7 +7834,7 @@ function _buildAllPagesHTML() {
     if (!fn) return;
     fn();
     if (p === '01') {
-      html += `<div class="report-page-frame${noBg}" style="background:none;page-break-after:always;">${el.innerHTML}</div>`;
+      html += `<div class="report-page-frame${noBg}" style="page-break-after:always;">${el.innerHTML}</div>`;
     } else {
       html += `<div class="report-page-frame${noBg}">
         <div class="report-page-header">
@@ -5431,8 +7844,8 @@ function _buildAllPagesHTML() {
         <div class="report-page-content">${el.innerHTML}</div>
       </div>`;
     }
-    // 0301 续页（多组月份/专业）
-    if (p === '0301' && _milestonePages.length > 1) {
+    // 04（原 0301）续页（多组月份/专业）
+    if (p === '04' && _milestonePages.length > 1) {
       for (let pi = 1; pi < _milestonePages.length; pi++) {
         html += `<div class="report-page-frame${noBg}">
           <div class="report-page-header">
@@ -5440,6 +7853,30 @@ function _buildAllPagesHTML() {
             <div class="header-line" style="background:${hc};"></div>
           </div>
           <div class="report-page-content">${_milestonePages[pi].html}</div>
+        </div>`;
+      }
+    }
+    // 05（原 04）续页（每页 12 行）
+    if (p === '05' && _page04Pages.length > 1) {
+      for (let pi = 1; pi < _page04Pages.length; pi++) {
+        html += `<div class="report-page-frame${noBg}">
+          <div class="report-page-header">
+            <div class="trapezoid" style="background:${hc};"></div>
+            <div class="header-line" style="background:${hc};"></div>
+          </div>
+          <div class="report-page-content">${_renderPage04Table(_page04Pages[pi])}</div>
+        </div>`;
+      }
+    }
+    // 06（原 05）续页（每页 6 张照片）
+    if (p === '06' && _page05Pages.length > 1) {
+      for (let pi = 1; pi < _page05Pages.length; pi++) {
+        html += `<div class="report-page-frame${noBg}">
+          <div class="report-page-header">
+            <div class="trapezoid" style="background:${hc};"></div>
+            <div class="header-line" style="background:${hc};"></div>
+          </div>
+          <div class="report-page-content">${_renderPage05Grid(_page05Pages[pi])}</div>
         </div>`;
       }
     }
@@ -5578,6 +8015,112 @@ function toggleAttendanceReason(cb) {
   if (reasonInput) reasonInput.style.display = cb.checked ? 'none' : 'inline';
 }
 
+// ============================================================
+// 周报 06 照片管理
+// ============================================================
+
+function _genId() { return 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+async function loadPage06Photos() {
+  try {
+    const r = await fetch(`http://localhost:3010/api/page06-photos/${currentProjectId}`);
+    const photos = await r.json();
+    M.PAGE06_PHOTOS = photos.map(p => ({ id: p.id, src: p.src, caption: p.caption || '', tradeId: p.trade_id || '' }));
+  } catch (e) { console.warn('[Page06 照片] 加载失败:', e); }
+}
+
+async function uploadPage06Photo(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async function(e) {
+    console.log('[Page06 Upload] before: currentProjectId=', currentProjectId, 'photos before push:', (M.PAGE06_PHOTOS || []).length);
+    const id = _genId();
+    const photo = { id, src: e.target.result, caption: '', tradeId: '' };
+    M.PAGE06_PHOTOS = M.PAGE06_PHOTOS || [];
+    M.PAGE06_PHOTOS.push(photo);
+    console.log('[Page06 Upload] after push, photos:', M.PAGE06_PHOTOS.length);
+    renderPage06PhotoGrid();
+    renderMappingPage06();
+    // 保存到 DB
+    try {
+      await fetch('http://localhost:3010/api/page06-photos', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, projectId: currentProjectId, src: e.target.result, caption: '', tradeId: '' })
+      });
+    } catch (err) { console.warn('[Page06 照片] 保存失败:', err); }
+  };
+  reader.readAsDataURL(file);
+  input.value = '';
+}
+
+function renderPage06PhotoGrid() {
+  const grid = document.getElementById('page06PhotoGrid');
+  const count = document.getElementById('page06PhotoCount');
+  if (!grid) return;
+  const photos = M.PAGE06_PHOTOS || [];
+  if (count) count.textContent = `共 ${photos.length} 张照片`;
+  if (photos.length === 0) {
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:16px;color:#94a3b8;font-size:11px;">暂无照片，点击上方「上传图片」添加</div>';
+    return;
+  }
+  const areas = getProjectAreas(currentProjectId);
+  const tradeOptions = areas.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
+  grid.innerHTML = photos.map(p => `
+    <div style="border:1px solid #e2e8f0;border-radius:4px;overflow:hidden;background:#f8fafb;">
+      <div style="width:100%;height:80px;overflow:hidden;background:#f1f5f9;display:flex;align-items:center;justify-content:center;cursor:pointer;" onclick="enlargePage06Photo('${p.id}')">
+        <img src="${p.src}" style="width:100%;height:100%;object-fit:contain;">
+      </div>
+      <div style="padding:4px;">
+        <input class="form-input" type="text" value="${(p.caption||'').replace(/"/g,'&quot;')}" placeholder="照片说明" style="width:100%;font-size:10px;padding:2px 4px;margin-bottom:2px;" onchange="updatePage06Photo('${p.id}','caption',this.value)">
+        <select style="width:100%;font-size:10px;padding:1px 4px;margin-bottom:2px;border:1px solid #d1d5db;border-radius:2px;" onchange="updatePage06Photo('${p.id}','tradeId',this.value)">
+          <option value="">-- 选择工种 --</option>
+          ${tradeOptions}
+        </select>
+        <button class="btn btn-xs btn-ghost" onclick="removePage06Photo('${p.id}')" style="font-size:9px;padding:1px 4px;color:#ef4444;">🗑 删除</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function removePage06Photo(id) {
+  M.PAGE06_PHOTOS = (M.PAGE06_PHOTOS || []).filter(p => p.id !== id);
+  renderPage06PhotoGrid();
+  renderMappingPage06();
+  try {
+    await fetch(`http://localhost:3010/api/page06-photos/${currentProjectId}/${id}`, { method: 'DELETE' });
+  } catch (e) { console.warn('[Page06 照片] 删除失败:', e); }
+}
+
+function updatePage06Photo(id, field, value) {
+  const photo = (M.PAGE06_PHOTOS || []).find(p => p.id === id);
+  if (photo) photo[field] = value;
+  // 保存到 DB
+  const p = M.PAGE06_PHOTOS.find(x => x.id === id);
+  if (p) {
+    fetch('http://localhost:3010/api/page06-photos', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: p.id, projectId: currentProjectId, src: p.src, caption: p.caption || '', tradeId: p.tradeId || '' })
+    }).catch(e => console.warn('[Page06 照片] 更新失败:', e));
+  }
+}
+
+function enlargePage06Photo(id) {
+  const photo = (M.PAGE06_PHOTOS || []).find(p => p.id === id);
+  if (!photo) return;
+  const overlay = document.getElementById('page06PhotoEnlargeOverlay');
+  const img = document.getElementById('page06PhotoEnlargeImg');
+  const caption = document.getElementById('page06PhotoEnlargeCaption');
+  if (overlay && img) {
+    img.src = photo.src;
+    overlay.style.display = 'flex';
+    if (caption) {
+      caption.textContent = photo.caption || '';
+      caption.style.display = '';
+    }
+  }
+}
+
 function setAllAttendance(checked) {
   document.querySelectorAll('#attendanceList .attendance-cb').forEach(cb => {
     cb.checked = checked;
@@ -5683,6 +8226,10 @@ function setReportRange() {
 
 // 在原有 DOMContentLoaded 之后启动健康检查
 document.addEventListener('DOMContentLoaded', () => {
+  _loadPage06Photos();
+  // 初始化 page06 unit 按钮高亮
+  const initUnit = localStorage.getItem(`page06_unit_${currentProjectId}`) || 'people';
+  if (typeof setPage06Unit === 'function') setPage06Unit(initUnit);
   setTimeout(() => {
     checkBackendHealth();
     setInterval(checkBackendHealth, 30000);

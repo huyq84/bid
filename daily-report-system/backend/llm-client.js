@@ -158,7 +158,7 @@ export class MinMaxClient {
 
 【输出格式】
 {
-  "type": "progress" | "material" | "safety" | "coordination" | "attendance" | "issue",
+  "type": "progress" | "material" | "safety" | "coordination" | "attendance" | "issue" | "drawing",
   "areaId": "区域ID（从列表选，找不到则空字符串）",
   "areaName": "如果识别到列表外的区域名，填这里；否则空字符串",
   "planId": "匹配的计划ID（从计划列表选，无法匹配则空字符串）",
@@ -185,7 +185,8 @@ export class MinMaxClient {
 - completionType：提到"计划内"或未说明 → "planned"；提到"计划外""新增""临时""突发" → "unplanned"
 - laborRequirements：当 type 为 progress 时，尽可能提取工种×人数；无法提取则留空数组
 - planId：只在明确匹配到计划列表中的某项时填写，不确定就留空
-- owner：口述中常见"负责人XXX"或"XXX负责"句式，"负责人刘"中"刘"就是负责人姓名，提取"刘"即可`;
+- owner：口述中常见"负责人XXX"或"XXX负责"句式，"负责人刘"中"刘"就是负责人姓名，提取"刘"即可
+- type 选择规则：口述出现"图纸深化/深化设计/深化图/节点图/立面图/幕墙节点/打样/样板段/旋转楼梯/岩板/木饰面清单/弧角打样"等关键词 → "drawing"；口述提及"安全检查/隐患/安全帽"等 → "safety"；口述提及"材料进场/规格/数量" → "material"；口述是讨论性质"碰了一下/与XX沟通" → "coordination"；口述是考勤"几人到岗/打卡" → "attendance"；其他默认 "progress"`;
 
     let userMsg = `【项目】${projectId}
 【区域列表】

@@ -509,6 +509,23 @@ aside .card { margin-bottom: 0; }
   margin: 0 auto; page-break-after: always;
 }
 .report-page-frame.no-bg { background-image: none !important; background-color: #fff; }
+.ecc-tab {
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #64748b;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+.ecc-tab:hover { color: #00adef; }
+.ecc-tab.active {
+  color: #00adef;
+  border-bottom-color: #00adef;
+  background: #fff;
+  font-weight: 700;
+}
 
 /* ========== 平台风格周报预览 ========== */
 #modalWeeklyMapping {
@@ -855,6 +872,7 @@ aside .card { margin-bottom: 0; }
 .legend-dot.today { background: #00adef; }
 .legend-dot.completed { background: #10b981; }
 .legend-dot.draft { background: #ef4444; }
+.legend-dot.plan { background: #8b5cf6; }
 
 /* ---------- 计划管理样式 ---------- */
 .labor-row, .area-row {
