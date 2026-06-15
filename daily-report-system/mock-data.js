@@ -73,29 +73,29 @@ const WORKERS = [
 // 3b. 管理团队（周报 03 页·到岗管理人员名单）
 // ============================================================
 const MANAGEMENT_TEAM = [
-  { id: 'MGR01', position: '项目经理',                  name: '侯帅',   phone: '13051103313', attendanceStatus: '已到岗' },
-  { id: 'MGR02', position: '项目技术负责人兼深化设计负责人', name: '王健',   phone: '13818589201', attendanceStatus: '已到岗' },
-  { id: 'MGR03', position: '计划经理',                  name: '陈冲',   phone: '13651007882', attendanceStatus: '已到岗' },
-  { id: 'MGR04', position: '生产经理（软装）',            name: '王亚广', phone: '15910813359', attendanceStatus: '已到岗' },
-  { id: 'MGR05', position: '生产经理（精装）',            name: '鲍永春', phone: '13382510829', attendanceStatus: '已到岗' },
-  { id: 'MGR06', position: '生产经理（机电）',            name: '袁永超', phone: '18900125480', attendanceStatus: '已到岗' },
-  { id: 'MGR07', position: '深化设计经理（软装）',        name: '李欢',   phone: '17310298646', attendanceStatus: '已到岗' },
-  { id: 'MGR08', position: '深化设计（软装）',            name: '乔志广', phone: '13939996372', attendanceStatus: '已到岗' },
-  { id: 'MGR09', position: '深化设计（软装）',            name: '李水旺', phone: '18310163008', attendanceStatus: '已到岗' },
-  { id: 'MGR10', position: '深化设计（软装）',            name: '赵晨星', phone: '15011544879', attendanceStatus: '已到岗' },
-  { id: 'MGR11', position: '深化设计（软装）',            name: '龙方',   phone: '13974050351', attendanceStatus: '已到岗' },
-  { id: 'MGR12', position: '深化设计经理（精装）',        name: '徐诗怡', phone: '18013705168', attendanceStatus: '已到岗' },
-  { id: 'MGR13', position: '深化设计（机电）',            name: '苏尧',   phone: '13141422281', attendanceStatus: '已到岗' },
-  { id: 'MGR14', position: '成本经理（软装/精装）',       name: '郭建欣', phone: '15600173618', attendanceStatus: '已到岗' },
-  { id: 'MGR15', position: '商务经理（软装/精装）',       name: '薛智臣', phone: '18810013805', attendanceStatus: '已到岗' },
-  { id: 'MGR16', position: '预算员（软装/精装）',         name: '王迪',   phone: '15726644536', attendanceStatus: '已到岗' },
-  { id: 'MGR17', position: '电气预算员',                 name: '邓明伟', phone: '19937244723', attendanceStatus: '已到岗' },
-  { id: 'MGR18', position: '质量经理（软装）',            name: '周建忠', phone: '13636535828', attendanceStatus: '已到岗' },
-  { id: 'MGR19', position: '质量经理（精装）',            name: '李欣霖', phone: '17631518331', attendanceStatus: '已到岗' },
-  { id: 'MGR20', position: '安全经理（软装）',            name: '孙攀岳', phone: '18501166924', attendanceStatus: '已到岗' },
-  { id: 'MGR21', position: '安全经理（精装）',            name: '赵国显', phone: '18516217962', attendanceStatus: '已到岗' },
-  { id: 'MGR22', position: '资料员',                    name: '蔡丽华', phone: '18600371133', attendanceStatus: '已到岗' },
-  { id: 'MGR23', position: '材料员（软装/精装）',         name: '肖自政', phone: '15093960151', attendanceStatus: '已到岗' }
+  { id: 'MGR01', position: '项目经理',                              name: '侯帅',   phone: '13051103313', attendanceStatus: '已到岗' },
+  { id: 'MGR02', position: '项目技术负责人兼深化设计负责人',          name: '王健',   phone: '13818589201', attendanceStatus: '已到岗' },
+  { id: 'MGR03', position: '计划经理',                              name: '陈冲',   phone: '13651007882', attendanceStatus: '已到岗' },
+  { id: 'MGR04', position: '生产经理（软装）',                       name: '王亚广', phone: '15910813359', attendanceStatus: '已到岗' },
+  { id: 'MGR05', position: '生产经理（精装）',                       name: '鲍永春', phone: '13382510829', attendanceStatus: '已到岗' },
+  { id: 'MGR06', position: '生产经理（机电）',                       name: '袁永超', phone: '18900125480', attendanceStatus: '已到岗' },
+  { id: 'MGR07', position: '深化设计经理（软装）',                   name: '李欢',   phone: '17310298646', attendanceStatus: '已到岗' },
+  { id: 'MGR08', position: '深化设计（软装）',                       name: '乔志广', phone: '13939996372', attendanceStatus: '已到岗' },
+  { id: 'MGR09', position: '深化设计（软装）',                       name: '李水旺', phone: '18310163008', attendanceStatus: '已到岗' },
+  { id: 'MGR10', position: '深化设计（软装）',                       name: '赵晨星', phone: '15011544879', attendanceStatus: '已到岗' },
+  { id: 'MGR11', position: '深化设计（软装）',                       name: '龙方',   phone: '13974050351', attendanceStatus: '已到岗' },
+  { id: 'MGR12', position: '深化设计经理（精装）',                   name: '徐诗怡', phone: '18013705168', attendanceStatus: '已到岗' },
+  { id: 'MGR13', position: '深化设计（机电）',                       name: '苏尧',   phone: '13141422281', attendanceStatus: '已到岗' },
+  { id: 'MGR14', position: '成本经理（软装/精装）',                  name: '郭建欣', phone: '15600173618', attendanceStatus: '已到岗' },
+  { id: 'MGR15', position: '商务经理（软装/精装）',                  name: '薛智臣', phone: '18810013805', attendanceStatus: '已到岗' },
+  { id: 'MGR16', position: '预算员（软装/精装）',                    name: '王迪',   phone: '15726644536', attendanceStatus: '已到岗' },
+  { id: 'MGR17', position: '电气预算员（软装/精装）',                name: '邓明伟', phone: '19937244723', attendanceStatus: '已到岗' },
+  { id: 'MGR18', position: '质量经理（软装）',                       name: '周建忠', phone: '13636535828', attendanceStatus: '已到岗' },
+  { id: 'MGR19', position: '质量经理（精装）',                       name: '李欣霖', phone: '17631518331', attendanceStatus: '已到岗' },
+  { id: 'MGR20', position: '安全经理（软装）',                       name: '孙攀岳', phone: '18501166924', attendanceStatus: '已到岗' },
+  { id: 'MGR21', position: '安全经理（精装）',                       name: '赵国显', phone: '18516217962', attendanceStatus: '已到岗' },
+  { id: 'MGR22', position: '资料员',                                name: '蔡丽华', phone: '18600371133', attendanceStatus: '已到岗' },
+  { id: 'MGR23', position: '材料员（软装/精装）',                    name: '肖自政', phone: '15093960151', attendanceStatus: '已到岗' }
 ];
 
 // ============================================================
@@ -1576,10 +1576,10 @@ let MILESTONE_DATA = null;
 
 function initMilestoneData() {
   if (MILESTONE_DATA) return;
-  // 关键：从 window.MockData 读取（init 时会被后端 /api/data/all 覆盖为 PostgreSQL 数据）
   const MD = (typeof window !== 'undefined' && window.MockData) || {};
   const projectId = CURRENT_PROJECT_ID;
-  const plans = (MD.MILESTONE_PLANS && MD.MILESTONE_PLANS[projectId]) || MILESTONE_PLANS[projectId] || [];
+  const apiPlans = (MD.MILESTONE_PLANS && MD.MILESTONE_PLANS[projectId]);
+  const plans = Array.isArray(apiPlans) ? apiPlans : [];
   const monthSet = new Set();
   plans.forEach(p => {
     if (p.targetMonth) monthSet.add(p.targetMonth);
@@ -1592,13 +1592,37 @@ function initMilestoneData() {
   plans.forEach(p => {
     if (!cats[p.category]) cats[p.category] = {};
     if (p.nodeType === '关键节点') {
+      // targetMonth 为 0 的是空行占位，创建空 entry 保持专业存在
+      if (p.targetMonth === 0) {
+        cats[p.category]['关键节点'] = { rowType: 'key', cells: {} };
+        return;
+      }
       const val = (p.areaLabel || '') + ' ' + (p.description || '');
-      cats[p.category]['关键节点'] = { rowType: 'key', cells: { [`${year}.${p.targetMonth}`]: val.trim() } };
+      if (!cats[p.category]['关键节点']) {
+        cats[p.category]['关键节点'] = { rowType: 'key', cells: {} };
+      }
+      cats[p.category]['关键节点'].cells[`${year}.${p.targetMonth}`] = val.trim();
     } else if (p.nodeType === '次要节点') {
-      const key = `${year}.${p.targetMonth}`;
-      const items = (p.subItems || []).map(s => `${s.label}：${s.text}`);
-      cats[p.category]['次要节点'] = cats[p.category]['次要节点'] || { rowType: 'sub', cells: {} };
-      cats[p.category]['次要节点'].cells[key] = (cats[p.category]['次要节点'].cells[key] || '') + items.join('\n');
+      // targetMonth 为 0 的是空行占位
+      if (p.targetMonth === 0) {
+        cats[p.category]['次要节点'] = { rowType: 'sub', cells: {} };
+        return;
+      }
+      const items = (p.subItems || []).map(s => {
+        if (s.label && s.text) return `${s.label}：${s.text}`;
+        if (s.label) return s.label;
+        if (s.text) return s.text;
+        return '';
+      }).filter(Boolean);
+      // 次要节点可能没有 targetMonth，需要从 subItems 中收集
+      const monthsForThisPlan = new Set();
+      (p.subItems || []).forEach(s => { if (s.targetMonth) monthsForThisPlan.add(s.targetMonth); });
+      if (p.targetMonth) monthsForThisPlan.add(p.targetMonth);
+      monthsForThisPlan.forEach(tm => {
+        const key = `${year}.${tm}`;
+        cats[p.category]['次要节点'] = cats[p.category]['次要节点'] || { rowType: 'sub', cells: {} };
+        cats[p.category]['次要节点'].cells[key] = (cats[p.category]['次要节点'].cells[key] || '') + items.join('\n');
+      });
     }
   });
   const rows = [];
@@ -1619,6 +1643,107 @@ function getMilestoneData() {
 
 function saveMilestoneData(data) {
   MILESTONE_DATA = data;
+  try {
+    const plans = _milestoneDataToPlans(data);
+    const projectId = (typeof window !== 'undefined' && window.MOCK_CURRENT_PROJECT) || (typeof window !== 'undefined' && window.MockData && window.MockData.CURRENT_PROJECT_ID) || CURRENT_PROJECT_ID || (M && M.PROJECTS && M.PROJECTS[0] && M.PROJECTS[0].id);
+    if (projectId) {
+      const clearUrl = 'http://localhost:3010/api/milestone-plans/clear/' + encodeURIComponent(projectId);
+      const xhr1 = new XMLHttpRequest();
+      xhr1.open('POST', clearUrl, false);
+      xhr1.send();
+      if (xhr1.status !== 200) console.warn('[milestone] clear failed:', xhr1.status, xhr1.responseText);
+    }
+    for (const p of plans) {
+      const xhr2 = new XMLHttpRequest();
+      xhr2.open('POST', 'http://localhost:3010/api/milestone-plans', false);
+      xhr2.setRequestHeader('Content-Type', 'application/json');
+      xhr2.send(JSON.stringify(p));
+      if (xhr2.status !== 200 && xhr2.status !== 201) console.warn('[milestone] save failed:', xhr2.status, xhr2.responseText);
+    }
+    // 同步更新内存中的 M.MILESTONE_PLANS，并重置 MILESTONE_DATA 使下次 initMilestoneData 重新读取
+    if (projectId && M && M.MILESTONE_PLANS) {
+      M.MILESTONE_PLANS[projectId] = plans;
+    }
+    MILESTONE_DATA = null;
+  } catch (e) { console.warn('[milestone] 同步失败:', e); }
+}
+
+// 重置节点缓存（切换项目时调用）
+function resetMilestoneCache() {
+  MILESTONE_DATA = null;
+}
+
+// 设置当前项目 ID（切换项目时调用，同步模块变量 CURRENT_PROJECT_ID）
+function setCurrentProjectId(pid) {
+  CURRENT_PROJECT_ID = pid;
+}
+
+// MILESTONE_DATA → MILESTONE_PLANS 转换
+// 输入：{ months: ['2026.5', '2026.6', ...], rows: [{ major, row, rowType, '2026.5': '...', '2026.6': '...' }] }
+// 输出：[{ projectId, id, category, nodeType, areaLabel, description, targetMonth, year, subItems }]
+function _milestoneDataToPlans(data) {
+  if (!data || !data.rows) return [];
+  const projectId = (typeof window !== 'undefined' && window.MOCK_CURRENT_PROJECT) || CURRENT_PROJECT_ID || (M && M.PROJECTS && M.PROJECTS[0] && M.PROJECTS[0].id) || 'baicaoyuan';
+  const plans = [];
+  const year = (data.months && data.months[0]) ? parseInt(String(data.months[0]).split('.')[0], 10) : 2026;
+  data.rows.forEach((r, i) => {
+    const id = 'MP' + String(900 + i).padStart(3, '0');
+    // 收集该行所有月份的 cell
+    const cellEntries = [];
+    (data.months || []).forEach(mk => {
+      const cellVal = r[mk];
+      if (cellVal && String(cellVal).trim()) {
+        const m = parseInt(String(mk).split('.')[1], 10);
+        cellEntries.push({ month: m, value: String(cellVal) });
+      }
+    });
+    if (r.rowType === 'key') {
+      if (cellEntries.length === 0) {
+        // 空行也生成一条占位 plan，否则新建专业不填内容就消失
+        plans.push({
+          projectId, id: id + 'K0', category: r.major, nodeType: '关键节点',
+          areaLabel: '', description: '', targetMonth: 0, year, subItems: []
+        });
+      }
+      cellEntries.forEach(e => {
+        // value like "食堂 食堂、健身房完工" or just "食堂、健身房完工"
+        const parts = e.value.split(/\s+/);
+        const areaLabel = parts.length > 1 ? parts[0] : '';
+        const desc = parts.length > 1 ? parts.slice(1).join(' ') : parts[0] || '';
+        plans.push({
+          projectId, id: id + 'K' + e.month, category: r.major, nodeType: '关键节点',
+          areaLabel, description: desc, targetMonth: e.month, year, subItems: []
+        });
+      });
+    } else {
+      // 次要节点
+      if (cellEntries.length === 0) {
+        plans.push({
+          projectId, id: id + 'S0', category: r.major, nodeType: '次要节点',
+          areaLabel: '', description: '', targetMonth: 0, year, subItems: []
+        });
+      }
+      const subItems = [];
+      cellEntries.forEach(e => {
+        e.value.split('\n').forEach(line => {
+          const m = line.match(/^([^：:]+)[：:](.+)$/);
+          if (m) subItems.push({ label: m[1].trim(), text: m[2].trim(), targetMonth: e.month });
+          else if (line.trim()) subItems.push({ label: line.trim(), text: '', targetMonth: e.month });
+        });
+      });
+      // 按月份分组
+      const byMonth = {};
+      subItems.forEach(si => { (byMonth[si.targetMonth] = byMonth[si.targetMonth] || []).push(si); });
+      Object.keys(byMonth).forEach(m => {
+        const mm = parseInt(m, 10);
+        plans.push({
+          projectId, id: id + 'S' + mm, category: r.major, nodeType: '次要节点',
+          areaLabel: '', description: '', targetMonth: mm, year, subItems: byMonth[mm]
+        });
+      });
+    }
+  });
+  return plans;
 }
 
 function getPage0301Data(projectId) {
@@ -2228,23 +2353,38 @@ function _getDateList(weekStart, weekEnd) {
 })();
 
 function getAttendanceForDate(date) {
-  if (!DAILY_ATTENDANCE[date]) {
+  // 始终用 window.MockData 上的最新引用（与签到界面/loadDataFromAPI 同步）
+  const dataRoot = (typeof window !== 'undefined' && window.MockData) || {};
+  const store = dataRoot.DAILY_ATTENDANCE || DAILY_ATTENDANCE;
+  const team = dataRoot.MANAGEMENT_TEAM || MANAGEMENT_TEAM;
+  const pid = CURRENT_PROJECT_ID;
+  if (!store[pid]) store[pid] = {};
+  if (!store[pid][date]) {
     const rec = {};
-    MANAGEMENT_TEAM.forEach(m => { rec[m.id] = { present: true, reason: '' }; });
-    DAILY_ATTENDANCE[date] = rec;
+    team.forEach(m => { rec[m.id] = { present: true, reason: '' }; });
+    store[pid][date] = rec;
   }
-  return DAILY_ATTENDANCE[date];
+  return store[pid][date];
 }
 
 function setAttendanceForDate(date, records) {
-  DAILY_ATTENDANCE[date] = records;
+  const store = (window.MockData && window.MockData.DAILY_ATTENDANCE) || DAILY_ATTENDANCE;
+  const pid = CURRENT_PROJECT_ID;
+  if (!store[pid]) store[pid] = {};
+  store[pid][date] = records;
 }
 
 function getWeekAttendanceStats(weekStart, weekEnd) {
   const dates = _getDateList(weekStart, weekEnd);
   dates.forEach(d => getAttendanceForDate(d));
-  return MANAGEMENT_TEAM.map(m => {
-    const days = dates.map(d => DAILY_ATTENDANCE[d][m.id] || { present: false, reason: '' });
+  // 始终用 window.MockData 上的最新引用（与签到界面/loadDataFromAPI/addManagementRow 同步）
+  const dataRoot = (typeof window !== 'undefined' && window.MockData) || {};
+  const team = dataRoot.MANAGEMENT_TEAM || MANAGEMENT_TEAM;
+  const store = dataRoot.DAILY_ATTENDANCE || DAILY_ATTENDANCE;
+  const pid = CURRENT_PROJECT_ID;
+  const pidStore = store[pid] || {};
+  return team.map(m => {
+    const days = dates.map(d => (pidStore[d] && pidStore[d][m.id]) || { present: false, reason: '' });
     const presentDays = days.filter(d => d.present).length;
     const reasons = days.filter(d => !d.present && d.reason).map(d => d.reason);
     return {
@@ -2295,6 +2435,6 @@ window.MockData = {
   getPage01Data, getPage03Data, getPage0301Data, getPage04Data, getPage05Photos,
   getPage06Data, getPage07Data, getPage08Data, getPage09Data, getPage10Data, getPage11Data, getPageSectionsData, getPage12Data,
   DAILY_ATTENDANCE, getAttendanceForDate, setAttendanceForDate, getWeekAttendanceStats,
-  getMilestoneData, saveMilestoneData,
+  getMilestoneData, saveMilestoneData, resetMilestoneCache, setCurrentProjectId,
   saveEventsToStorage, savePlansToStorage
 };

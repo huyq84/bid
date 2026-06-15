@@ -52,9 +52,11 @@ async function loadDataFromAPI() {
     };
     mergePhotos(M.EVENTS);
     mergePhotos(M.HISTORY_EVENTS);
-    // 持久化合并后的数据到 localStorage（防止下次刷新又丢）
-    if (M.saveEventsToStorage) {
-      try { M.saveEventsToStorage(); } catch {}
+    // 持久化合并后的数据到 localStorage（防止下次刷新又丢）—— 仅首次加载时写
+    if (M._initialLoadDone !== true) {
+      if (M.saveEventsToStorage) {
+        try { M.saveEventsToStorage(); } catch {}
+      }
     }
 
     // 深度合并 PLANS（API + 本地，按 id 去重，API 版本优先）
@@ -73,8 +75,10 @@ async function loadDataFromAPI() {
         //（M.PLANS[pid] 中未被覆盖的本地项保持不变）
       }
     }
-    // 同步 PLANS 到 localStorage（让 getPlansForProject 等 mock-data.js 函数能读到最新数据）
-    try { localStorage.setItem('daily_plans', JSON.stringify(M.PLANS)); } catch(e) { console.warn('[localStorage] 写计划失败:', e.message); }
+    // 同步 PLANS 到 localStorage（让 getPlansForProject 等 mock-data.js 函数能读到最新数据）—— 仅首次加载
+    if (M._initialLoadDone !== true) {
+      try { localStorage.setItem('daily_plans', JSON.stringify(M.PLANS)); } catch(e) { console.warn('[localStorage] 写计划失败:', e.message); }
+    }
 
     // ECC / 图纸深化 / 甘特 / 施工段
     M.ECC_ITEMS = data.ECC_ITEMS || [];
@@ -97,6 +101,9 @@ async function loadDataFromAPI() {
 
     // ECC 手动汇总（按项目一条）
     M.ECC_SUMMARIES = data.ECC_SUMMARIES || {};
+
+    // 标记首次加载完成，切换项目时不再写 localStorage
+    M._initialLoadDone = true;
 
     // 重写保存方法：先同步写 localStorage（防刷新丢）→ 再异步同步到后端
     M.saveEventsToStorage = async function() {
@@ -367,15 +374,23 @@ document.addEventListener('click', function(e) {
 function switchProject(projectId) {
   currentProjectId = projectId;
   localStorage.setItem('current_project_id', projectId);
+  // 同步 mock-data.js 的 CURRENT_PROJECT_ID（确保签到/节点等按项目隔离）
+  try { M.setCurrentProjectId && M.setCurrentProjectId(projectId); } catch {}
+  // 重置 milestone 缓存，使下次打开时从 M.MILESTONE_PLANS[新项目] 重新读取
+  try { M.resetMilestoneCache && M.resetMilestoneCache(); } catch {}
   document.getElementById('projectDropdown').style.display = 'none';
-  initProject();
-  renderProjectInfo();
-  renderIssues();
-  renderStats();
-  populateAreaSelects();
-  updateCalendar();
-  renderFilteredEvents();
-  renderDailyPlanCard();
+  // 切换后从 API 拉取新项目的数据
+  loadDataFromAPI().then(() => {
+    initProject();
+    renderProjectInfo();
+    renderIssues();
+    renderStats();
+    populateAreaSelects();
+    updateCalendar();
+    renderFilteredEvents();
+    renderDailyPlanCard();
+    loadPage03Photo();
+  });
 }
 
 // ============================================================
@@ -830,11 +845,22 @@ async function deleteEvent(eventId) {
   if (!confirmed) return;
   const index = M.EVENTS.findIndex(e => e.id === eventId);
   if (index === -1) return;
+  const ev = M.EVENTS[index];
   M.EVENTS.splice(index, 1);
   // 同步到后端（如连接可用）
   try {
     await fetch('http://localhost:3010/api/events/' + eventId, { method: 'DELETE' });
   } catch { /* 后端不可达时只删本地 */ }
+  // 如果是图纸深化事件，级联删除 DRAWING_DEEPENINGS
+  if (ev && ev.type === 'drawing') {
+    const dd = M.DRAWING_DEEPENINGS && M.DRAWING_DEEPENINGS.find(d => d.eventId === eventId);
+    if (dd) {
+      M.DRAWING_DEEPENINGS = M.DRAWING_DEEPENINGS.filter(d => d.eventId !== eventId);
+      try {
+        await fetch('http://localhost:3010/api/drawing-deepenings/' + encodeURIComponent(dd.id), { method: 'DELETE' });
+      } catch (err) { console.warn('[图纸深化] 删除后端失败:', err); }
+    }
+  }
   if (M.saveEventsToStorage) M.saveEventsToStorage();
   renderFilteredEvents();
   renderStats();
@@ -1641,10 +1667,33 @@ function togglePlanCard(id) {
 }
 
 function renderDailyPlanCard() {
-  // 取选中的第一个日期，否则回退到今天。多选时取首日为主日。
-  const today = (selectedDates && selectedDates.length > 0) ? selectedDates[0] : M.TODAY;
+  // 多选时：展示所有选中日期上的计划（具体日期集合，非连续区间）；单选/无选时：只展示当日计划
+  const isMulti = selectedDates && selectedDates.length > 1;
+  const daySet = isMulti ? new Set(selectedDates) : null;
+  const titleEl = document.getElementById('dailyPlanTitle');
+  if (titleEl) {
+    if (isMulti) {
+      const sorted = [...selectedDates].sort();
+      const fmtMD = s => s.replace(/^\d{4}-/, '').replace(/-/g, '.');
+      titleEl.textContent = sorted.length > 5
+        ? `多日计划（${sorted.length} 天）`
+        : `多日计划（${sorted.map(fmtMD).join('、')}）`;
+    } else {
+      titleEl.textContent = '今日计划';
+    }
+  }
   const todayPlans = (M.PLANS[currentProjectId] || []).filter(p => {
     if (p.status === 'cancelled') return false;
+    if (isMulti) {
+      // 计划与任一选中日相交（具体日期集合，不是连续区间）
+      if (p.startDate && p.endDate) {
+        for (const d of selectedDates) if (d >= p.startDate && d <= p.endDate) return true;
+        return false;
+      }
+      if (p.date) return daySet.has(p.date);
+      return false;
+    }
+    const today = selectedDates && selectedDates.length > 0 ? selectedDates[0] : M.TODAY;
     if (p.startDate && p.endDate) return p.startDate <= today && p.endDate >= today;
     if (p.date) return p.date === today;
     return false;
@@ -1654,7 +1703,7 @@ function renderDailyPlanCard() {
     document.getElementById('dailyPlanCard').innerHTML = `
       <div style="text-align:center; padding:12px; color:#94a3b8;">
         <div style="font-size:24px; margin-bottom:4px;">📋</div>
-        <div style="font-size:12px;">暂无今日计划</div>
+        <div style="font-size:12px;">${isMulti ? '所选日期内暂无计划' : '暂无今日计划'}</div>
       </div>
     `;
     return;
@@ -1688,8 +1737,12 @@ function renderDailyPlanCard() {
     } else if (plan.date) {
       dateRange = fmtMD(plan.date);
     }
-    // 获取关联完成记录
-    const planEvents = M.EVENTS.filter(e => e.planId === plan.id);
+    // 获取关联完成记录（多选时仅取区间内的事件）
+    const planEvents = M.EVENTS.filter(e => {
+      if (e.planId !== plan.id) return false;
+      if (isMulti) return selectedDates.includes(e.date);
+      return true;
+    });
 
     html += `
       <div style="background:#f8fafc; border-radius:6px; padding:10px; margin-bottom:8px; border-left:3px solid ${typeMeta.color};">
@@ -1728,7 +1781,7 @@ function renderDailyPlanCard() {
         <!-- 填报记录 -->
         ${planEvents.length > 0 ? `
           <div style="margin-top:6px; padding-top:6px; border-top:1px dashed #d1d5db;">
-            <div style="font-size:10px; color:#94a3b8; margin-bottom:4px;">📋 今日填报（${planEvents.length}次）</div>
+            <div style="font-size:10px; color:#94a3b8; margin-bottom:4px;">📋 ${isMulti ? '多日报填报' : '今日填报'}（${planEvents.length}次）</div>
             ${planEvents.slice(-5).reverse().map(e => `
               <div style="display:flex; justify-content:space-between; font-size:11px; color:#475569; padding:2px 0;">
                 <span style="color:#94a3b8;">${e.time || ''}</span>
@@ -2207,13 +2260,17 @@ function saveDailyPlan() {
     plan.createdAt = new Date().toISOString();
     plan.updatedAt = plan.createdAt;
     M.PLANS[currentProjectId].unshift(plan);
+    // 限制 localStorage 大小，只保留最近 100 条
+    if (M.PLANS[currentProjectId].length > 100) {
+      M.PLANS[currentProjectId] = M.PLANS[currentProjectId].slice(0, 100);
+    }
     showToast('日计划已保存', 'success');
   }
   
   console.log('[日计划] 保存后长度:', M.PLANS[currentProjectId].length, '计划ID:', plan.id);
   
   if (M.savePlansToStorage) M.savePlansToStorage();
-  localStorage.setItem('daily_plans', JSON.stringify(M.PLANS));
+  try { localStorage.setItem('daily_plans', JSON.stringify(M.PLANS)); } catch(e) { console.warn('[localStorage] 写计划失败:', e.message); }
   
   updateCalendarPlanMarks();
   closeModal('modalDailyPlan');
@@ -2264,10 +2321,16 @@ function editDailyPlan(planId) {
   const laborList = plan.laborRequirements || plan.laborSchedule || [];
   if (laborList.length > 0) {
     laborRowCount = laborList.length;
+    // 工日自动计算：count × plan天数；若 l.manDays 已存则用存值
+    const planStartForMd = plan.startDate || plan.date;
+    const planEndForMd = plan.endDate || plan.startDate || plan.date;
+    const planDaysForMd = (planStartForMd && planEndForMd)
+      ? Math.max(1, Math.round((new Date(planEndForMd) - new Date(planStartForMd)) / 86400000) + 1)
+      : 1;
     document.getElementById('laborRows').innerHTML = laborList.map((l, i) => {
       const trade = l.trade || l.laborType;
       const count = l.count || 0;
-      const mandays = l.manDays || 0;
+      const mandays = (l.manDays != null && l.manDays !== '') ? l.manDays : (count * planDaysForMd);
       return `
         <div class="form-row labor-row">
           <div class="form-group" style="flex:2;">
@@ -2427,6 +2490,11 @@ async function addCustomArea(selectId) {
   customAreas[currentProjectId].push(newArea);
   saveCustomAreas();
   renderAreaOptions(selectId, newId);
+  // 同步到后端
+  fetch('http://localhost:3010/api/areas', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ projectId: currentProjectId, id: newId, name: name.trim() })
+  }).catch(err => console.warn('[自定义区域] 保存失败:', err));
   showToast(`已新增区域：${name}（ID: ${newId}）`, 'success');
 }
 
@@ -2443,6 +2511,9 @@ async function removeArea(areaId) {
   }
   customAreas[currentProjectId] = customAreas[currentProjectId].filter(a => a.id !== areaId);
   saveCustomAreas();
+  // 同步删除后端
+  fetch('http://localhost:3010/api/areas/' + encodeURIComponent(currentProjectId) + '/' + encodeURIComponent(areaId), { method: 'DELETE' })
+    .catch(err => console.warn('[自定义区域] 删除失败:', err));
   refreshAreaSelectors();
   renderAreasList();  // 刷新区域管理弹窗列表
   showToast('区域已删除', 'success');
@@ -5093,6 +5164,11 @@ function saveUnifiedEvent(opts = {}) {
     };
     if (exists) Object.assign(exists, record);
     else M.DRAWING_DEEPENINGS.push(record);
+    // 同步到后端
+    fetch('http://localhost:3010/api/drawing-deepenings', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(record)
+    }).catch(err => console.warn('[图纸深化] 保存失败:', err));
   }
 
   // 同步关联计划
@@ -6174,7 +6250,7 @@ function openWeeklyReportMapping() {
 
 const PAGE_HEADERS = {
   '02':   { title:'目录/Contents',        subtitle:'',                 pad:100 },
-  '03':   { title:'一、组织架构',          subtitle:'到岗管理人员名单', pad:130 },
+  '03':   { title:'一、组织架构',          subtitle:'到岗管理人员名单', pad:122 },
   '04':   { title:'项目重要节点一览表',    subtitle:'项目重要节点',     pad:125 },
   '05':   { title:'二、上周工作完成情况',  subtitle:'2.1 上周重要工作完成', pad:130 },
   '06':   { title:'二、上周工作',          subtitle:'2.2 高管层现场工作', pad:130 },
@@ -6379,28 +6455,28 @@ function renderMappingPage03() {
   const absentCount = stats.filter(s => !s.fullAttendance).length;
   const toggleBtns = hasAbsent ? `
     <span style="color:#f59e0b;font-size:11px;font-weight:500;">⚠️ ${absentCount}人未满勤</span>
-    <button style="background:${_attendanceMode==='full'?'#2563eb':'#fff'};color:${_attendanceMode==='full'?'#fff':'#374151'};border:1px solid ${_attendanceMode==='full'?'#2563eb':'#d1d5db'};border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;" onclick="_attendanceMode='full';renderMappingPage03()">按满勤统计</button>
-    <button style="background:${_attendanceMode==='actual'?'#2563eb':'#fff'};color:${_attendanceMode==='actual'?'#fff':'#374151'};border:1px solid ${_attendanceMode==='actual'?'#2563eb':'#d1d5db'};border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;" onclick="_attendanceMode='actual';renderMappingPage03()">按实际出勤</button>` : '';
+    <button style="background:${_attendanceMode==='full'?'#2563eb':'#fff'};color:${_attendanceMode==='full'?'#fff':'#374151'};border:1px solid ${_attendanceMode==='full'?'#2563eb':'#d1d5db'};border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;" onclick="_attendanceMode='full';switchMappingTab('03')">按满勤统计</button>
+    <button style="background:${_attendanceMode==='actual'?'#2563eb':'#fff'};color:${_attendanceMode==='actual'?'#fff':'#374151'};border:1px solid ${_attendanceMode==='actual'?'#2563eb':'#d1d5db'};border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;" onclick="_attendanceMode='actual';switchMappingTab('03')">按实际出勤</button>` : '';
   const photoInner = _s03Photo
     ? `<img src="${_s03Photo}" style="width:100%;height:100%;object-fit:contain;">`
     : '<div style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;color:#94a3b8;font-size:13px;">🖼️ 项目现场</div>';
 
   document.getElementById('mappingContent').innerHTML = `
     <div style="display:grid;grid-template-columns:7fr 5fr;gap:24px;height:100%;">
-      <div style="border:1px solid #d1d5db;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 10px;background:#f3f4f6;border-bottom:1px solid #d1d5db;">
-          <span style="font-weight:600;font-size:12px;">到岗管理人员名单</span>
+      <div style="border:1px solid #d1d5db;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);display:flex;flex-direction:column;">
+        <div style="display:flex;justify-content:flex-end;align-items:center;padding:4px 10px;background:#f3f4f6;border-bottom:1px solid #d1d5db;flex-shrink:0;min-height:24px;">
           <div class="attendance-toggle-bar" style="display:flex;align-items:center;gap:6px;">${toggleBtns}</div>
         </div>
+        <div style="flex:1;overflow-y:auto;padding-top:4px;">
         <table style="width:100%;border-collapse:collapse;font-size:11px;">
           <thead>
-            <tr style="background:#f3f4f6;">
-              <th style="padding:5px;border-right:1px solid #d1d5db;text-align:center;width:32px;">序号</th>
-              <th style="padding:5px;border-right:1px solid #d1d5db;text-align:center;">职务</th>
-              <th style="padding:5px;border-right:1px solid #d1d5db;text-align:center;width:60px;">姓名</th>
-              <th style="padding:5px;border-right:1px solid #d1d5db;text-align:center;width:95px;">联系电话</th>
-              <th style="padding:5px;border-right:1px solid #d1d5db;text-align:center;width:65px;">是否到岗</th>
-              <th style="padding:5px;text-align:center;width:80px;${showReason?'':'display:none'}">未到岗原因</th>
+            <tr style="background:#f3f4f6;position:sticky;top:0;z-index:1;">
+              <th style="padding:4px;border-right:1px solid #d1d5db;text-align:center;width:32px;">序号</th>
+              <th style="padding:4px;border-right:1px solid #d1d5db;text-align:center;">职务</th>
+              <th style="padding:4px;border-right:1px solid #d1d5db;text-align:center;width:60px;">姓名</th>
+              <th style="padding:4px;border-right:1px solid #d1d5db;text-align:center;width:95px;">联系电话</th>
+              <th style="padding:4px;border-right:1px solid #d1d5db;text-align:center;width:65px;">是否到岗</th>
+              <th style="padding:4px;text-align:center;width:80px;${showReason?'':'display:none'}">未到岗原因</th>
             </tr>
           </thead>
           <tbody>
@@ -6410,20 +6486,21 @@ function renderMappingPage03() {
               const rowBg = i % 2 === 0 ? '#fff' : '#f9fafb';
               return `
               <tr style="background:${rowBg};">
-                <td style="padding:4px;border-right:1px solid #d1d5db;border-bottom:1px solid #e5e7eb;text-align:center;">${i+1}</td>
-                <td style="padding:4px;border-right:1px solid #d1d5db;border-bottom:1px solid #e5e7eb;">${s.position}</td>
-                <td style="padding:4px;border-right:1px solid #d1d5db;border-bottom:1px solid #e5e7eb;text-align:center;font-weight:600;">${s.name}</td>
-                <td style="padding:4px;border-right:1px solid #d1d5db;border-bottom:1px solid #e5e7eb;text-align:center;">${s.phone}</td>
-                <td style="padding:4px;border-right:1px solid #d1d5db;border-bottom:1px solid #e5e7eb;text-align:center;">
+                <td style="padding:2.5px 4px;border-right:1px solid #d1d5db;border-bottom:1px solid #e5e7eb;text-align:center;">${i+1}</td>
+                <td style="padding:2.5px 4px;border-right:1px solid #d1d5db;border-bottom:1px solid #e5e7eb;">${s.position}</td>
+                <td style="padding:2.5px 4px;border-right:1px solid #d1d5db;border-bottom:1px solid #e5e7eb;text-align:center;font-weight:600;">${s.name}</td>
+                <td style="padding:2.5px 4px;border-right:1px solid #d1d5db;border-bottom:1px solid #e5e7eb;text-align:center;">${s.phone}</td>
+                <td style="padding:2.5px 4px;border-right:1px solid #d1d5db;border-bottom:1px solid #e5e7eb;text-align:center;">
                   <span style="background:${showPresent?'#d1fae5':'#fef3c7'};color:${showPresent?'#065f46':'#92400e'};padding:1px 6px;border-radius:3px;font-size:10px;">${showPresent?'已到岗':'未到岗'}</span>
                 </td>
-                <td style="padding:4px;border-bottom:1px solid #e5e7eb;text-align:center;font-size:10px;${showReason?'':'display:none'}">
+                <td style="padding:2.5px 4px;border-bottom:1px solid #e5e7eb;text-align:center;font-size:10px;${showReason?'':'display:none'}">
                   ${showPresent ? '<span style="color:#9ca3af;">—</span>' : `<span style="color:#92400e;">${s.absentReasons.length ? s.absentReasons.join('、') : '缺勤 '+absentDays+' 天'}</span>`}
                 </td>
               </tr>`;
             }).join('')}
           </tbody>
         </table>
+        </div>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;">
         <div style="flex:1;border-radius:12px;overflow:hidden;border:4px solid #fff;box-shadow:0 4px 16px rgba(0,0,0,0.15);background:#f1f5f9;display:flex;align-items:center;justify-content:center;overflow:hidden;">${photoInner}</div>
@@ -6629,9 +6706,12 @@ async function s0301DelRow(major, row) {
 }
 
 function s0301Save() {
+  // 告知 mock-data.js 当前的 projectId（saveMilestoneData 会用其写 dr_milestone_plans）
+  try { window.MOCK_CURRENT_PROJECT = currentProjectId; } catch {}
   M.saveMilestoneData(_milestoneData);
   const activeBtn = document.querySelector('#reportPageNav button.active[data-page]');
   if (activeBtn && activeBtn.dataset.page === '04') switchMappingTab('04');
+  showToast('里程碑已保存到后端', 'success');
 }
 
 function _smartWrap(text) {
@@ -6977,9 +7057,10 @@ function renderMappingPage06() {
     '<div style="background:#48a0f8;color:#fff;padding:8px 24px;text-align:center;font-size:14px;font-weight:700;width:fit-content;margin:0 auto;border-radius:0;">' +
     (photos[0].caption || '无说明') + '</div></div>' : '';
   const gap = hasPhotos ? '<div style="width:24px;flex-shrink:0;"></div>' : '';
-  const tableStyle = hasPhotos ? 'flex:1;display:flex;flex-direction:column;gap:12px;min-width:0;' : 'display:flex;flex-direction:column;gap:12px;';
-  const fullHtml = '<div style="display:flex;gap:0;height:100%;">' + leftCol + gap +
-    '<div style="' + tableStyle + '">' +
+  const containerStyle = hasPhotos ? 'display:flex;gap:0;height:100%;' : 'display:block;height:100%;';
+  const tableContainerStyle = hasPhotos ? 'flex:1;display:flex;flex-direction:column;gap:12px;min-width:0;' : 'display:flex;flex-direction:column;gap:12px;';
+  const fullHtml = '<div style="' + containerStyle + '">' + leftCol + gap +
+    '<div style="' + tableContainerStyle + '">' +
     '<div style="background:#fff;border:1px solid #005e00;border-radius:4px;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.06);flex:1;">' +
     '<table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="background:#00a2ff;color:#fff;">' +
     '<th style="padding:6px;border-right:1px solid #005e00;border-bottom:2px solid #005e00;width:36px;">序号</th>' +
@@ -7310,13 +7391,13 @@ function renderMappingPage07() {
         <div style="padding:6px 10px;background:#f1f5f9;font-size:12px;color:#475569;font-weight:600;border-bottom:1px solid #005e00;">
           📷 ECC 销项照片（${itemPhotos.length} 张录入 + ${summaryPhotos.length} 张汇总，共 ${allPhotos.length} 张）
         </div>
-        <div style="height:300px;overflow:hidden;display:grid;grid-template-columns:repeat(${Math.min(allPhotos.length, 4)}, 1fr);gap:2px;padding:2px;">
-          ${allPhotos.slice(0, 16).map(p => `<div style="position:relative;overflow:hidden;">
-            <img src="${p.src}" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in;" onclick="enlargePage07Photo('${p.src}','${(p.title || '').replace(/'/g, '')}')">
+        <div style="padding:4px;display:grid;grid-template-columns:repeat(${Math.min(allPhotos.length, 4)}, 1fr);gap:4px;">
+          ${allPhotos.slice(0, 16).map(p => `<div style="height:422px;overflow:hidden;background:#f8fafb;border:1px solid #e2e8f0;border-radius:2px;display:flex;align-items:center;justify-content:center;">
+            <img src="${p.src}" style="max-width:100%;max-height:calc(100% - 2mm);object-fit:contain;cursor:zoom-in;" onclick="enlargePage07Photo('${p.src}','${(p.title || '').replace(/'/g, '')}')">
           </div>`).join('')}
         </div>
       </div>`
-    : `<div style="background:#fff;border:1px dashed #cbd5e1;border-radius:4px;height:300px;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:13px;">🖼️ 暂无 ECC 销项照片（请在快速录入 → ECC 中上传）</div>`;
+    : `<div style="background:#fff;border:1px dashed #cbd5e1;border-radius:4px;height:160px;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:13px;">🖼️ 暂无 ECC 销项照片（请在快速录入 → ECC 中上传）</div>`;
   document.getElementById('mappingContent').innerHTML = `
     <div style="font-size:18px;font-weight:700;color:#000;text-align:center;margin-bottom:16px;">北京清尚ECC质量整改统计表</div>
     <div style="background:#fff;border:1px solid #005e00;border-radius:4px;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.06);margin-bottom:12px;">
@@ -7937,23 +8018,186 @@ function exportReportPDF() {
 function openAttendanceInput() {
   const dateInput = document.getElementById('attendanceDate');
   dateInput.value = M.TODAY;
+  renderAttendanceList();
+  _refreshAttendancePhotoUI();
+  // 每次打开都从后端拉取最新照片（保证多端/刷新后一致）
+  loadPage03Photo();
+  showModal('modalAttendance');
+}
 
+// 渲染管理人员签到表格（与模板列一致：序号/职务/姓名/联系电话/是否到岗）
+function renderAttendanceList() {
   const list = document.getElementById('attendanceList');
-  const records = M.getAttendanceForDate(M.TODAY);
+  const date = document.getElementById('attendanceDate').value || M.TODAY;
+  const records = M.getAttendanceForDate(date);
   const mgrs = M.MANAGEMENT_TEAM;
 
-  list.innerHTML = mgrs.map((m, i) => {
+  let html = `
+    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+      <thead style="position:sticky;top:0;background:#f1f5f9;z-index:1;">
+        <tr style="color:#475569;font-weight:600;">
+          <th style="width:42px;padding:6px 4px;border-bottom:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">序号</th>
+          <th style="padding:6px 4px;border-bottom:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">职务</th>
+          <th style="padding:6px 4px;border-bottom:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">姓名</th>
+          <th style="padding:6px 4px;border-bottom:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">联系电话</th>
+          <th style="width:90px;padding:6px 4px;border-bottom:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">是否到岗</th>
+          <th style="padding:6px 4px;border-bottom:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">未到岗说明</th>
+          <th style="width:64px;padding:6px 4px;border-bottom:1px solid #e2e8f0;">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+  mgrs.forEach((m, i) => {
     const r = records[m.id] || { present: true, reason: '' };
-    return `<div style="display:flex;align-items:center;gap:6px;padding:4px 10px;${i%2===0?'background:#f9fafb;':''}">
-      <input type="checkbox" class="attendance-cb" value="${m.id}" ${r.present?'checked':''} onchange="toggleAttendanceReason(this)">
-      <span style="font-size:13px;min-width:140px;font-weight:500;">${m.name}</span>
-      <span style="font-size:11px;color:#64748b;flex:1;">${m.position}</span>
-      <input type="text" class="attendance-reason" data-id="${m.id}" value="${r.reason}" placeholder="缺勤原因" style="display:${r.present?'none':'inline'};width:130px;font-size:11px;border:1px solid #d1d5db;border-radius:3px;padding:2px 6px;">
-    </div>`;
-  }).join('');
+    const present = r.present;
+    const reason = r.reason || '';
+    html += `
+      <tr style="background:${i%2===0?'#fff':'#f9fafb'};">
+        <td style="padding:4px;border-bottom:1px solid #f1f5f9;border-right:1px solid #f1f5f9;text-align:center;color:#94a3b8;">${i+1}</td>
+        <td style="padding:2px 4px;border-bottom:1px solid #f1f5f9;border-right:1px solid #f1f5f9;"><input class="att-cell" data-id="${m.id}" data-field="position" value="${(m.position||'').replace(/"/g,'&quot;')}" style="width:100%;border:1px solid transparent;background:transparent;padding:2px 4px;font-size:12px;border-radius:3px;" onblur="updateManagementField('${m.id}','position',this.value);this.style.background='transparent';this.style.border='1px solid transparent';" onfocus="this.style.background='#fff';this.style.border='1px solid #00adef';"></td>
+        <td style="padding:2px 4px;border-bottom:1px solid #f1f5f9;border-right:1px solid #f1f5f9;"><input class="att-cell" data-id="${m.id}" data-field="name" value="${(m.name||'').replace(/"/g,'&quot;')}" style="width:100%;border:1px solid transparent;background:transparent;padding:2px 4px;font-size:12px;border-radius:3px;" onblur="updateManagementField('${m.id}','name',this.value);this.style.background='transparent';this.style.border='1px solid transparent';" onfocus="this.style.background='#fff';this.style.border='1px solid #00adef';"></td>
+        <td style="padding:2px 4px;border-bottom:1px solid #f1f5f9;border-right:1px solid #f1f5f9;"><input class="att-cell" data-id="${m.id}" data-field="phone" value="${(m.phone||'').replace(/"/g,'&quot;')}" style="width:100%;border:1px solid transparent;background:transparent;padding:2px 4px;font-size:12px;border-radius:3px;" onfocus="this.style.background='#fff';this.style.border='1px solid #00adef';" onblur="updateManagementField('${m.id}','phone',this.value);this.style.background='transparent';this.style.border='1px solid transparent';"></td>
+        <td style="padding:4px;border-bottom:1px solid #f1f5f9;border-right:1px solid #f1f5f9;text-align:center;">
+          <input type="checkbox" class="attendance-cb" value="${m.id}" ${present?'checked':''} onchange="updateAttendancePresent('${m.id}',this.checked)">
+        </td>
+        <td style="padding:2px 4px;border-bottom:1px solid #f1f5f9;border-right:1px solid #f1f5f9;">
+          ${present
+            ? '<span style="font-size:10px;color:#94a3b8;">—</span>'
+            : `<input class="attendance-reason" data-id="${m.id}" value="${(reason||'').replace(/"/g,'&quot;')}" placeholder="如：事假 / 病假 / 出差 / 调休" style="width:100%;border:1px solid #fbbf24;background:#fffbeb;padding:2px 6px;font-size:12px;border-radius:3px;color:#92400e;" oninput="updateAttendanceReason('${m.id}',this.value)">`}
+        </td>
+        <td style="padding:4px;border-bottom:1px solid #f1f5f9;text-align:center;">
+          <button class="btn btn-xs btn-ghost" onclick="removeManagementRow('${m.id}')" style="font-size:10px;padding:1px 6px;color:#ef4444;" title="删除">🗑</button>
+        </td>
+      </tr>
+    `;
+  });
+  html += `</tbody></table>`;
+  list.innerHTML = html;
+  _refreshAttendanceCount();
+}
 
-  _refreshAttendancePhotoUI();
-  showModal('modalAttendance');
+// 刷新"在岗 N / 总 N"
+function _refreshAttendanceCount() {
+  const date = document.getElementById('attendanceDate').value || M.TODAY;
+  const records = M.getAttendanceForDate(date);
+  const total = M.MANAGEMENT_TEAM.length;
+  const present = M.MANAGEMENT_TEAM.filter(m => (records[m.id] || { present: true }).present).length;
+  const el1 = document.getElementById('attPresentCount');
+  const el2 = document.getElementById('attTotalCount');
+  if (el1) el1.textContent = present;
+  if (el2) el2.textContent = total;
+}
+
+// 编辑管理人员字段（职务/姓名/电话）
+async function updateManagementField(id, field, value) {
+  const m = M.MANAGEMENT_TEAM.find(x => x.id === id);
+  if (!m) return;
+  m[field] = value;
+  try {
+    await fetch('http://localhost:3010/api/management-team', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, position: m.position, name: m.name, phone: m.phone })
+    });
+  } catch { /* 离线不报错 */ }
+}
+
+// 新增一行管理人员
+async function addManagementRow() {
+  // 生成唯一 id：MGRxx（找最大编号 +1）
+  const nums = M.MANAGEMENT_TEAM
+    .map(m => parseInt(String(m.id).replace(/^MGR/i, ''), 10))
+    .filter(n => !isNaN(n));
+  const next = (nums.length ? Math.max(...nums) : 0) + 1;
+  const id = 'MGR' + String(next).padStart(2, '0');
+  const mgr = { id, position: '', name: '', phone: '' };
+  M.MANAGEMENT_TEAM.push(mgr);
+  try {
+    await fetch('http://localhost:3010/api/management-team', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(mgr)
+    });
+  } catch { /* 离线不报错 */ }
+  renderAttendanceList();
+  showToast('已新增管理人员，请填写职务/姓名/电话', 'success');
+}
+
+// 删除一行管理人员
+async function removeManagementRow(id) {
+  const m = M.MANAGEMENT_TEAM.find(x => x.id === id);
+  if (!m) return;
+  const ok = await showConfirm(`确定删除「${m.name || id}」？该人员的签到记录也会被清除。`, '删除管理人员', '🗑');
+  if (!ok) return;
+  M.MANAGEMENT_TEAM = M.MANAGEMENT_TEAM.filter(x => x.id !== id);
+  // 同步清掉该 id 在所有日期的签到记录
+  Object.keys(M.DAILY_ATTENDANCE || {}).forEach(d => {
+    if (M.DAILY_ATTENDANCE[d]) delete M.DAILY_ATTENDANCE[d][id];
+  });
+  try {
+    await fetch('http://localhost:3010/api/management-team/' + encodeURIComponent(id), { method: 'DELETE' });
+  } catch { /* 离线不报错 */ }
+  renderAttendanceList();
+  showToast('已删除', 'info');
+}
+
+// 更新某管理人员某日期的"是否到岗"（立即影响计数和预览）
+function updateAttendancePresent(id, present) {
+  const date = document.getElementById('attendanceDate').value || M.TODAY;
+  const records = M.getAttendanceForDate(date);
+  records[id] = { present, reason: records[id]?.reason || '' };
+  _refreshAttendanceCount();
+  // 切换到"未到岗"后，刷新该行以显示说明输入框
+  const row = document.querySelector(`#attendanceList input.attendance-cb[value="${id}"]`)?.closest('tr');
+  if (row) {
+    const reasonCell = row.children[5]; // 「未到岗说明」列
+    if (reasonCell) {
+      if (present) {
+        reasonCell.innerHTML = '<span style="font-size:10px;color:#94a3b8;">—</span>';
+      } else {
+        const cur = records[id]?.reason || '';
+        reasonCell.innerHTML = `<input class="attendance-reason" data-id="${id}" value="${(cur||'').replace(/"/g,'&quot;')}" placeholder="如：事假 / 病假 / 出差 / 调休" style="width:100%;border:1px solid #fbbf24;background:#fffbeb;padding:2px 6px;font-size:12px;border-radius:3px;color:#92400e;" oninput="updateAttendanceReason('${id}',this.value)" autofocus>`;
+        const input = reasonCell.querySelector('input');
+        if (input) { input.focus(); }
+      }
+    }
+  }
+  // 立即同步到后端（防抖，多次切换合并一次请求）
+  _saveAttendanceDebounced(date);
+}
+
+function updateAttendanceReason(id, reason) {
+  const date = document.getElementById('attendanceDate').value || M.TODAY;
+  const records = M.getAttendanceForDate(date);
+  records[id] = { present: records[id]?.present ?? false, reason };
+  // 防抖保存
+  _saveAttendanceDebounced(date);
+}
+
+// 防抖保存：300ms 内多次变更合并为一次 POST
+let _attSaveTimer = null;
+let _attSaveLatestDate = null;
+function _saveAttendanceDebounced(date) {
+  _attSaveLatestDate = date;
+  if (_attSaveTimer) clearTimeout(_attSaveTimer);
+  _attSaveTimer = setTimeout(() => {
+    const d = _attSaveLatestDate;
+    _attSaveTimer = null;
+    _saveAttendanceToBackend(d);
+    // 同步刷新周报 03 预览：若当前正在显示 03，则用 switchMappingTab 走完整包装（带标题/色条）
+    const cur = document.querySelector('#reportPageNav button.active[data-page]');
+    if (cur && cur.dataset.page === '03' && typeof switchMappingTab === 'function') {
+      switchMappingTab('03');
+    }
+  }, 300);
+}
+
+async function _saveAttendanceToBackend(date) {
+  const records = M.getAttendanceForDate(date);
+  try {
+    await fetch('http://localhost:3010/api/attendance', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date, projectId: currentProjectId, records })
+    });
+  } catch (err) { console.warn('[签到] 保存失败:', err); }
 }
 
 function _refreshAttendancePhotoUI() {
@@ -7983,11 +8227,22 @@ function uploadAttendancePhoto(input) {
   const file = input.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = function(e) {
+  reader.onload = async function(e) {
     _s03Photo = e.target.result;
     _s03PhotoCaption = document.getElementById('attPhotoCaption').value || '管理人员合影';
     _refreshAttendancePhotoUI();
-    renderMappingPage03();
+    // 若当前正在 03 预览页，用 switchMappingTab 走完整包装，避免丢失标题/色条
+    const cur = document.querySelector('#reportPageNav button.active[data-page]');
+    if (cur && cur.dataset.page === '03' && typeof switchMappingTab === 'function') {
+      switchMappingTab('03');
+    }
+    // 持久化到后端（每项目一张）
+    try {
+      await fetch('http://localhost:3010/api/page03-photo', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: currentProjectId, src: _s03Photo, caption: _s03PhotoCaption })
+      });
+    } catch (err) { console.warn('[签到照片] 保存失败:', err); }
   };
   reader.readAsDataURL(file);
   input.value = '';
@@ -7997,7 +8252,34 @@ function clearAttendancePhoto() {
   _s03Photo = '';
   _s03PhotoCaption = '管理人员合影';
   _refreshAttendancePhotoUI();
-  renderMappingPage03();
+  const cur = document.querySelector('#reportPageNav button.active[data-page]');
+  if (cur && cur.dataset.page === '03' && typeof switchMappingTab === 'function') {
+    switchMappingTab('03');
+  }
+  // 同步删除后端
+  fetch('http://localhost:3010/api/page03-photo/' + encodeURIComponent(currentProjectId), { method: 'DELETE' })
+    .catch(err => console.warn('[签到照片] 删除失败:', err));
+}
+
+// 加载当前项目的签到合影
+async function loadPage03Photo() {
+  try {
+    const r = await fetch('http://localhost:3010/api/page03-photo/' + encodeURIComponent(currentProjectId));
+    const data = await r.json();
+    if (data && data.src) {
+      _s03Photo = data.src;
+      _s03PhotoCaption = data.caption || '管理人员合影';
+    } else {
+      _s03Photo = '';
+      _s03PhotoCaption = '管理人员合影';
+    }
+    if (typeof _refreshAttendancePhotoUI === 'function') _refreshAttendancePhotoUI();
+    // 若当前正在 03 预览页，用 switchMappingTab 走完整包装，避免丢失标题/色条
+    const cur = document.querySelector('#reportPageNav button.active[data-page]');
+    if (cur && cur.dataset.page === '03' && typeof switchMappingTab === 'function') {
+      switchMappingTab('03');
+    }
+  } catch (e) { console.warn('[签到照片] 加载失败:', e); }
 }
 
 function enlargeAttendancePhoto() {
@@ -8011,8 +8293,7 @@ function enlargeAttendancePhoto() {
 }
 
 function toggleAttendanceReason(cb) {
-  const reasonInput = cb.closest('div').querySelector('.attendance-reason');
-  if (reasonInput) reasonInput.style.display = cb.checked ? 'none' : 'inline';
+  // 兼容旧调用：当前不再使用「缺勤原因」内联编辑，但保留空实现以免外部调用报错
 }
 
 // ============================================================
@@ -8124,18 +8405,25 @@ function enlargePage06Photo(id) {
 function setAllAttendance(checked) {
   document.querySelectorAll('#attendanceList .attendance-cb').forEach(cb => {
     cb.checked = checked;
-    toggleAttendanceReason(cb);
+    updateAttendancePresent(cb.value, checked);
   });
 }
 
-function saveAttendance() {
+async function saveAttendance() {
   const date = document.getElementById('attendanceDate').value;
   const records = {};
   document.querySelectorAll('#attendanceList .attendance-cb').forEach(cb => {
-    const reasonInput = cb.closest('div').querySelector('.attendance-reason');
-    records[cb.value] = { present: cb.checked, reason: reasonInput ? reasonInput.value : '' };
+    const prev = M.getAttendanceForDate(date)[cb.value] || {};
+    records[cb.value] = { present: cb.checked, reason: prev.reason || '' };
   });
   M.setAttendanceForDate(date, records);
+  // 持久化到后端
+  try {
+    await fetch('http://localhost:3010/api/attendance', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date, projectId: currentProjectId, records })
+    });
+  } catch { /* 离线不报错 */ }
   closeModal('modalAttendance');
   showToast(`📅 ${date} 签到记录已保存`, 'success');
 }
@@ -8227,6 +8515,7 @@ function setReportRange() {
 // 在原有 DOMContentLoaded 之后启动健康检查
 document.addEventListener('DOMContentLoaded', () => {
   _loadPage06Photos();
+  loadPage03Photo();
   // 初始化 page06 unit 按钮高亮
   const initUnit = localStorage.getItem(`page06_unit_${currentProjectId}`) || 'people';
   if (typeof setPage06Unit === 'function') setPage06Unit(initUnit);

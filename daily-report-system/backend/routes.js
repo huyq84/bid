@@ -93,11 +93,13 @@ router.get('/api/data/all', async (req, res) => {
       });
     }
 
-    // Build ATTENDANCE object
+    // Build ATTENDANCE object (按 project_id 隔离)
     const attObj = {};
     for (const a of attendance.rows) {
-      if (!attObj[a.date]) attObj[a.date] = {};
-      attObj[a.date][a.manager_id] = { present: a.present, reason: a.reason || '' };
+      const pid = a.project_id || 'baicaoyuan';
+      if (!attObj[pid]) attObj[pid] = {};
+      if (!attObj[pid][a.date]) attObj[pid][a.date] = {};
+      attObj[pid][a.date][a.manager_id] = { present: a.present, reason: a.reason || '' };
     }
 
     // Build today + history events
@@ -229,6 +231,27 @@ router.put('/api/events/:id', async (req, res) => {
 router.delete('/api/events/:id', async (req, res) => {
   try {
     await query('DELETE FROM dr_events WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ==================== AREAS CRUD (含自定义区域) ====================
+router.post('/api/areas', async (req, res) => {
+  try {
+    const { projectId, id, name, floor, manager } = req.body;
+    if (!projectId || !id) return res.status(400).json({ error: 'projectId/id required' });
+    await query(
+      `INSERT INTO dr_areas (project_id, id, name, floor, manager) VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (project_id, id) DO UPDATE SET name=$3, floor=$4, manager=$5`,
+      [projectId, id, name || '', floor || '', manager || '']
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/api/areas/:projectId/:id', async (req, res) => {
+  try {
+    await query('DELETE FROM dr_areas WHERE project_id=$1 AND id=$2', [req.params.projectId, req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -395,15 +418,36 @@ router.delete('/api/issues/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ==================== MANAGEMENT TEAM CRUD ====================
+router.post('/api/management-team', async (req, res) => {
+  try {
+    const { id, position, name, phone } = req.body;
+    await query(
+      `INSERT INTO dr_management_team (id, position, name, phone) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (id) DO UPDATE SET position=$2, name=$3, phone=$4`,
+      [id, position || '', name || '', phone || '']
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/api/management-team/:id', async (req, res) => {
+  try {
+    await query('DELETE FROM dr_daily_attendance WHERE manager_id=$1', [req.params.id]);
+    await query('DELETE FROM dr_management_team WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ==================== ATTENDANCE CRUD ====================
 router.post('/api/attendance', async (req, res) => {
   try {
-    const { date, records } = req.body; // records = { managerId: { present, reason } }
+    const { date, projectId, records } = req.body; // records = { managerId: { present, reason } }
     for (const [managerId, rec] of Object.entries(records)) {
       await query(
-        `INSERT INTO dr_daily_attendance (date, manager_id, present, reason) VALUES ($1,$2,$3,$4)
-         ON CONFLICT (date, manager_id) DO UPDATE SET present=$3, reason=$4`,
-        [date, managerId, rec.present, rec.reason || '']
+        `INSERT INTO dr_daily_attendance (date, project_id, manager_id, present, reason) VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (date, project_id, manager_id) DO UPDATE SET present=$4, reason=$5`,
+        [date, projectId || 'baicaoyuan', managerId, rec.present, rec.reason || '']
       );
     }
     res.json({ ok: true });
@@ -438,6 +482,13 @@ router.delete('/api/milestone-plans/:projectId/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+router.post('/api/milestone-plans/clear/:projectId', async (req, res) => {
+  try {
+    await query('DELETE FROM dr_milestone_plans WHERE project_id=$1', [req.params.projectId]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ==================== PAGE 06 PHOTOS CRUD ====================
 router.get('/api/page06-photos/:projectId', async (req, res) => {
   try {
@@ -467,6 +518,33 @@ router.delete('/api/page06-photos/:projectId/:id', async (req, res) => {
       'DELETE FROM dr_page06_photos WHERE project_id=$1 AND id=$2',
       [req.params.projectId, req.params.id]
     );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ==================== PAGE 03 PHOTO (签到合影) ====================
+router.get('/api/page03-photo/:projectId', async (req, res) => {
+  try {
+    const r = await query('SELECT * FROM dr_page03_photo WHERE project_id=$1', [req.params.projectId]);
+    res.json(r.rows[0] || null);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/api/page03-photo', async (req, res) => {
+  try {
+    const { projectId, src, caption } = req.body;
+    await query(
+      `INSERT INTO dr_page03_photo (project_id, src, caption, updated_at) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (project_id) DO UPDATE SET src=$2, caption=$3, updated_at=$4`,
+      [projectId, src, caption || '管理人员合影', new Date().toISOString()]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/api/page03-photo/:projectId', async (req, res) => {
+  try {
+    await query('DELETE FROM dr_page03_photo WHERE project_id=$1', [req.params.projectId]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

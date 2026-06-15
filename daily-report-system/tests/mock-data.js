@@ -1460,9 +1460,9 @@ let MILESTONE_DATA = null;
 function initMilestoneData() {
   if (MILESTONE_DATA) return;
   const projectId = CURRENT_PROJECT_ID;
-  // 关键：从 window.MockData 读取（init 时会被后端 /api/data/all 覆盖为 PostgreSQL 数据）
   const MD = (typeof window !== 'undefined' && window.MockData) || {};
-  const plans = (MD.MILESTONE_PLANS && MD.MILESTONE_PLANS[projectId]) || MILESTONE_PLANS[projectId] || [];
+  const apiPlans = (MD.MILESTONE_PLANS && MD.MILESTONE_PLANS[projectId]);
+  const plans = Array.isArray(apiPlans) ? apiPlans : [];
   const monthSet = new Set();
   plans.forEach(p => {
     if (p.targetMonth) monthSet.add(p.targetMonth);
@@ -1475,13 +1475,34 @@ function initMilestoneData() {
   plans.forEach(p => {
     if (!cats[p.category]) cats[p.category] = {};
     if (p.nodeType === '关键节点') {
+      if (p.targetMonth === 0) {
+        cats[p.category]['关键节点'] = { rowType: 'key', cells: {} };
+        return;
+      }
       const val = (p.areaLabel || '') + ' ' + (p.description || '');
-      cats[p.category]['关键节点'] = { rowType: 'key', cells: { [`${year}.${p.targetMonth}`]: val.trim() } };
+      if (!cats[p.category]['关键节点']) {
+        cats[p.category]['关键节点'] = { rowType: 'key', cells: {} };
+      }
+      cats[p.category]['关键节点'].cells[`${year}.${p.targetMonth}`] = val.trim();
     } else if (p.nodeType === '次要节点') {
-      const key = `${year}.${p.targetMonth}`;
-      const items = (p.subItems || []).map(s => `${s.label}：${s.text}`);
-      cats[p.category]['次要节点'] = cats[p.category]['次要节点'] || { rowType: 'sub', cells: {} };
-      cats[p.category]['次要节点'].cells[key] = (cats[p.category]['次要节点'].cells[key] || '') + items.join('\n');
+      if (p.targetMonth === 0) {
+        cats[p.category]['次要节点'] = { rowType: 'sub', cells: {} };
+        return;
+      }
+      const items = (p.subItems || []).map(s => {
+        if (s.label && s.text) return `${s.label}：${s.text}`;
+        if (s.label) return s.label;
+        if (s.text) return s.text;
+        return '';
+      }).filter(Boolean);
+      const monthsForThisPlan = new Set();
+      (p.subItems || []).forEach(s => { if (s.targetMonth) monthsForThisPlan.add(s.targetMonth); });
+      if (p.targetMonth) monthsForThisPlan.add(p.targetMonth);
+      monthsForThisPlan.forEach(tm => {
+        const key = `${year}.${tm}`;
+        cats[p.category]['次要节点'] = cats[p.category]['次要节点'] || { rowType: 'sub', cells: {} };
+        cats[p.category]['次要节点'].cells[key] = (cats[p.category]['次要节点'].cells[key] || '') + items.join('\n');
+      });
     }
   });
   const rows = [];
@@ -1502,6 +1523,71 @@ function getMilestoneData() {
 
 function saveMilestoneData(data) {
   MILESTONE_DATA = data;
+  if (M && M.MILESTONE_PLANS) {
+    const projectId = CURRENT_PROJECT_ID;
+    const plans = _milestoneDataToPlans(data);
+    M.MILESTONE_PLANS[projectId] = plans;
+  }
+}
+
+function _milestoneDataToPlans(data) {
+  if (!data || !data.rows) return [];
+  const projectId = (typeof window !== 'undefined' && window.MOCK_CURRENT_PROJECT) || CURRENT_PROJECT_ID || (M && M.PROJECTS && M.PROJECTS[0] && M.PROJECTS[0].id) || 'baicaoyuan';
+  const plans = [];
+  const year = (data.months && data.months[0]) ? parseInt(String(data.months[0]).split('.')[0], 10) : 2026;
+  data.rows.forEach((r, i) => {
+    const id = 'MP' + String(900 + i).padStart(3, '0');
+    const cellEntries = [];
+    (data.months || []).forEach(mk => {
+      const cellVal = r[mk];
+      if (cellVal && String(cellVal).trim()) {
+        const m = parseInt(String(mk).split('.')[1], 10);
+        cellEntries.push({ month: m, value: String(cellVal) });
+      }
+    });
+    if (r.rowType === 'key') {
+      if (cellEntries.length === 0) {
+        plans.push({
+          projectId, id: id + 'K0', category: r.major, nodeType: '关键节点',
+          areaLabel: '', description: '', targetMonth: 0, year, subItems: []
+        });
+      }
+      cellEntries.forEach(e => {
+        const parts = e.value.split(/\s+/);
+        const areaLabel = parts.length > 1 ? parts[0] : '';
+        const desc = parts.length > 1 ? parts.slice(1).join(' ') : parts[0] || '';
+        plans.push({
+          projectId, id: id + 'K' + e.month, category: r.major, nodeType: '关键节点',
+          areaLabel, description: desc, targetMonth: e.month, year, subItems: []
+        });
+      });
+    } else {
+      if (cellEntries.length === 0) {
+        plans.push({
+          projectId, id: id + 'S0', category: r.major, nodeType: '次要节点',
+          areaLabel: '', description: '', targetMonth: 0, year, subItems: []
+        });
+      }
+      const subItems = [];
+      cellEntries.forEach(e => {
+        e.value.split('\n').forEach(line => {
+          const m = line.match(/^([^：:]+)[：:](.+)$/);
+          if (m) subItems.push({ label: m[1].trim(), text: m[2].trim(), targetMonth: e.month });
+          else if (line.trim()) subItems.push({ label: line.trim(), text: '', targetMonth: e.month });
+        });
+      });
+      const byMonth = {};
+      subItems.forEach(si => { (byMonth[si.targetMonth] = byMonth[si.targetMonth] || []).push(si); });
+      Object.keys(byMonth).forEach(m => {
+        const mm = parseInt(m, 10);
+        plans.push({
+          projectId, id: id + 'S' + mm, category: r.major, nodeType: '次要节点',
+          areaLabel: '', description: '', targetMonth: mm, year, subItems: byMonth[mm]
+        });
+      });
+    }
+  });
+  return plans;
 }
 
 function getPage0301Data(projectId) {

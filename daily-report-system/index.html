@@ -92,10 +92,6 @@
             <span style="font-size:13px; color:#64748b; margin-right:8px;">筛选：</span>
             <div class="filter-chip active" data-filter="all" onclick="filterEvents('all', this)">全部</div>
             <div class="filter-chip" data-filter="progress"     onclick="filterEvents('progress', this)">🔨 进度</div>
-            <div class="filter-chip" data-filter="material"     onclick="filterEvents('material', this)">📦 材料</div>
-            <div class="filter-chip" data-filter="safety"       onclick="filterEvents('safety', this)">🛡 安全</div>
-            <div class="filter-chip" data-filter="coordination" onclick="filterEvents('coordination', this)">🤝 协调</div>
-            <div class="filter-chip" data-filter="attendance"   onclick="filterEvents('attendance', this)">👥 考勤</div>
             <div class="filter-chip" data-filter="drawing"      onclick="filterEvents('drawing', this)">📐 图纸深化</div>
             <button class="btn btn-success btn-sm" onclick="confirmTodayReport()" style="margin-left:auto; margin-right:4px;">✅ 一键确认</button>
           </div>
@@ -154,7 +150,7 @@
           <div class="card-header">
             <div class="card-title">
               <div class="icon">🎯</div>
-              <span>今日计划</span>
+              <span id="dailyPlanTitle">今日计划</span>
             </div>
             <div style="display:flex;gap:4px;align-items:center;">
               <span style="font-size:10px;color:#94a3b8;">统计口径</span>
@@ -605,11 +601,6 @@
             <label class="form-label">事件类型 <span class="req">*</span></label>
             <select class="form-select" id="m-type" onchange="renderManualForm()">
               <option value="progress">🔨 进度</option>
-              <option value="material">📦 材料</option>
-              <option value="safety">🛡 安全</option>
-              <option value="coordination">🤝 协调</option>
-              <option value="issue">⚠️ 问题</option>
-              <option value="attendance">👥 考勤</option>
               <option value="drawing">📐 图纸深化</option>
             </select>
           </div>
@@ -943,10 +934,6 @@
               <label class="form-label">事件类型 <span class="req">*</span></label>
               <select class="form-select" id="dp-event-type" onchange="filterPlanFormByType()">
                 <option value="progress">🔨 进度</option>
-                <option value="material">📦 材料</option>
-                <option value="safety">🛡 安全</option>
-                <option value="coordination">🤝 协调</option>
-                <option value="attendance">👥 考勤</option>
                 <option value="drawing">📐 图纸深化</option>
               </select>
             </div>
@@ -1121,14 +1108,19 @@
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">📅 日期</label>
-              <input class="form-input" type="date" id="attendanceDate">
+              <input class="form-input" type="date" id="attendanceDate" onchange="renderAttendanceList()">
             </div>
             <div class="form-group" style="display:flex; align-items:flex-end; gap:4px;">
               <button class="btn btn-sm btn-primary" onclick="setAllAttendance(true)">全选</button>
               <button class="btn btn-sm btn-secondary" onclick="setAllAttendance(false)">全不选</button>
             </div>
           </div>
-          <div id="attendanceList" style="max-height:320px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:4px; padding:4px 0;"></div>
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:11px;color:#475569;">
+            <span>👥 在岗 <b id="attPresentCount" style="color:#059669;">0</b> / 总 <b id="attTotalCount" style="color:#00adef;">0</b></span>
+            <div style="flex:1;"></div>
+            <button class="btn btn-ghost btn-sm" onclick="addManagementRow()" style="font-size:11px;padding:2px 10px;">+ 新增管理人员</button>
+          </div>
+          <div id="attendanceList" style="max-height:360px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:4px;"></div>
           <div style="margin-top:8px;border-top:1px solid #e2e8f0;padding-top:8px;">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
               <span style="font-size:12px;font-weight:600;color:#374151;">📸 现场照片</span>

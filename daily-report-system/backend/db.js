@@ -217,11 +217,24 @@ CREATE TABLE IF NOT EXISTS dr_construction_zone_schedules (
 -- 每日签到
 CREATE TABLE IF NOT EXISTS dr_daily_attendance (
   date TEXT NOT NULL,
+  project_id TEXT,
   manager_id TEXT REFERENCES dr_management_team(id) ON DELETE CASCADE,
   present BOOLEAN DEFAULT false,
-  reason TEXT DEFAULT '',
-  PRIMARY KEY (date, manager_id)
+  reason TEXT DEFAULT ''
 );
+-- 兼容旧表（无 project_id 列）自动添加
+ALTER TABLE dr_daily_attendance ADD COLUMN IF NOT EXISTS project_id TEXT;
+-- 旧记录没有 project_id，给默认项目 'baicaoyuan'
+UPDATE dr_daily_attendance SET project_id = 'baicaoyuan' WHERE project_id IS NULL;
+-- 删除旧主键（如果存在）
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'dr_daily_attendance_pkey') THEN
+    ALTER TABLE dr_daily_attendance DROP CONSTRAINT dr_daily_attendance_pkey;
+  END IF;
+END$$;
+-- 添加新主键
+ALTER TABLE dr_daily_attendance ADD CONSTRAINT dr_daily_attendance_pkey PRIMARY KEY (date, project_id, manager_id);
 
 -- 标准工种模板（周报 06 人员统计表头，project_id 为 null 表示全局共享）
 CREATE TABLE IF NOT EXISTS dr_standard_trades (
@@ -253,6 +266,14 @@ CREATE TABLE IF NOT EXISTS dr_page06_photos (
   caption TEXT DEFAULT '',
   trade_id TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 周报 03 签到照片（每项目一张管理人员合影）
+CREATE TABLE IF NOT EXISTS dr_page03_photo (
+  project_id TEXT PRIMARY KEY REFERENCES dr_projects(id) ON DELETE CASCADE,
+  src TEXT NOT NULL,
+  caption TEXT DEFAULT '管理人员合影',
+  updated_at TEXT
 );
 `;
 
@@ -291,29 +312,29 @@ const SEED_WORKERS = [
 ];
 
 const SEED_MANAGEMENT_TEAM = [
-  { id: 'MGR01', position: '项目经理', name: '侯帅', phone: '13051103313' },
-  { id: 'MGR02', position: '项目执行经理', name: '孙浩东', phone: '17326846352' },
-  { id: 'MGR03', position: '生产经理', name: '张金龙', phone: '17777777777' },
-  { id: 'MGR04', position: '项目总工', name: '候辉景', phone: '13988888888' },
-  { id: 'MGR05', position: '质量总监', name: '志国', phone: '18888888888' },
-  { id: 'MGR06', position: '安全总监', name: '刑永胜', phone: '13788888888' },
-  { id: 'MGR07', position: '商务经理', name: '雷恒', phone: '13588888888' },
-  { id: 'MGR08', position: '物资经理', name: '刘浩', phone: '18788888888' },
-  { id: 'MGR09', position: '深化设计', name: '蔡浩川', phone: '18988888888' },
-  { id: 'MGR10', position: '资料员', name: '吴昊', phone: '18388888888' },
-  { id: 'MGR11', position: 'BIM 工程师', name: '杨德安', phone: '15788888888' },
-  { id: 'MGR12', position: '施工员', name: '刘闯', phone: '13288888888' },
-  { id: 'MGR13', position: '精装施工员', name: '徐长林', phone: '17788888888' },
-  { id: 'MGR14', position: '施工员', name: '程千', phone: '15288888888' },
-  { id: 'MGR15', position: '施工员', name: '刘喜', phone: '18688888888' },
-  { id: 'MGR16', position: '安全员', name: '董宝森', phone: '17688888888' },
-  { id: 'MGR17', position: '质量员', name: '吴迪', phone: '18888888888' },
-  { id: 'MGR18', position: '质量员', name: '张强', phone: '15688888888' },
-  { id: 'MGR19', position: '材料员', name: '裴柯', phone: '13088888888' },
-  { id: 'MGR20', position: '测量员', name: '党志高', phone: '15088888888' },
-  { id: 'MGR21', position: '水电工程师', name: '王团结', phone: '17388888888' },
-  { id: 'MGR22', position: '文员', name: '韩笑', phone: '13788888888' },
-  { id: 'MGR23', position: '保安队长', name: '刘队', phone: '13488888888' },
+  { id: 'MGR01', position: '项目经理',                              name: '侯帅',   phone: '13051103313' },
+  { id: 'MGR02', position: '项目技术负责人兼深化设计负责人',          name: '王健',   phone: '13818589201' },
+  { id: 'MGR03', position: '计划经理',                              name: '陈冲',   phone: '13651007882' },
+  { id: 'MGR04', position: '生产经理（软装）',                       name: '王亚广', phone: '15910813359' },
+  { id: 'MGR05', position: '生产经理（精装）',                       name: '鲍永春', phone: '13382510829' },
+  { id: 'MGR06', position: '生产经理（机电）',                       name: '袁永超', phone: '18900125480' },
+  { id: 'MGR07', position: '深化设计经理（软装）',                   name: '李欢',   phone: '17310298646' },
+  { id: 'MGR08', position: '深化设计（软装）',                       name: '乔志广', phone: '13939996372' },
+  { id: 'MGR09', position: '深化设计（软装）',                       name: '李水旺', phone: '18310163008' },
+  { id: 'MGR10', position: '深化设计（软装）',                       name: '赵晨星', phone: '15011544879' },
+  { id: 'MGR11', position: '深化设计（软装）',                       name: '龙方',   phone: '13974050351' },
+  { id: 'MGR12', position: '深化设计经理（精装）',                   name: '徐诗怡', phone: '18013705168' },
+  { id: 'MGR13', position: '深化设计（机电）',                       name: '苏尧',   phone: '13141422281' },
+  { id: 'MGR14', position: '成本经理（软装/精装）',                  name: '郭建欣', phone: '15600173618' },
+  { id: 'MGR15', position: '商务经理（软装/精装）',                  name: '薛智臣', phone: '18810013805' },
+  { id: 'MGR16', position: '预算员（软装/精装）',                    name: '王迪',   phone: '15726644536' },
+  { id: 'MGR17', position: '电气预算员（软装/精装）',                name: '邓明伟', phone: '19937244723' },
+  { id: 'MGR18', position: '质量经理（软装）',                       name: '周建忠', phone: '13636535828' },
+  { id: 'MGR19', position: '质量经理（精装）',                       name: '李欣霖', phone: '17631518331' },
+  { id: 'MGR20', position: '安全经理（软装）',                       name: '孙攀岳', phone: '18501166924' },
+  { id: 'MGR21', position: '安全经理（精装）',                       name: '赵国显', phone: '18516217962' },
+  { id: 'MGR22', position: '资料员',                                name: '蔡丽华', phone: '18600371133' },
+  { id: 'MGR23', position: '材料员（软装/精装）',                    name: '肖自政', phone: '15093960151' },
 ];
 
 const SEED_MILESTONES_BAICAOYUAN = [
@@ -457,7 +478,7 @@ export async function initDatabase() {
   // Seed management team
   for (const m of SEED_MANAGEMENT_TEAM) {
     await pool.query(
-      `INSERT INTO dr_management_team (id, position, name, phone) VALUES ($1,$2,$3,$4) ON CONFLICT (id) DO NOTHING`,
+      `INSERT INTO dr_management_team (id, position, name, phone) VALUES ($1,$2,$3,$4) ON CONFLICT (id) DO UPDATE SET position=$2, name=$3, phone=$4`,
       [m.id, m.position, m.name, m.phone]
     );
   }
@@ -470,14 +491,8 @@ export async function initDatabase() {
     );
   }
 
-  // Seed milestone plans
-  const allPlans = [...SEED_MILESTONE_PLANS_SOFT, ...SEED_MILESTONE_PLANS_HARD];
-  for (const mp of allPlans) {
-    await pool.query(
-      `INSERT INTO dr_milestone_plans (project_id, id, category, node_type, area_label, description, target_month, year, sub_items) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb) ON CONFLICT (project_id, id) DO NOTHING`,
-      [mp.project_id, mp.id, mp.category, mp.node_type, mp.area_label, mp.description, mp.target_month, mp.year, mp.sub_items]
-    );
-  }
+  // Seed milestone plans (禁用：避免后端重启时把用户已清空的数据重新插回)
+  // 如需重新 seed，手动执行 seed_all.mjs
 
   // Seed standard trades (项目内标准工种模板，project_id 为 null 表示全局默认)
   const { rows: stCount } = await pool.query('SELECT COUNT(*) AS cnt FROM dr_standard_trades');
@@ -493,7 +508,7 @@ export async function initDatabase() {
 }
 
 export async function getDbStats() {
-  const tables = ['dr_projects', 'dr_areas', 'dr_workers', 'dr_management_team', 'dr_milestones', 'dr_milestone_plans', 'dr_daily_plans', 'dr_events', 'dr_issues', 'dr_ecc_items', 'dr_drawing_deepenings', 'dr_weekly_gantt_items', 'dr_construction_zone_schedules', 'dr_daily_attendance', 'dr_standard_trades', 'dr_weekly_labor_data', 'dr_page06_photos', 'dr_ecc_summaries'];
+  const tables = ['dr_projects', 'dr_areas', 'dr_workers', 'dr_management_team', 'dr_milestones', 'dr_milestone_plans', 'dr_daily_plans', 'dr_events', 'dr_issues', 'dr_ecc_items', 'dr_drawing_deepenings', 'dr_weekly_gantt_items', 'dr_construction_zone_schedules', 'dr_daily_attendance', 'dr_standard_trades', 'dr_weekly_labor_data', 'dr_page06_photos', 'dr_ecc_summaries', 'dr_page03_photo'];
   const stats = {};
   for (const t of tables) {
     try {
