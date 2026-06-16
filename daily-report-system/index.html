@@ -3,8 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <title>施工日报系统 - Demo</title>
   <link rel="stylesheet" href="styles.css">
+  <script src="assets/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: false, theme: 'dark', fontFamily: 'sans-serif', flowchart: { useMaxWidth: true } });</script>
 </head>
 <body>
 
@@ -1353,28 +1356,34 @@
   <div id="aiChatWidget" class="ai-chat-widget">
     <div class="ai-chat-overlay" id="aiChatOverlay" onclick="toggleChat()"></div>
     <div class="ai-chat-btn" id="aiChatBtn" onclick="toggleChat()">
-      <span class="ai-chat-btn-icon">💬</span>
+      <img class="ai-chat-btn-img ai-chat-btn-img-1" src="assets/avatar-construction-girl.png">
+      <img class="ai-chat-btn-img ai-chat-btn-img-2" src="assets/avatar-construction-girl-alt.png">
       <span class="ai-chat-btn-ring"></span>
+      <span id="aiChatBadge" style="display:none;position:absolute;top:-10px;right:-10px;min-width:20px;height:20px;padding:0 6px;background:#ef4444;color:#fff;font-size:12px;font-weight:700;border-radius:10px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 3px #fff;animation:aiBadgePop 0.3s ease;z-index:10;">0</span>
     </div>
     <div class="ai-chat-panel" id="aiChatPanel">
       <div class="ai-chat-header">
         <div class="ai-chat-header-left">
-          <div class="ai-chat-avatar">🤖</div>
+          <div class="ai-chat-avatar">
+            <img class="ai-chat-avatar-img" src="assets/avatar-construction-girl.png">
+          </div>
           <div>
-            <div class="ai-chat-title">AI 助手</div>
+            <div class="ai-chat-title">AI 助手 <span id="aiChatProjectLabel" style="font-size:11px;color:rgba(255,255,255,0.6);font-weight:400;margin-left:6px;"></span></div>
             <div class="ai-chat-status"><span class="status-dot"></span>在线 · 快如闪电</div>
           </div>
         </div>
         <button class="ai-chat-close" onclick="toggleChat()">✕</button>
       </div>
-      <div class="ai-chat-messages" id="aiChatMessages">
-        <div class="ai-message ai-message-system">
-          <div class="ai-message-avatar">🤖</div>
-          <div class="ai-message-bubble">
-            你好！我是你的 AI 助手，可以帮你：记录协调事宜、查看今日计划、生成周报等。
-          </div>
-        </div>
+      <div class="ai-chat-session-bar" id="aiChatSessionBar">
+        <select id="aiChatSessionSelect" class="ai-chat-session-select" onchange="onSessionSelect(this.value)"></select>
+        <button class="ai-chat-session-btn" onclick="createNewClicked()" title="新建对话">✚</button>
+        <button class="ai-chat-session-btn" id="aiChatSessionMoreBtn" onclick="toggleSessionMenu()" title="更多">⋯</button>
       </div>
+      <div id="aiChatSessionMenu" class="ai-chat-session-menu" style="display:none;position:absolute;top:90px;right:12px;background:rgba(30,41,59,0.95);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:4px;z-index:30;min-width:120px;backdrop-filter:blur(8px);">
+        <div class="ai-chat-session-menu-item" onclick="renameCurrentSession()">✏️ 重命名</div>
+        <div class="ai-chat-session-menu-item" onclick="deleteCurrentSession()">🗑️ 删除</div>
+      </div>
+      <div class="ai-chat-messages" id="aiChatMessages"></div>
       <div class="ai-chat-actions" id="aiChatActions">
         <span class="ai-chip" onclick="quickChatAction('帮我记录一个协调事宜')">📋 记录协调</span>
         <span class="ai-chip" onclick="quickChatAction('显示今日进度计划')">📅 今日计划</span>
@@ -1386,6 +1395,7 @@
         <button class="ai-chat-ico-btn" onclick="document.getElementById('aiChatPhotoInput').click()" title="拍照上传">📷</button>
         <button class="ai-chat-ico-btn" id="aiChatVoiceBtn" onclick="toggleChatVoice()" title="语音输入">🎤</button>
         <input type="text" id="aiChatInput" class="ai-chat-input" placeholder="说进度、协调、考勤等，一键录入..." autocomplete="off">
+        <button class="ai-chat-ico-btn" onclick="triggerInspection()" title="立即巡检" style="background:rgba(245,158,11,0.15);color:#fbbf24;">🔔</button>
         <button class="ai-chat-send" id="aiChatSendBtn" onclick="sendChatMessage()">➤</button>
       </div>
     </div>
@@ -1421,7 +1431,7 @@
 
   <!-- 引入脚本 -->
   <script src="mock-data.js"></script>
-  <script src="app.js"></script>
+  <script src="app.v3.js"></script>
   <script>
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closePhotoLightbox(); });
   </script>

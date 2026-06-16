@@ -505,10 +505,33 @@ export async function initDatabase() {
       );
     }
   }
+  // 聊天会话
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS dr_chat_sessions (
+      id TEXT PRIMARY KEY,
+      project_id TEXT REFERENCES dr_projects(id) ON DELETE CASCADE,
+      name TEXT NOT NULL DEFAULT '新对话',
+      created_at TEXT NOT NULL DEFAULT (NOW()),
+      updated_at TEXT NOT NULL DEFAULT (NOW())
+    )
+  `);
+  // 聊天消息
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS dr_chat_messages (
+      id TEXT PRIMARY KEY,
+      session_id TEXT REFERENCES dr_chat_sessions(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (NOW())
+    )
+  `);
+  // 索引
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_chat_sessions_project ON dr_chat_sessions(project_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON dr_chat_messages(session_id, created_at)`);
 }
 
 export async function getDbStats() {
-  const tables = ['dr_projects', 'dr_areas', 'dr_workers', 'dr_management_team', 'dr_milestones', 'dr_milestone_plans', 'dr_daily_plans', 'dr_events', 'dr_issues', 'dr_ecc_items', 'dr_drawing_deepenings', 'dr_weekly_gantt_items', 'dr_construction_zone_schedules', 'dr_daily_attendance', 'dr_standard_trades', 'dr_weekly_labor_data', 'dr_page06_photos', 'dr_ecc_summaries', 'dr_page03_photo'];
+  const tables = ['dr_projects', 'dr_areas', 'dr_workers', 'dr_management_team', 'dr_milestones', 'dr_milestone_plans', 'dr_daily_plans', 'dr_events', 'dr_issues', 'dr_ecc_items', 'dr_drawing_deepenings', 'dr_weekly_gantt_items', 'dr_construction_zone_schedules', 'dr_daily_attendance', 'dr_standard_trades', 'dr_weekly_labor_data', 'dr_page06_photos', 'dr_ecc_summaries', 'dr_page03_photo', 'dr_chat_sessions', 'dr_chat_messages'];
   const stats = {};
   for (const t of tables) {
     try {

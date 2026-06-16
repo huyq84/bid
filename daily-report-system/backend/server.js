@@ -14,6 +14,11 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { MinMaxClient } from './llm-client.js';
 import { mockParseVoice, mockParsePhoto, mockAggregateWeekly } from './mock-fallback.js';
+import { buildChatContext, contextToText } from './chat-context.js';
+import { executeAction } from './chat-actions.js';
+import { isSensitiveAction, getActionSummary } from './chat-actions.js';
+import { dailyInspection, generateProactiveMessages } from './inspection-engine.js';
+import { query } from './db.js';
 import apiRoutes from './routes.js';
 import os from 'os';
 
@@ -195,47 +200,250 @@ app.post('/api/aggregate-weekly', async (req, res) => {
   }
 });
 
-// ==================== AI 对话 ====================
+// ==================== AI 对话 — 权限分级 ====================
+// pending 操作暂存区
+const _pendingActions = new Map();
+let _paSeq = 0;
+
 app.post('/api/chat', async (req, res) => {
   const start = Date.now();
   try {
-    const { message, history, projectId, date } = req.body;
+    const { message, history, projectId, date, sessionId } = req.body;
     if (!message) return res.status(400).json({ error: 'message required' });
+
+    const pid = projectId || 'baicaoyuan';
+    const d = date || new Date().toISOString().slice(0, 10);
+
+    // 1. 拉取项目上下文
+    const ctx = await buildChatContext(pid, d);
+    const ctxText = contextToText(ctx);
+
     let reply, actions, source = 'mock';
     try {
-      const result = await llm.dialogue({ message, history, projectId, date });
+      const result = await llm.chatWithContext({ message, history, contextText: ctxText });
       reply = result.reply;
       actions = result.actions;
       source = 'llm';
     } catch (e) {
       console.warn('[chat] LLM 失败，降级 mock:', e.message);
-      reply = _mockChatReply(message);
-      actions = [];
+      const mock = _mockChatReply(message);
+      reply = mock.reply;
+      actions = mock.actions;
     }
-    res.json({ reply, actions, latencyMs: Date.now() - start, source });
+
+    // 2. 按权限分级执行
+    const enrichedCtx = { ...ctx, date: d, projectId: pid, plans: ctx.today.plans };
+    const results = [];
+    const pendingActions = [];
+
+    for (const action of (actions || [])) {
+      if (isSensitiveAction(action.type)) {
+        // 敏感操作 -> 暂存，等用户授权
+        const paId = 'pa_' + (++_paSeq);
+        _pendingActions.set(paId, { action, ctx: enrichedCtx });
+        pendingActions.push({
+          id: paId,
+          type: action.type,
+          summary: getActionSummary(action),
+          data: action.data
+        });
+      } else {
+        // 安全操作 -> 立即执行
+        const r = await executeAction(action, enrichedCtx);
+        results.push({ action, ...r });
+      }
+    }
+
+    res.json({ reply, actions, results, pendingActions, latencyMs: Date.now() - start, source, sessionId });
   } catch (e) {
-    res.status(500).json({ error: e.message, reply: _mockChatReply(req.body?.message || ''), actions: [], latencyMs: Date.now() - start });
+    console.error('[chat] error:', e);
+    const mock = _mockChatReply(req.body?.message || '');
+    res.status(500).json({ error: e.message, reply: mock.reply, actions: mock.actions, results: [], latencyMs: Date.now() - start });
+  }
+});
+
+// 用户授权执行敏感操作
+app.post('/api/chat/authorize', async (req, res) => {
+  try {
+    const { pendingId } = req.body;
+    if (!pendingId) return res.status(400).json({ error: 'pendingId required' });
+
+    const entry = _pendingActions.get(pendingId);
+    if (!entry) return res.status(404).json({ error: '授权请求已过期或不存在' });
+
+    _pendingActions.delete(pendingId);
+    const result = await executeAction(entry.action, entry.ctx);
+    res.json({ ok: true, result, action: entry.action });
+  } catch (e) {
+    console.error('[chat] 授权执行失败:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 用户拒绝/取消执行
+app.post('/api/chat/reject', async (req, res) => {
+  const { pendingId } = req.body;
+  if (pendingId) _pendingActions.delete(pendingId);
+  res.json({ ok: true });
+});
+
+// 手动触发巡检（前端可调用，立即执行并推送）
+app.post('/api/chat/inspect', async (req, res) => {
+  try {
+    await runInspection();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
 function _mockChatReply(text) {
   const t = text || '';
-  if (t.includes('协调') || t.includes('记录')) {
-    return '好的，我来帮你记录协调事宜。请提供：\n1. 需协调事项\n2. 提出部门\n3. 配合部门\n或直接说"记录协调：xxx，提出部门：xxx，配合部门：xxx"';
+
+  // 删除/编辑事件
+  const delMatch = t.match(/(?:删除|删掉|移除|去掉)\s*[Ee]?(\w+)/);
+  if (delMatch) {
+    return { reply: '将要删除事件 ' + delMatch[0] + '，需要您授权确认。', actions: [{ type: 'deleteEvent', data: { eventId: 'E' + delMatch[1] } }] };
   }
-  if (t.includes('今日计划') || t.includes('进度')) return '📋 正在查询今日进度计划…';
-  if (t.includes('周报') || t.includes('生成')) return '📊 已为你打开周报预览界面。';
-  return '你好！我是 AI 助手，可以帮你记录协调事宜、查看今日计划、生成周报等。需要什么帮助？';
+  const editMatch = t.match(/(?:把|将|给)?\s*[Ee]?(\w+)\s*(?:进度|改成|改为|更新)?\s*(\d+%)?/);
+  if (editMatch && (t.includes('进度') || t.includes('改成') || t.includes('改为') || t.includes('更新'))) {
+    return { reply: '将要更新事件 ' + editMatch[1] + '，需要您授权确认。', actions: [{ type: 'updateEvent', data: { eventId: 'E' + editMatch[1], progress: editMatch[2] || '' } }] };
+  }
+  // 关闭/删除协调
+  const closeMatch = t.match(/(?:关闭|关掉|完成|解决)\s*[Ii]?(\w+)/);
+  if (closeMatch) {
+    return { reply: '将要关闭协调 ' + closeMatch[0] + '，需要您授权确认。', actions: [{ type: 'closeIssue', data: { issueId: 'I' + closeMatch[1] } }] };
+  }
+
+  if (t.includes('协调') || t.includes('记录') || t.includes('设计院') || t.includes('图纸') || t.includes('配合')) {
+    // 简单的协调解析
+    const m = t.match(/记录协调[：:]\s*(.+?)[，,。\n]*(?:提出[：:]\s*(.+?))?[，,。\n]*(?:配合[：:]\s*(.+?))?/);
+    if (m) {
+      return {
+        reply: '已记录协调事宜',
+        actions: [{
+          type: 'createIssue',
+          data: { title: m[1] || t, proposeDept: m[2] || '', cooperateDept: m[3] || '', priority: 'medium' }
+        }]
+      };
+    }
+    return { reply: '请补充协调内容', actions: [] };
+  }
+  if (t.includes('签到') || t.includes('请假')) {
+    return {
+      reply: '已记录签到（请在前端确认具体人员）',
+      actions: []
+    };
+  }
+  if (t.includes('完成') || t.includes('进度') || t.includes('施工') || t.includes('木工') || t.includes('瓦工') || t.includes('电工')) {
+    // 提取任务名（取第一个名词短语）
+    const taskMatch = t.match(/(今天|刚才|上午|下午)?(.+?)(完成|进度|开始|进行|进行中)/);
+    const taskName = taskMatch ? taskMatch[2].trim() : t.slice(0, 20);
+    const progressMatch = t.match(/(\d+)\s*%/);
+    const headcountMatch = t.match(/(\d+)\s*人/);
+    return {
+      reply: '已记录进度事件',
+      actions: [{
+        type: 'createEvent',
+        data: {
+          type: 'progress',
+          taskName,
+          progress: progressMatch ? progressMatch[0] : '',
+          headcount: headcountMatch ? parseInt(headcountMatch[1]) : 0
+        }
+      }]
+    };
+  }
+  if (t.includes('周报') || t.includes('生成')) {
+    return { reply: '📊 已为你打开周报预览界面。', actions: [] };
+  }
+  return { reply: '你好！我是 AI 助手，可以帮你记录事件、协调、签到等。试试说"今天木工完成大堂天花龙骨 80%"', actions: [] };
 }
 
 // ==================== 数据库 API 路由 ====================
 app.use(apiRoutes);
 
-// ============================================================
-// 启动
-// ============================================================
+// ==================== 主动巡检 + WebSocket 推送 ====================
+import { WebSocketServer } from 'ws';
+import http from 'http';
+
+let wss = null;
+const connectedClients = new Set();
+
+// 推送消息到所有连接
+function broadcastToClients(msg) {
+  const data = JSON.stringify(msg);
+  connectedClients.forEach(c => {
+    try { c.send(data); } catch {}
+  });
+}
+
+// 巡检 + 生成主动消息
+async function runInspection() {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    // 查询所有项目
+    let projectIds = ['baicaoyuan'];
+    try {
+      const result = await query('SELECT id FROM dr_projects');
+      if (result.rows && result.rows.length > 0) {
+        projectIds = result.rows.map(r => r.id);
+      }
+    } catch (e) {
+      console.warn('[巡检] 查询项目列表失败，使用默认:', e.message);
+    }
+    let allMessages = [];
+    for (const pid of projectIds) {
+      const reminders = await dailyInspection(pid, today);
+      const messages = await generateProactiveMessages(reminders);
+      // 每条消息带上 projectId
+      messages.forEach(m => {
+        allMessages.push({ projectId: pid, message: m.message });
+      });
+    }
+    if (allMessages.length > 0) {
+      console.log(`[巡检] 发现 ${allMessages.length} 条提醒（${projectIds.length} 个项目）`);
+      broadcastToClients({
+        type: 'reminders',
+        ts: Date.now(),
+        reminders: allMessages
+      });
+    } else {
+      console.log('[巡检] 一切正常，无提醒');
+    }
+  } catch (e) {
+    console.error('[巡检] 失败:', e);
+  }
+}
+
+// 调度器：每小时检查一次（实际触发由 _lastRunHour 控制）
+let _lastRunHour = -1;
+function scheduler() {
+  const now = new Date();
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+  // 在 8:30, 13:00, 17:30 触发
+  const triggers = [[8, 30], [13, 0], [17, 30]];
+  for (const [h, m] of triggers) {
+    if (hour === h && minute === m && _lastRunHour !== hour) {
+      _lastRunHour = hour;
+      runInspection();
+      return;
+    }
+  }
+  // 启动时跑一次（如果是 8:00-22:00 之间）
+  if (_lastRunHour === -1 && hour >= 8 && hour <= 22) {
+    _lastRunHour = -2; // 防止启动后立即重复
+    setTimeout(runInspection, 5000);
+  }
+}
+setInterval(scheduler, 60 * 1000);  // 每分钟检查一次
+setTimeout(scheduler, 3000);  // 启动 3 秒后初始化
+
+// ==================== 启动 ====================
 const PORT = process.env.BACKEND_PORT || 3010;
-app.listen(PORT, '0.0.0.0', async () => {
+const server = http.createServer(app);
+server.listen(PORT, '0.0.0.0', async () => {
   // 初始化数据库
   try {
     const { initDatabase } = await import('./db.js');
@@ -267,5 +475,20 @@ app.listen(PORT, '0.0.0.0', async () => {
     console.log(`    未检测到局域网网卡，请检查WiFi/网线连接`);
   }
   console.log(`  健康检查: http://localhost:${PORT}/api/health`);
+  console.log(`  WebSocket: ws://localhost:${PORT}/ws/chat`);
   console.log(`========================================\n`);
+
+  // 启动 WebSocket
+  wss = new WebSocketServer({ server, path: '/ws/chat' });
+  wss.on('connection', (ws) => {
+    connectedClients.add(ws);
+    console.log(`[WS] 客户端连接 (当前 ${connectedClients.size} 个)`);
+    // 连接时主动推一次巡检
+    setTimeout(() => runInspection(), 1000);
+    ws.on('close', () => {
+      connectedClients.delete(ws);
+      console.log(`[WS] 客户端断开 (剩余 ${connectedClients.size} 个)`);
+    });
+    ws.on('error', () => connectedClients.delete(ws));
+  });
 });

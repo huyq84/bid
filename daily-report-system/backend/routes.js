@@ -597,4 +597,58 @@ router.delete('/api/ecc-summary/:projectId', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ==================== 聊天会话 CRUD ====================
+router.get('/api/chat/sessions', async (req, res) => {
+  try {
+    const { projectId } = req.query;
+    if (!projectId) return res.status(400).json({ error: 'projectId required' });
+    const result = await query('SELECT id, project_id, name, created_at, updated_at FROM dr_chat_sessions WHERE project_id=$1 ORDER BY updated_at DESC', [projectId]);
+    res.json(result.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/api/chat/sessions', async (req, res) => {
+  try {
+    const { projectId, name } = req.body;
+    if (!projectId) return res.status(400).json({ error: 'projectId required' });
+    const id = 'cs_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+    await query('INSERT INTO dr_chat_sessions (id, project_id, name) VALUES ($1,$2,$3)', [id, projectId, name || '新对话']);
+    res.json({ id, project_id: projectId, name: name || '新对话' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/api/chat/sessions/:id', async (req, res) => {
+  try {
+    const { name } = req.body;
+    await query('UPDATE dr_chat_sessions SET name=$1, updated_at=NOW() WHERE id=$2', [name, req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/api/chat/sessions/:id', async (req, res) => {
+  try {
+    await query('DELETE FROM dr_chat_messages WHERE session_id=$1', [req.params.id]);
+    await query('DELETE FROM dr_chat_sessions WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/api/chat/sessions/:id/messages', async (req, res) => {
+  try {
+    const result = await query('SELECT id, role, content, created_at FROM dr_chat_messages WHERE session_id=$1 ORDER BY created_at', [req.params.id]);
+    res.json(result.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/api/chat/messages', async (req, res) => {
+  try {
+    const { sessionId, role, content } = req.body;
+    if (!sessionId || !role || !content) return res.status(400).json({ error: 'sessionId, role, content required' });
+    const id = 'cm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+    await query('INSERT INTO dr_chat_messages (id, session_id, role, content) VALUES ($1,$2,$3,$4)', [id, sessionId, role, content]);
+    await query('UPDATE dr_chat_sessions SET updated_at=NOW() WHERE id=$1', [sessionId]);
+    res.json({ ok: true, id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;

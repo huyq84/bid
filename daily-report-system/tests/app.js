@@ -7020,6 +7020,8 @@ function createEventFromChat(data) {
     (data.owner ? '• 负责人：' + data.owner + '\n' : '') +
     (data.progress ? '• 进度：' + data.progress + '\n' : '') +
     (data.headcount ? '• 人数：' + data.headcount + '人' : ''));
+  // 同步到后端 DB（静默，不阻塞 UI）
+  fetch('http://localhost:3010/api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ev) }).catch(function(){});
 }
 
 async function handleChatPhoto(input) {

@@ -172,7 +172,7 @@ export class MinMaxClient {
     "taskName": "任务名称（简洁，3-12 字）",
     "owner": "负责人姓名（优先从工人列表里选；如果口述中出现"负责人刘""张师傅负责"等明确姓名但不在列表中，也直接提取，不要留空）",
     "progress": "进度百分比（格式：80%），无法提取留空",
-    "headcount": 总人数（整数，无法提取填 0）,
+    "headcount": 总人数（各工种人数之和，不含负责人；可据laborRequirements求和，无法提取填 0）,
     "status": "进行中" | "已完成" | "未开始" | "暂停"
   },
   "confidence": 0~1 之间的数字
@@ -455,36 +455,90 @@ ${text}`;
     }
   }
 
-  // 通用对话 (独立方法，不覆盖低层 chat)
-  async dialogue({ message, history = [], projectId, date, areaMap = {} }) {
-    const systemMsg = `你是百草园城市更新项目的 AI 工程助手，通过自然语言帮助用户完成以下工作：
-1. 记录协调事宜：用户告知需协调事项、提出部门、配合部门，回复确认信息 + action
-2. 查看今日进度计划：返回当前项目的今日计划摘要
-3. 生成周报：打开周报预览界面
-4. 直接记录日报事件：用户描述施工进度/材料/安全/考勤等，自动解析并保存为事件
+  // P0 新增：带完整上下文的对话（注入项目数据 + 行动指令）
+  async chatWithContext({ message, history = [], contextText = '' }) {
+    const systemMsg = `你是【百草园城市更新项目】的 AI 工程助手。
 
-当前项目ID: ${projectId || 'baicaoyuan'}
-当前日期: ${date || ''}
+## 你的能力
+通过自然语言帮用户完成所有日报系统操作：
 
-回复要求：
-- 简洁、中文、专业
-- 如果用户要求执行操作，在回复末尾加上 { "action": { "type": "xxx", "data": {} } } JSON 块
-- action 类型：
-  - createIssue（{title,proposeDept,cooperateDept}）— 记录协调事宜
-  - openWeeklyReport — 生成周报
-  - showPlans — 查看今日计划
-  - createEvent — 直接记录日报事件，data 格式：
-    {
-      "type": "progress|material|safety|coordination|attendance|drawing",
-      "areaId": "区域ID（可为空）",
-      "areaName": "区域名称",
-      "taskName": "任务名称",
-      "owner": "负责人",
-      "progress": "进度如80%",
-      "headcount": 人数,
-      "planId": "匹配的计划ID",
-      "note": "备注"
-    }`;
+【安全操作】自动执行，用户可见结果：
+- createEvent: 录日报事件（type, taskName, 可选: areaId, owner, progress, headcount=各工种人数之和, laborRequirements=[{trade:"工种",count:人数}]）
+- createIssue: 录协调事宜（title, type, areaId, proposeDept, cooperateDept, priority, owner, description）
+- createAttendance: 签到（records: { managerId: { present, reason } }）
+- confirmEvent: 确认事件为已完成（eventId）
+
+【敏感操作】需用户授权后执行：
+- updateEvent: 编辑已有事件（eventId, taskName, owner, progress, headcount, type, status）
+- deleteEvent: 删除事件（eventId）
+- updateIssue: 更新协调（issueId, title, status, priority, owner, description）
+- closeIssue: 关闭协调（issueId）
+- deleteIssue: 删除协调（issueId）
+
+## 匹配规则
+- 区域名 → 从下面的"项目区域"中找匹配的 id
+- 负责人 → 从下面的"工人列表"或"今日计划"中找
+- 计划名 → 从下面的"今日进行中的计划"中找匹配的 id
+- 进度保留原格式（"80%" 或 80）
+- 事件ID/协调ID → 从"今日已录事件"/"未关闭协调"中匹配
+
+## 缺信息处理
+- 缺区域 → 留空 areaId
+- 缺负责人 → 留空 owner
+- 缺进度 → 留空
+- 真的猜不出来 → 在 reply 里反问
+
+## 字段必填规则（重要）
+createEvent:
+  - 必填: type（事件类型）, taskName（任务名称）
+  - 可选: areaId（区域）, owner（负责人）, progress（进度百分比）, headcount（总人数=各工种人数之和）, laborRequirements（工种×人数明细，如[{trade:"木工",count:3},{trade:"电工",count:2}]）, note（备注）, planId（计划ID）
+  - 默认值: type=progress, source=chat
+createIssue:
+  - 必填: title
+  - 可选: type, areaId, priority, proposeDept, cooperateDept, owner, description
+  - 默认值: type=coordination, priority=medium
+createAttendance:
+  - 必填: records (至少 1 条)
+  - 每条 record: managerId (必填), present (默认 true), reason (可选)
+
+## 反问规则（重要）
+- 如果用户想创建事件但没说任务内容（taskName），必须反问："请问要记录什么任务？"
+- 如果用户想创建协调但没说标题（title），必须反问："请问协调什么事？"
+- 如果用户想签到但没说谁签到，必须反问："请问哪些人要签到？"
+- 其他可选字段（areaId, owner, progress, headcount）缺失时直接留空，不要反问
+- 用户说"录入今日完成"之类模糊表述时，反问具体任务内容
+
+## 回复格式
+1. 一句中文回复（友好、简洁）
+2. 如果有操作，输出 JSON 块，用代码块包裹（\`\`\`json ... \`\`\`）：
+
+\`\`\`json
+{ "actions": [
+  { "type": "createEvent", "data": { "type": "progress", "areaId": "BAI-A1", "taskName": "大堂天花龙骨", "progress": "80%", "owner": "鲍永春", "headcount": 5, "laborRequirements": [{ "trade": "木工", "count": 3 }, { "trade": "电工", "count": 2 }] } }
+] }
+\`\`\`
+
+## 编辑/删除示例（敏感操作类型）
+- "把 E849 进度改成 100%" / "把 E849 改成 50%" / "E849 更新进度为 80%" → updateEvent: { eventId: "E849", progress: "50%" }
+- "删掉 E849" / "删除事件 E849" / "移除 E849" → deleteEvent: { eventId: "E849" }
+- "关闭 I123" / "关掉协调 I123" / "解决 I123" → closeIssue: { issueId: "I123" }
+- "把 I123 优先级改成高" / "更新 I123，负责人改王工" → updateIssue: { issueId: "I123", priority: "high" }
+- "删除协调 I123" / "删掉 I123" → deleteIssue: { issueId: "I123" }
+- 涉及事件/协调的修改删除必须用 eventId/issueId 引用
+- 即使用户提到的 eventId 不在今日事件中，也要生成对应操作（后端会校验是否存在）
+
+## 注意事项
+- 一个用户消息可以包含多个操作（比如"木工完成 80%，电工完成 60%"→ 2 个 createEvent）
+- 时间默认用当前时间
+- source 标 "chat"
+- 敏感操作告诉用户「请点击卡片上的 ✅ 授权执行 按钮」即可，不要回复"请回复确认"（系统只认按钮点击，不认文字确认）
+- **绝对不要输出任何图片引用（如 ![alt](url)）、截图链接、或图片占位符。所有信息用纯文本或表格展示。**
+- 如果需要展示数据，用 Markdown 表格，不要用图片
+
+========================================
+## 项目实时数据（必读）
+${contextText}
+========================================`;
 
     const messages = (history || []).map(m => ({
       role: m.role === 'user' ? 'user' : 'assistant',
@@ -495,17 +549,34 @@ ${text}`;
     const body = await this._call(systemMsg, messages);
     const text = body?.content?.[0]?.text || '';
 
-    // 解析 action JSON 块
+    return this._parseChatReply(text);
+  }
+
+  _parseChatReply(text) {
     let reply = text;
     let actions = [];
-    const actionMatch = text.match(/\{[\s\S]*?"action"[\s\S]*?\}/);
-    if (actionMatch) {
+
+    // 提取 ```json ... ``` 代码块
+    const jsonBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (jsonBlockMatch) {
       try {
-        const parsed = JSON.parse(actionMatch[0]);
-        if (parsed.action) actions = [parsed.action];
-        reply = text.replace(actionMatch[0], '').trim();
-      } catch {}
+        const parsed = JSON.parse(jsonBlockMatch[1].trim());
+        if (Array.isArray(parsed.actions)) actions = parsed.actions;
+        else if (parsed.action) actions = [parsed.action];
+        reply = text.replace(jsonBlockMatch[0], '').trim();
+      } catch (e) {
+        // 解析失败，尝试用宽松正则
+        const actionMatch = text.match(/\{[\s\S]*?"action"[\s\S]*?\}/);
+        if (actionMatch) {
+          try {
+            const parsed = JSON.parse(actionMatch[0]);
+            if (parsed.action) actions = [parsed.action];
+            reply = text.replace(actionMatch[0], '').trim();
+          } catch {}
+        }
+      }
     }
+
     return { reply, actions };
   }
 

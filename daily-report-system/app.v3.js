@@ -1,6 +1,5 @@
 // ============================================================
 // 主应用逻辑
-console.log('[app.js] v3 loaded');
 // ============================================================
 
 let M = window.MockData;
@@ -9177,9 +9176,19 @@ function appendChatMessage(role, content, skipCache) {
     div.innerHTML = '<div class="ai-message-bubble" style="background:transparent;padding:0;">' + renderMarkdownInline(content) + '</div>';
   } else {
     div.className = 'ai-message ai-message-system';
-    div.innerHTML = '<div class="ai-message-avatar"><img src="assets/avatar-construction-girl.png" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></div><div class="ai-message-bubble">' + renderMarkdownInline(content) + '</div>';
+    const rendered = renderMarkdownInline(content);
+    div.innerHTML = '<div class="ai-message-avatar"><img src="assets/avatar-construction-girl.png" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></div><div class="ai-message-bubble">' + rendered + '</div>';
   }
   container.appendChild(div);
+  // 保险：元素入 DOM 后检查 <table> 前是否有 <br>，有则清理（防御外部修改）
+  const bubble = div.querySelector('.ai-message-bubble');
+  if (bubble && bubble.innerHTML.includes('<table')) {
+    const before = bubble.innerHTML.substring(0, bubble.innerHTML.indexOf('<table'));
+    if ((before.match(/<br>/g) || []).length > 0) {
+      console.log('[br-guard] found ' + (before.match(/<br>/g) || []).length + ' br before table, cleaning');
+      bubble.innerHTML = bubble.innerHTML.replace(/(?:<br\s*\/?>\s*)+(?=<table)/gi, '');
+    }
+  }
   scrollChatToBottom();
   // 渲染 mermaid
   renderMermaidDiagrams();
@@ -9187,6 +9196,7 @@ function appendChatMessage(role, content, skipCache) {
 
 function renderMarkdownInline(text) {
   if (!text) return '';
+  console.log('[br-input] text length:', text.length, 'has|:', text.includes('|'), 'newlines:', (text.match(/\n/g)||[]).length, 'sample:', JSON.stringify(text.slice(0,100)));
   let html = _escapeHtml(text);
 
   // 1. 提取代码块 / mermaid
@@ -9278,7 +9288,10 @@ function renderMarkdownInline(text) {
   html = html.replace(/<br>\s*<li /g, '<li ');
   html = html.replace(/<br>\s*<div /g, '<div ');
   html = html.replace(/<br>\s*<hr /g, '<hr ');
-  html = html.replace(/(?:<br>\s*)+<table/g, '<table');
+  html = html.replace(/(?:<br>\s*)+<table/g, function(m) {
+    console.log('[br-regex] matched ' + (m.match(/<br>/g)||[]).length + ' br: ' + JSON.stringify(m.slice(-30)));
+    return '<table';
+  });
   html = html.replace(/(<br\s*\/?>\s*){2,}/g, '<br>');
 
   // 6. 清理空表格和坏图片

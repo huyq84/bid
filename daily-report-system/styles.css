@@ -1764,6 +1764,15 @@ aside .card { margin-bottom: 0; }
   right: 24px;
   z-index: 9999;
   font-family: 'Noto Sans SC', 'Microsoft YaHei', 'PingFang SC', sans-serif;
+  touch-action: none;
+}
+.ai-chat-widget.dragging {
+  transition: none;
+  cursor: grabbing;
+}
+.ai-chat-widget.dragging .ai-chat-btn-ring,
+.ai-chat-widget.dragging .ai-chat-btn {
+  animation: none;
 }
 
 /* 遮罩层 */
@@ -1788,7 +1797,7 @@ aside .card { margin-bottom: 0; }
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #00adef 0%, #0081cc 100%);
+  background: #fff;
   box-shadow: 0 4px 20px rgba(0,173,239,0.4);
   display: flex;
   align-items: center;
@@ -1798,6 +1807,19 @@ aside .card { margin-bottom: 0; }
   z-index: 2;
   animation: aiChatBtnPulse 3s ease-in-out infinite;
 }
+.ai-chat-btn-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.ai-chat-btn-img-1 { opacity: 1; }
+.ai-chat-btn:hover .ai-chat-btn-img-1 { opacity: 0; }
+.ai-chat-btn:hover .ai-chat-btn-img-2 { opacity: 1; }
 .ai-chat-btn:hover {
   transform: scale(1.1) rotate(-10deg);
   box-shadow: 0 6px 30px rgba(0,173,239,0.6);
@@ -1826,6 +1848,12 @@ aside .card { margin-bottom: 0; }
   0%, 100% { box-shadow: 0 4px 20px rgba(0,173,239,0.4); }
   50% { box-shadow: 0 4px 30px rgba(0,173,239,0.7); }
 }
+@keyframes aiBadgePop {
+  0% { transform: scale(0); }
+  60% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+.ai-chat-widget.expanded #aiChatBadge { display: none !important; }
 
 /* 展开态：隐藏按钮，显示面板 */
 .ai-chat-widget.expanded .ai-chat-btn {
@@ -1836,13 +1864,76 @@ aside .card { margin-bottom: 0; }
 }
 .ai-chat-widget.expanded .ai-chat-btn-ring { display: none; }
 
+/* 会话栏 */
+.ai-chat-session-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background: rgba(0,0,0,0.2);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.ai-chat-session-select {
+  flex: 1;
+  background: rgba(255,255,255,0.06);
+  color: #e2e8f0;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+}
+.ai-chat-session-select option { background: #1e293b; color: #e2e8f0; }
+.ai-chat-session-btn {
+  width: 28px; height: 28px;
+  border: none; border-radius: 6px;
+  background: rgba(255,255,255,0.06);
+  color: #94a3b8;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s;
+}
+.ai-chat-session-btn:hover { background: rgba(255,255,255,0.12); color: #f1f5f9; }
+.ai-chat-session-menu-item {
+  padding: 8px 14px;
+  font-size: 13px;
+  color: #e2e8f0;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ai-chat-session-menu-item:hover { background: rgba(255,255,255,0.1); }
+
+/* 授权按钮 */
+.ai-auth-btn {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+}
+.ai-auth-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.ai-auth-btn-confirm { background: rgba(74,222,128,0.15); color: #4ade80; }
+.ai-auth-btn-confirm:hover:not(:disabled) { background: rgba(74,222,128,0.25); }
+.ai-auth-btn-cancel { background: rgba(255,255,255,0.06); color: #94a3b8; }
+.ai-auth-btn-cancel:hover:not(:disabled) { background: rgba(255,255,255,0.12); color: #e2e8f0; }
+
 /* 聊天面板 */
 .ai-chat-panel {
-  position: absolute;
-  bottom: 0;
-  right: 0;
-  width: 380px;
-  height: 560px;
+  position: fixed;
+  bottom: 96px;
+  right: 24px;
+  width: 850px;
+  height: 540px;
+  min-width: 380px;
+  min-height: 400px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
   background: rgba(15,23,42,0.94);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
@@ -1857,11 +1948,16 @@ aside .card { margin-bottom: 0; }
   transform-origin: bottom right;
   transition: opacity 0.3s cubic-bezier(0.22,1,0.36,1), transform 0.35s cubic-bezier(0.22,1,0.36,1);
   pointer-events: none;
+  resize: both;
 }
 .ai-chat-widget.expanded .ai-chat-panel {
   opacity: 1;
   transform: scale(1) translateY(0);
   pointer-events: all;
+}
+.ai-chat-panel.dragging {
+  transition: none;
+  cursor: grabbing;
 }
 
 /* Header */
@@ -1872,6 +1968,8 @@ aside .card { margin-bottom: 0; }
   padding: 16px 20px;
   border-bottom: 1px solid rgba(255,255,255,0.06);
   flex-shrink: 0;
+  cursor: move;
+  user-select: none;
 }
 .ai-chat-header-left {
   display: flex;
@@ -1882,13 +1980,24 @@ aside .card { margin-bottom: 0; }
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: linear-gradient(135deg, #00adef, #6366f1);
+  background: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 18px;
   box-shadow: 0 2px 8px rgba(0,173,239,0.3);
+  position: relative;
+  overflow: hidden;
 }
+.ai-chat-avatar-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 10px;
+  object-fit: cover;
+}
+.ai-chat-avatar-img-2 { animation-delay: 1.6s; }
 .ai-chat-title {
   font-size: 14px;
   font-weight: 600;
@@ -1982,13 +2091,28 @@ aside .card { margin-bottom: 0; }
   padding: 10px 14px;
   border-radius: 4px 14px 14px 14px;
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.45;
   word-break: break-word;
 }
+.ai-message-bubble br { display: block; content: ''; margin: 2px 0; }
+.ai-message-bubble p { margin: 4px 0; }
 .ai-message-system .ai-message-bubble {
   background: rgba(255,255,255,0.1);
   color: #f8fafc;
   border: 1px solid rgba(255,255,255,0.08);
+}
+.ai-message.ai-proactive {
+  border-left: 3px solid #f59e0b;
+  background: rgba(245,158,11,0.08);
+  border-radius: 4px;
+  padding: 6px 10px;
+  margin: 4px 0;
+}
+.ai-message.ai-proactive .ai-message-bubble {
+  background: transparent;
+  color: #fde68a;
+  font-size: 12.5px;
+  font-weight: 500;
 }
 .ai-message.user .ai-message-bubble {
   background: linear-gradient(135deg, #00adef, #0081cc);
