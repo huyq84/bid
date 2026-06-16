@@ -454,4 +454,103 @@ ${text}`;
       throw new Error(`LLM 返回的不是合法 JSON: ${e.message}\n原文: ${raw.slice(0, 200)}`);
     }
   }
+
+  // 通用对话 (独立方法，不覆盖低层 chat)
+  async dialogue({ message, history = [], projectId, date, areaMap = {} }) {
+    const systemMsg = `你是百草园城市更新项目的 AI 工程助手，通过自然语言帮助用户完成以下工作：
+1. 记录协调事宜：用户告知需协调事项、提出部门、配合部门，回复确认信息 + action
+2. 查看今日进度计划：返回当前项目的今日计划摘要
+3. 生成周报：打开周报预览界面
+4. 直接记录日报事件：用户描述施工进度/材料/安全/考勤等，自动解析并保存为事件
+
+当前项目ID: ${projectId || 'baicaoyuan'}
+当前日期: ${date || ''}
+
+回复要求：
+- 简洁、中文、专业
+- 如果用户要求执行操作，在回复末尾加上 { "action": { "type": "xxx", "data": {} } } JSON 块
+- action 类型：
+  - createIssue（{title,proposeDept,cooperateDept}）— 记录协调事宜
+  - openWeeklyReport — 生成周报
+  - showPlans — 查看今日计划
+  - createEvent — 直接记录日报事件，data 格式：
+    {
+      "type": "progress|material|safety|coordination|attendance|drawing",
+      "areaId": "区域ID（可为空）",
+      "areaName": "区域名称",
+      "taskName": "任务名称",
+      "owner": "负责人",
+      "progress": "进度如80%",
+      "headcount": 人数,
+      "planId": "匹配的计划ID",
+      "note": "备注"
+    }`;
+
+    const messages = (history || []).map(m => ({
+      role: m.role === 'user' ? 'user' : 'assistant',
+      content: m.content
+    }));
+    messages.push({ role: 'user', content: message });
+
+    const body = await this._call(systemMsg, messages);
+    const text = body?.content?.[0]?.text || '';
+
+    // 解析 action JSON 块
+    let reply = text;
+    let actions = [];
+    const actionMatch = text.match(/\{[\s\S]*?"action"[\s\S]*?\}/);
+    if (actionMatch) {
+      try {
+        const parsed = JSON.parse(actionMatch[0]);
+        if (parsed.action) actions = [parsed.action];
+        reply = text.replace(actionMatch[0], '').trim();
+      } catch {}
+    }
+    return { reply, actions };
+  }
+
+  async _call(system, messages) {
+    let lastErr;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        if (attempt > 0) await new Promise(r => setTimeout(r, 1000 * attempt));
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+        const body = {
+          model: this.model,
+          system,
+          messages,
+          max_tokens: this.maxTokens,
+          temperature: this.temperature
+        };
+        if (this.groupId) body.metadata = { group_id: this.groupId };
+        const apiUrl = this.baseUrl.endsWith('/v1') ? `${this.baseUrl}/messages` : `${this.baseUrl}/v1/messages`;
+        const res = await fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': this.apiKey,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify(body)
+        });
+        clearTimeout(timer);
+        if (!res.ok) {
+          const errText = await res.text().catch(() => '');
+          lastErr = new Error(`HTTP ${res.status}: ${errText.slice(0, 200)}`);
+          if (res.status < 500) break;
+          continue;
+        }
+        const data = await res.json();
+        const text = data?.content?.[0]?.text;
+        if (text) return data;
+        lastErr = new Error('空响应');
+        continue;
+      } catch (e) {
+        lastErr = e;
+        if (e.name === 'AbortError') break;
+      }
+    }
+    throw lastErr || new Error('LLM 调用失败');
+  }
 }

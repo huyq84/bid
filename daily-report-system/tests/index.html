@@ -101,7 +101,10 @@
         <!-- 今日事件流 -->
         <div class="card">
           <div class="toolbar">
-            <span style="font-size:13px; color:#64748b; margin-right:8px;">筛选：</span>
+            <div class="card-title" style="display:flex;align-items:center;gap:6px;margin-right:8px;">
+              <span style="font-size:16px;">✅</span>
+              <span style="font-size:13px;font-weight:600;color:#334155;">今日完成</span>
+            </div>
             <div class="filter-chip active" data-filter="all" onclick="filterEvents('all', this)">全部</div>
             <div class="filter-chip" data-filter="progress"     onclick="filterEvents('progress', this)">🔨 进度</div>
             <div class="filter-chip" data-filter="material"     onclick="filterEvents('material', this)">📦 材料</div>
@@ -1270,6 +1273,48 @@
       <div class="confirm-actions">
         <button class="btn btn-ghost" id="confirmCancel">取消</button>
         <button class="btn btn-danger" id="confirmOk">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== 浮动 AI 聊天窗口 ============== -->
+  <div id="aiChatWidget" class="ai-chat-widget">
+    <div class="ai-chat-overlay" id="aiChatOverlay" onclick="toggleChat()"></div>
+    <div class="ai-chat-btn" id="aiChatBtn" onclick="toggleChat()">
+      <span class="ai-chat-btn-icon">💬</span>
+      <span class="ai-chat-btn-ring"></span>
+    </div>
+    <div class="ai-chat-panel" id="aiChatPanel">
+      <div class="ai-chat-header">
+        <div class="ai-chat-header-left">
+          <div class="ai-chat-avatar">🤖</div>
+          <div>
+            <div class="ai-chat-title">AI 助手</div>
+            <div class="ai-chat-status"><span class="status-dot"></span>在线 · 快如闪电</div>
+          </div>
+        </div>
+        <button class="ai-chat-close" onclick="toggleChat()">✕</button>
+      </div>
+      <div class="ai-chat-messages" id="aiChatMessages">
+        <div class="ai-message ai-message-system">
+          <div class="ai-message-avatar">🤖</div>
+          <div class="ai-message-bubble">
+            你好！我是你的 AI 助手，可以帮你：记录协调事宜、查看今日计划、生成周报等。
+          </div>
+        </div>
+      </div>
+      <div class="ai-chat-actions" id="aiChatActions">
+        <span class="ai-chip" onclick="quickChatAction('帮我记录一个协调事宜')">📋 记录协调</span>
+        <span class="ai-chip" onclick="quickChatAction('显示今日进度计划')">📅 今日计划</span>
+        <span class="ai-chip" onclick="quickChatAction('生成周报')">📊 生成周报</span>
+        <span class="ai-chip" onclick="quickChatAction('1号楼木工3人完成龙骨安装80%')">🔨 录进度</span>
+      </div>
+      <div class="ai-chat-input-area">
+        <input type="file" id="aiChatPhotoInput" accept="image/*" capture="environment" style="display:none" onchange="handleChatPhoto(this)">
+        <button class="ai-chat-ico-btn" onclick="document.getElementById('aiChatPhotoInput').click()" title="拍照上传">📷</button>
+        <button class="ai-chat-ico-btn" id="aiChatVoiceBtn" onclick="toggleChatVoice()" title="语音输入">🎤</button>
+        <input type="text" id="aiChatInput" class="ai-chat-input" placeholder="说进度、协调、考勤等，一键录入..." autocomplete="off">
+        <button class="ai-chat-send" id="aiChatSendBtn" onclick="sendChatMessage()">➤</button>
       </div>
     </div>
   </div>

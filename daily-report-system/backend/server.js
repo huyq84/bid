@@ -195,6 +195,39 @@ app.post('/api/aggregate-weekly', async (req, res) => {
   }
 });
 
+// ==================== AI 对话 ====================
+app.post('/api/chat', async (req, res) => {
+  const start = Date.now();
+  try {
+    const { message, history, projectId, date } = req.body;
+    if (!message) return res.status(400).json({ error: 'message required' });
+    let reply, actions, source = 'mock';
+    try {
+      const result = await llm.dialogue({ message, history, projectId, date });
+      reply = result.reply;
+      actions = result.actions;
+      source = 'llm';
+    } catch (e) {
+      console.warn('[chat] LLM 失败，降级 mock:', e.message);
+      reply = _mockChatReply(message);
+      actions = [];
+    }
+    res.json({ reply, actions, latencyMs: Date.now() - start, source });
+  } catch (e) {
+    res.status(500).json({ error: e.message, reply: _mockChatReply(req.body?.message || ''), actions: [], latencyMs: Date.now() - start });
+  }
+});
+
+function _mockChatReply(text) {
+  const t = text || '';
+  if (t.includes('协调') || t.includes('记录')) {
+    return '好的，我来帮你记录协调事宜。请提供：\n1. 需协调事项\n2. 提出部门\n3. 配合部门\n或直接说"记录协调：xxx，提出部门：xxx，配合部门：xxx"';
+  }
+  if (t.includes('今日计划') || t.includes('进度')) return '📋 正在查询今日进度计划…';
+  if (t.includes('周报') || t.includes('生成')) return '📊 已为你打开周报预览界面。';
+  return '你好！我是 AI 助手，可以帮你记录协调事宜、查看今日计划、生成周报等。需要什么帮助？';
+}
+
 // ==================== 数据库 API 路由 ====================
 app.use(apiRoutes);
 

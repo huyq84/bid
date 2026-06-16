@@ -8523,4 +8523,298 @@ document.addEventListener('DOMContentLoaded', () => {
     checkBackendHealth();
     setInterval(checkBackendHealth, 30000);
   }, 500);
+  // 初始化聊天输入框 Enter 键
+  const chatInput = document.getElementById('aiChatInput');
+  if (chatInput) {
+    chatInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(); }
+    });
+  }
 });
+
+// ============================================================
+// 浮动 AI 聊天
+// ============================================================
+let _chatHistory = [];
+
+function toggleChat() {
+  const w = document.getElementById('aiChatWidget');
+  if (!w) return;
+  const expanded = w.classList.toggle('expanded');
+  if (expanded) {
+    setTimeout(() => { document.getElementById('aiChatInput')?.focus(); }, 400);
+  }
+}
+
+function sendChatMessage() {
+  const input = document.getElementById('aiChatInput');
+  const text = input?.value.trim();
+  if (!text) return;
+  input.value = '';
+  appendChatMessage('user', text);
+  _chatHistory.push({ role: 'user', content: text });
+  document.getElementById('aiChatSendBtn').disabled = true;
+  showChatTyping();
+  // 调用后端或降级
+  _callChatLLM(text);
+}
+
+async function _callChatLLM(text) {
+  try {
+    const res = await fetch('http://localhost:3010/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: text,
+        history: _chatHistory.slice(-10),
+        projectId: typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan',
+        date: typeof M !== 'undefined' && M.TODAY ? M.TODAY : ''
+      })
+    });
+    if (!res.ok) throw new Error('Network error');
+    const data = await res.json();
+    hideChatTyping();
+    _chatHistory.push({ role: 'assistant', content: data.reply });
+    appendChatMessage('system', data.reply);
+    if (data.actions) data.actions.forEach(a => executeChatAction(a));
+  } catch (e) {
+    hideChatTyping();
+    _mockChatReply(text);
+  }
+}
+
+function _mockChatReply(text) {
+  setTimeout(() => {
+    let reply = '';
+    const actions = [];
+    const t = text || '';
+    if (t.includes('协调') || t.includes('记录')) {
+      reply = '好的，我来帮你记录协调事宜。请填写以下信息：\n1. 需协调事项：________\n2. 提出部门：________\n3. 配合部门：________\n或者直接告诉我完整信息，例如"设计院未回复图纸，项目部提出，设计院配合"。';
+    } else if (t.includes('今日计划') || t.includes('进度')) {
+      const plans = (typeof M !== 'undefined' && M.PLANS && currentProjectId && M.PLANS[currentProjectId]) || [];
+      const today = (typeof M !== 'undefined' && M.TODAY) || '';
+      const todayPlans = plans.filter(p => p.startDate && p.endDate && p.startDate <= today && p.endDate >= today);
+      if (todayPlans.length > 0) {
+        reply = '📋 **今日进度计划**\n' + todayPlans.map((p, i) => `${i+1}. ${p.taskName || '施工任务'}（${p.startDate}~${p.endDate}）${p.progress ? '📊 '+p.progress : ''}`).join('\n');
+      } else {
+        reply = '今日暂无进度计划。你可以通过「今日计划」卡片新建。';
+      }
+    } else if (t.includes('周报') || t.includes('生成')) {
+      reply = '📊 正在生成周报…\n已为你打开周报预览，请点击「周报」按钮查看详情。';
+      actions.push({ type: 'openWeeklyReport' });
+    } else if (t.includes('木工') || t.includes('电工') || t.includes('安装') || t.includes('龙骨') || t.includes('砌筑') || t.includes('抹灰') || t.includes('钢筋') || t.includes('混凝土') || t.includes('完成') || t.includes('号楼')) {
+      const _mType = t.includes('安全') ? 'safety' : (t.includes('材料') ? 'material' : (t.includes('考勤') ? 'attendance' : 'progress'));
+      const _areaMatch = t.match(/(\d+)号楼/);
+      const _areaId = _areaMatch ? ('BAI-B' + _areaMatch[1]) : null;
+      const _proMatch = t.match(/(\d+)%/);
+      const _headMatch = t.match(/(\d+)人/);
+      actions.push({ type: 'createEvent', data: {
+        type: _mType,
+        areaId: _areaId,
+        taskName: t.slice(0, 20) + (t.length > 20 ? '...' : ''),
+        owner: '',
+        progress: _proMatch ? _proMatch[0] : '',
+        headcount: _headMatch ? parseInt(_headMatch[1]) : 0,
+        note: t
+      }});
+    } else {
+      reply = '收到！我支持以下操作：\n• 📋 记录协调事宜\n• 📅 查看今日进度计划\n• 📊 生成周报\n• 🔨 描述施工进度直接录入日报\n请告诉我你需要什么帮助？';
+    }
+    _chatHistory.push({ role: 'assistant', content: reply});
+    if (reply) appendChatMessage('system', reply);
+    actions.forEach(a => executeChatAction(a));
+  }, 600 + Math.random() * 400);
+}
+
+function appendChatMessage(role, content) {
+  const container = document.getElementById('aiChatMessages');
+  if (!container) return;
+  const div = document.createElement('div');
+  div.className = role === 'user' ? 'ai-message user' : 'ai-message ai-message-system';
+  div.innerHTML = `<div class="ai-message-avatar">${role === 'user' ? '👤' : '🤖'}</div><div class="ai-message-bubble">${_escapeHtml(content).replace(/\n/g, '<br>')}</div>`;
+  container.appendChild(div);
+  scrollChatToBottom();
+}
+
+function showChatTyping() {
+  const container = document.getElementById('aiChatMessages');
+  if (!container) return;
+  const existing = document.getElementById('aiChatTyping');
+  if (existing) return;
+  const div = document.createElement('div');
+  div.id = 'aiChatTyping';
+  div.className = 'ai-typing';
+  div.innerHTML = '<div class="ai-typing-dot"></div><div class="ai-typing-dot"></div><div class="ai-typing-dot"></div>';
+  container.appendChild(div);
+  scrollChatToBottom();
+}
+
+function hideChatTyping() {
+  const el = document.getElementById('aiChatTyping');
+  if (el) el.remove();
+  document.getElementById('aiChatSendBtn').disabled = false;
+}
+
+function scrollChatToBottom() {
+  const container = document.getElementById('aiChatMessages');
+  if (container) container.scrollTop = container.scrollHeight;
+}
+
+function quickChatAction(text) {
+  const input = document.getElementById('aiChatInput');
+  if (input) { input.value = text; sendChatMessage(); }
+}
+
+function executeChatAction(action) {
+  if (!action || !action.type) return;
+  switch (action.type) {
+    case 'openWeeklyReport':
+      if (typeof openWeeklyReport === 'function') { closeModal('modalWeeklyMapping'); openWeeklyReport(); }
+      break;
+    case 'createIssue':
+      if (action.data && typeof saveIssue === 'function') {
+        const titleEl = document.getElementById('i-title');
+        const proposeEl = document.getElementById('i-propose');
+        const cooperateEl = document.getElementById('i-cooperate');
+        if (titleEl) titleEl.value = action.data.title || '';
+        if (proposeEl) proposeEl.value = action.data.proposeDept || '';
+        if (cooperateEl) cooperateEl.value = action.data.cooperateDept || '';
+        saveIssue();
+      }
+      break;
+    case 'createEvent':
+      if (action.data) createEventFromChat(action.data);
+      break;
+  }
+}
+
+function createEventFromChat(data) {
+  if (typeof M === 'undefined' || !M.EVENTS) return;
+  const projectId = typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan';
+  const today = M.TODAY || new Date().toISOString().slice(0, 10);
+  const ev = {
+    id: 'E' + String(Date.now()).slice(-3),
+    projectId: projectId,
+    date: today,
+    time: new Date().toTimeString().slice(0, 5),
+    type: data.type || 'progress',
+    areaId: data.areaId || null,
+    planId: data.planId || undefined,
+    payload: {
+      taskName: data.taskName || '',
+      owner: data.owner || '',
+      progress: typeof data.progress === 'string' ? data.progress : (data.progress != null ? data.progress + '%' : ''),
+      headcount: data.headcount || 0,
+      description: data.note || ''
+    },
+    submitter: '张明',
+    source: 'chat',
+    confidence: 0.9,
+    status: 'draft',
+    note: data.note || ''
+  };
+  M.EVENTS.unshift(ev);
+  if (M.saveEventsToStorage) M.saveEventsToStorage();
+  if (typeof renderFilteredEvents === 'function') renderFilteredEvents();
+  if (typeof renderDailyPlanCard === 'function') renderDailyPlanCard();
+  if (typeof renderStats === 'function') renderStats();
+  if (typeof updateCalendar === 'function') updateCalendar();
+  appendChatMessage('system', '✅ 日报事件已保存！\n' +
+    (data.taskName ? '• 任务：' + data.taskName + '\n' : '') +
+    (data.owner ? '• 负责人：' + data.owner + '\n' : '') +
+    (data.progress ? '• 进度：' + data.progress + '\n' : '') +
+    (data.headcount ? '• 人数：' + data.headcount + '人' : ''));
+}
+
+async function handleChatPhoto(input) {
+  const file = input?.files?.[0];
+  if (!file) return;
+  input.value = '';
+  appendChatMessage('user', '📷 [上传照片中...]');
+  showChatTyping();
+  try {
+    const reader = new FileReader();
+    const base64 = await new Promise((resolve, reject) => {
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    const projectId = typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan';
+    const areas = typeof M !== 'undefined' && M.AREAS ? M.AREAS[projectId] || [] : [];
+    const plans = typeof M !== 'undefined' && M.PLANS ? M.PLANS[projectId] || [] : [];
+    const res = await fetch('http://localhost:3010/api/parse-photo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageBase64: base64, caption: '', projectId, areas, plans })
+    });
+    hideChatTyping();
+    if (!res.ok) throw new Error('解析照片失败');
+    const result = await res.json();
+    const data = result || {};
+    createEventFromChat({
+      type: data.type || 'progress',
+      areaId: data.areaId || null,
+      taskName: data.payload?.taskName || data.taskHint || '拍照记录',
+      owner: data.payload?.owner || '',
+      progress: data.payload?.progress || '',
+      headcount: data.payload?.headcount || 0,
+      note: data.caption || ''
+    });
+    appendChatMessage('system', '📸 照片已解析并保存为日报事件。');
+  } catch (e) {
+    hideChatTyping();
+    appendChatMessage('system', '⚠️ 照片解析失败：' + e.message + '，已降级为普通记录。');
+    createEventFromChat({ type: 'progress', taskName: file.name || '拍照记录', note: '照片上传记录' });
+  }
+}
+
+let _chatRecognition = null;
+let _chatRecogRunning = false;
+function toggleChatVoice() {
+  const btn = document.getElementById('aiChatVoiceBtn');
+  if (!btn) return;
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    appendChatMessage('system', '⚠️ 当前浏览器不支持语音识别，请使用 Chrome。');
+    return;
+  }
+  if (_chatRecogRunning) {
+    if (_chatRecognition) { _chatRecognition.abort(); _chatRecognition = null; }
+    _chatRecogRunning = false;
+    btn.classList.remove('recording');
+    btn.textContent = '🎤';
+    return;
+  }
+  _chatRecognition = new SR();
+  _chatRecognition.lang = 'zh-CN';
+  _chatRecognition.continuous = false;
+  _chatRecognition.interimResults = true;
+  _chatRecognition.onresult = function(e) {
+    const transcript = e.results[e.results.length - 1][0].transcript;
+    const input = document.getElementById('aiChatInput');
+    if (input) input.value = transcript;
+  };
+  _chatRecognition.onend = function() {
+    _chatRecogRunning = false;
+    btn.classList.remove('recording');
+    btn.textContent = '🎤';
+    const input = document.getElementById('aiChatInput');
+    if (input && input.value.trim()) sendChatMessage();
+  };
+  _chatRecognition.onerror = function(e) {
+    _chatRecogRunning = false;
+    btn.classList.remove('recording');
+    btn.textContent = '🎤';
+    if (e.error !== 'aborted') appendChatMessage('system', '⚠️ 语音识别出错：' + e.error);
+  };
+  _chatRecogRunning = true;
+  btn.classList.add('recording');
+  btn.textContent = '⏺';
+  _chatRecognition.start();
+}
+
+function _escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
