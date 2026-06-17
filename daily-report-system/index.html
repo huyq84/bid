@@ -1447,11 +1447,13 @@
       <div class="ai-chat-session-bar" id="aiChatSessionBar">
         <select id="aiChatSessionSelect" class="ai-chat-session-select" onchange="onSessionSelect(this.value)"></select>
         <button class="ai-chat-session-btn" onclick="createNewClicked()" title="新建对话">✚</button>
+        <button class="ai-chat-session-btn" id="aiChatSessionClearBtn" onclick="clearChatMessages()" title="清空当前对话">🧹</button>
         <button class="ai-chat-session-btn" id="aiChatSessionMoreBtn" onclick="toggleSessionMenu()" title="更多">⋯</button>
       </div>
       <div id="aiChatSessionMenu" class="ai-chat-session-menu" style="display:none;position:absolute;top:90px;right:12px;background:rgba(30,41,59,0.95);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:4px;z-index:30;min-width:120px;backdrop-filter:blur(8px);">
         <div class="ai-chat-session-menu-item" onclick="renameCurrentSession()">✏️ 重命名</div>
-        <div class="ai-chat-session-menu-item" onclick="deleteCurrentSession()">🗑️ 删除</div>
+        <div class="ai-chat-session-menu-item" onclick="deleteCurrentSession()">🗑️ 删除会话</div>
+        <div class="ai-chat-session-menu-item" onclick="clearChatMessages()" style="border-top:1px solid rgba(255,255,255,0.08);margin-top:2px;padding-top:6px;">🧹 清空对话</div>
       </div>
       <div class="ai-chat-messages" id="aiChatMessages"></div>
       <div class="ai-chat-actions" id="aiChatActions">
@@ -1501,7 +1503,7 @@
 
   <!-- 引入脚本 -->
   <script src="mock-data.js"></script>
-  <script src="app.js"></script>
+  <script src="app.v3.js"></script>
   <script>
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closePhotoLightbox(); });
   </script>

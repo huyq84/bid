@@ -3,6 +3,14 @@ import { query } from './db.js';
 
 /**
  * 构建 LLM 需要的项目数据上下文
+ * 字段命名约定：统一用 camelCase（与前端 JSON / LLM action 一致）
+ *   - 计划：dr_daily_plans 的 task_name → taskName, labor_schedule → laborSchedule, area_targets → areaTargets
+ *   - 事件：dr_events 的 area_id → areaId, plan_id → planId, payload.* 保留 payload
+ *   - 协调：dr_issues 的 area_id → areaId, created_date → createdDate
+ *
+ * 「今日计划」 = dr_daily_plans 中 startDate <= today <= endDate 的记录
+ * 「今日完成」 = dr_events 中 date = today 的记录
+ *
  * @param {string} projectId - 项目ID
  * @param {string} date - 日期 YYYY-MM-DD
  * @returns {Object} 上下文对象
@@ -22,41 +30,61 @@ export async function buildChatContext(projectId, date) {
     query('SELECT id, name, floor, manager FROM dr_areas WHERE project_id=$1 ORDER BY id', [projectId]),
     query('SELECT id, name, role, team, phone FROM dr_workers ORDER BY id'),
     query('SELECT id, position, name, phone FROM dr_management_team ORDER BY position'),
-    query(`SELECT id, task_name, start_date, end_date, progress, status, area_targets, labor_schedule, extra
+    query(`SELECT id, task_name, start_date, end_date, progress, status, area_targets, labor_schedule, total_man_days, extra
            FROM dr_daily_plans WHERE project_id=$1 AND start_date <= $2 AND end_date >= $2 ORDER BY start_date`, [projectId, date]),
-    query(`SELECT id, time, type, area_id, plan_id, payload, submitter, status, note
+    query(`SELECT id, time, type, area_id, plan_id, payload, submitter, status, note, voice_text, photos, completion_type, building_no, floor_no, owner, source
            FROM dr_events WHERE project_id=$1 AND date=$2 ORDER BY time`, [projectId, date]),
-    query(`SELECT id, type, title, area_id, priority, status, created_date, owner, description
-           FROM dr_issues WHERE project_id=$1 AND status != 'closed' ORDER BY created_date DESC LIMIT 10`, [projectId])
+     query(`SELECT id, type, title, area_id, priority, status, created_date, owner, description
+            FROM dr_issues WHERE project_id=$1 AND status != 'closed' ORDER BY created_date DESC LIMIT 10`, [projectId])
   ]);
 
-  // 今日事件汇总
+  // 今日事件汇总（即"今日完成"，来自 dr_events）
   const todayEvents = eventsRes.rows.map(e => ({
     id: e.id,
     time: e.time,
     type: e.type,
-    area: e.area_id,
+    areaId: e.area_id,
+    areaName: e.area_id ? '' : '',  // 区域名需要前端按 areaId 查询填充
+    planId: e.plan_id,
     taskName: e.payload?.taskName || '',
-    owner: e.payload?.owner || '',
+    owner: e.owner || e.payload?.owner || '',
     progress: e.payload?.progress || '',
     headcount: e.payload?.headcount || 0,
     laborRequirements: e.payload?.laborRequirements || [],
-    status: e.status
+    laborStats: e.payload?.laborStats || null,
+    description: e.payload?.description || e.note || '',
+    completionType: e.completion_type || '',          // planned / unplanned
+    buildingNo: e.building_no || '',
+    floorNo: e.floor_no || '',
+    submitter: e.submitter,
+    source: e.source,
+    status: e.status,                                 // draft / confirmed
+    hasPhotos: Array.isArray(e.photos) && e.photos.length > 0,
+    photoCount: Array.isArray(e.photos) ? e.photos.length : 0
   }));
 
-  // 计划列表（精简为 LLM 友好的格式）
-  const activePlans = plansRes.rows.map(p => ({
-    id: p.id,
-    name: p.task_name,
-    startDate: p.start_date,
-    endDate: p.end_date,
-    progress: p.progress,
-    owner: p.extra?.owner || '',
-    status: p.status,
-    areas: p.area_targets || [],
-    labor: p.labor_schedule || [],
-    extra: p.extra || {}
-  }));
+  // 计划列表（即"今日计划"，来自 dr_daily_plans）
+  const activePlans = plansRes.rows.map(p => {
+    const extra = p.extra || {};
+    return {
+      id: p.id,
+      taskName: p.task_name,                          // 任务名（与前端/JSON 一致）
+      description: extra.description || '',
+      startDate: p.start_date,
+      endDate: p.end_date,
+      progress: p.progress,
+      status: p.status,                               // active / completed / paused
+      type: extra.type || '',
+      areaId: extra.areaId || '',
+      areaName: extra.areaName || '',
+      buildingNo: extra.buildingNo || '',
+      floorNo: extra.floorNo || '',
+      owner: extra.owner || '',
+      totalManDays: p.total_man_days || 0,
+      areaTargets: Array.isArray(p.area_targets) ? p.area_targets : [],   // [{areaId, taskName, targetProgress}]
+      laborSchedule: Array.isArray(p.labor_schedule) ? p.labor_schedule : []  // [{trade/laborType, count, manDays}]
+    };
+  });
 
   // 区域列表（用于匹配 areaId）
   const areas = areasRes.rows.map(a => ({
@@ -86,18 +114,22 @@ export async function buildChatContext(projectId, date) {
     id: i.id,
     type: i.type,
     title: i.title,
-    area: i.area_id,
+    areaId: i.area_id,
     priority: i.priority,
     status: i.status,
     createdDate: i.created_date,
-    owner: i.owner
+    owner: i.owner,
+    description: i.description
   }));
 
   // 统计
   const stats = {
     eventsToday: todayEvents.length,
     eventsUnconfirmed: todayEvents.filter(e => e.status !== 'confirmed').length,
+    eventsPlanned: todayEvents.filter(e => e.completionType === 'planned').length,
+    eventsUnplanned: todayEvents.filter(e => e.completionType === 'unplanned').length,
     plansActive: activePlans.length,
+    plansCompleted: activePlans.filter(p => p.status === 'completed').length,
     issuesOpen: openIssues.length
   };
 
@@ -106,8 +138,8 @@ export async function buildChatContext(projectId, date) {
     projectName: projectRes.rows[0]?.name || projectId,
     date,
     today: {
-      events: todayEvents,
-      plans: activePlans,
+      plans: activePlans,         // 今日计划
+      events: todayEvents,        // 今日完成
       issues: openIssues
     },
     reference: {
@@ -122,89 +154,122 @@ export async function buildChatContext(projectId, date) {
 /**
  * 把上下文转成 LLM 友好的文本摘要
  * 用于拼接到 system prompt 中
+ *
+ * 关键概念：
+ *   - 「今日计划」= 计划列表（来自 dr_daily_plans，今天处于 startDate~endDate 区间）
+ *   - 「今日完成」= 已录事件（来自 dr_events，今天 date=today）
+ *   - 用户说"录入 X 完成"或"记录 X 进度"→ createEvent（向"今日完成"加一条）
+ *   - 用户说"修改/完善计划 X"→ updatePlan（修改"今日计划"中的某条）
  */
 export function contextToText(ctx) {
   const lines = [];
 
-  // 计算待处理项目：进行中的计划里，哪些还没有对应的已录事件
-  const planEventNames = new Set(ctx.today.events.map(e => e.taskName));
-  const pendingPlans = ctx.today.plans.filter(p => !planEventNames.has(p.name));
+  // 待处理项目：今日计划里，taskName 还不在今日完成里的
+  const planEventNames = new Set(ctx.today.events.map(e => e.taskName).filter(Boolean));
+  const pendingPlans = ctx.today.plans.filter(p => !planEventNames.has(p.taskName));
 
-  lines.push(`## 批量操作规则（重要）`);
-  lines.push(`- 如果用户要求批量处理（如"完善今日计划""录入所有"），你必须一次性输出所有操作，严禁分批`);
-  lines.push(`- 对照"待处理项目"清单，对每一项生成对应的 action`);
-  lines.push(`- 例如有 5 条待处理项目，就输出 5 个 createEvent 或对应的 action`);
-  lines.push(`- 如果某些项目不需要操作，在 reply 中说明原因`);
+  lines.push(`## 核心概念（重要）`);
+  lines.push(`- 「今日计划」= 计划表（dr_daily_plans）中今天处于起止区间内的任务，代表"计划要做什么"`);
+  lines.push(`- 「今日完成」= 日报事件表（dr_events）中 date=今天 的记录，代表"实际做了什么/进度如何"`);
+  lines.push(`- createEvent → 录入"今日完成"（一条日报事件），即向 dr_events 加一条记录`);
+  lines.push(`- updatePlan → 完善"今日计划"（更新计划字段），即修改 dr_daily_plans 中某条记录`);
+  lines.push(`- createIssue → 录协调事宜（与计划/事件无关的独立事项台账）`);
   lines.push('');
-  if (pendingPlans.length > 0) {
-    lines.push(`## 待处理项目（共 ${pendingPlans.length} 项）`);
-    pendingPlans.forEach((p, i) => {
-      const laborStr = (p.labor || []).map(l => `${l.trade || ''} × ${l.count || 0}人`).join('、');
-      lines.push(`  ${i+1}. [${p.id}] ${p.name} | 区域: ${(p.areas || []).join('/') || '未指定'} | 负责人: ${p.owner || '未指定'} | 进度: ${p.progress || '0%'} | 劳动力: ${laborStr || '未指定'}`);
-    });
-    lines.push('');
-  }
 
   lines.push(`## 可用操作（返回 JSON actions 数组，每项含 type + data）`);
   lines.push(`安全操作（自动执行）：`);
-  lines.push(`  - createEvent: [必填] type（事件类型）+ taskName（任务名称）| [可选] areaId（区域）, owner（负责人）, progress（进度百分比）, headcount（总人数=各工种人数之和）, laborRequirements（工种×人数明细）, note（备注）, planId（计划ID）`);
-  lines.push(`    type∈{progress（进度）,material（材料）,safety（安全）,coordination（协调）,attendance（考勤）,issue（问题）,drawing（图纸）}`);
+  lines.push(`  - createEvent: [必填] type（事件类型）+ taskName（任务名称） | [可选] areaId（区域）, areaName, planId（关联计划ID）, owner（负责人）, progress（进度%,如 80%）, headcount（总人数=各工种人数之和）, laborRequirements（工种×人数,如[{trade:"木工",count:3}]）, note（备注）, completionType（planned|unplanned）, buildingNo, floorNo, type（事件类型：progress/material/safety/coordination/attendance/issue/drawing）`);
+  lines.push(`    type∈{progress（进度/今日完成）, material（材料进场）, safety（安全）, coordination（协调沟通）, attendance（考勤）, issue（问题）, drawing（图纸深化）}`);
   lines.push(`  - createIssue: [必填] title | [可选] type, areaId, priority, proposeDept, cooperateDept, owner, description`);
   lines.push(`  - createAttendance: [必填] records: { managerId, present, reason }`);
-  lines.push(`  - confirmEvent: [必填] eventId（将事件标记为已确认）`);
+  lines.push(`  - confirmEvent: [必填] eventId（将"今日完成"标记为已确认）`);
   lines.push(`敏感操作（需要用户授权后执行）：`);
-  lines.push(`  - updateEvent: [必填] eventId | [可选] taskName（任务名称）, owner（负责人）, progress（进度）, headcount（总人数）, laborRequirements（工种×人数）, type, status`);
-  lines.push(`  - deleteEvent: [必填] eventId`);
+  lines.push(`  - updateEvent: [必填] eventId | [可选] taskName, owner, progress, headcount, laborRequirements, type, status, areaId, completionType, buildingNo, floorNo`);
+  lines.push(`  - deleteEvent: [必填] eventId（仅删 1 条）`);
+  lines.push(`  - batchDelete: [必填] date（YYYY-MM-DD）+ 至少 1 个其他条件 | [可选] timeFrom, timeTo, status, type, planId, areaId, taskNameContains, ids（按条件批量删除）`);
   lines.push(`  - updateIssue: [必填] issueId | [可选] title, status, priority, owner, description`);
   lines.push(`  - closeIssue: [必填] issueId`);
   lines.push(`  - deleteIssue: [必填] issueId`);
-  lines.push(`  - updatePlan: [必填] planId | [可选] areaId（区域）, areaName, owner（负责人）, progress（进度）, buildingNo（楼栋）, floorNo（楼层）, laborRequirements（工种×人数）, taskName, status（完善计划字段）`);
+  lines.push(`  - updatePlan: [必填] planId | [可选] areaId, areaName, owner, progress, buildingNo, floorNo, laborRequirements, taskName, status（完善"今日计划"字段）`);
   lines.push(``);
   lines.push(`## 反问规则`);
   lines.push(`- 缺少[必填]字段时必须反问用户，不要生成 action`);
-  lines.push(`- 缺少[可选]字段时留空默认值`);
-  lines.push(`- 用户说"录入今日完成"等模糊表述 → 反问"请问要记录什么任务？"`);
-  lines.push(`- 用户说"确认事件 E123"或"标记为已完成" → 使用 confirmEvent: { eventId: "E123" }`);
+  lines.push(`- 缺少[可选]字段时留空默认值，不要反问`);
+  lines.push(`- 用户说"录入今日完成"等模糊表述时，反问"请问要记录什么任务？"`);
+  lines.push(`- 用户说"标记 E123 为已确认/已完成"→ confirmEvent: { eventId: "E123" }`);
+  lines.push('');
+  lines.push(`## 批量操作规则（重要）`);
+  lines.push(`- 用户要求批量处理（如"完善今日计划""录入所有"）时，必须对照"待处理项目"一次性输出所有 action，严禁分批`);
   lines.push('');
   lines.push(`## 项目：${ctx.projectName} (${ctx.projectId})`);
   lines.push(`## 日期：${ctx.date}`);
   lines.push('');
   lines.push(`## 今日统计`);
-  lines.push(`- 已录事件：${ctx.stats.eventsToday} 条（未确认 ${ctx.stats.eventsUnconfirmed} 条）`);
-  lines.push(`- ⚠️ 人数说明：每个事件中的 headcount = 各工种人数（laborRequirements）之和，不含负责人。如木工3人+电工2人，headcount=5`);
-  lines.push(`- 进行中计划：${ctx.stats.plansActive} 个`);
+  lines.push(`- 今日计划（进行中）：${ctx.stats.plansActive} 个（已完成 ${ctx.stats.plansCompleted} 个）`);
+  lines.push(`- 今日完成（已录事件）：${ctx.stats.eventsToday} 条（未确认 ${ctx.stats.eventsUnconfirmed} 条；计划内 ${ctx.stats.eventsPlanned} 条，计划外 ${ctx.stats.eventsUnplanned} 条）`);
   lines.push(`- 未关闭协调：${ctx.stats.issuesOpen} 个`);
+  lines.push(`- ⚠️ 人数说明：每个事件中的 headcount = 各工种人数（laborRequirements）之和，不含负责人。如木工3人+电工2人，headcount=5`);
   lines.push('');
 
+  // ============== 今日计划 ==============
   if (ctx.today.plans.length > 0) {
-    lines.push(`## 今日进行中的计划（可用于匹配）`);
+    lines.push(`## 今日计划（共 ${ctx.today.plans.length} 条）— 来自 dr_daily_plans，今天处于起止区间内`);
+    lines.push(`字段：id, taskName（任务名）, startDate~endDate, progress, status（active/completed/paused）, type, areaId, buildingNo, floorNo, owner, totalManDays（总工日）, areaTargets[], laborSchedule[]`);
     ctx.today.plans.forEach(p => {
-      const laborStr = (p.labor || []).map(l => `${l.trade || ''} × ${l.count || 0}人`).join('、');
-      lines.push(`- [${p.id}] ${p.name} | 区域: ${(p.areas || []).join('/') || '未指定'} | 负责人: ${p.owner || '未指定'} | 进度: ${p.progress || '0%'} | 劳动力: ${laborStr || '未指定'} | 起止: ${p.startDate}~${p.endDate}`);
+      const areaStr = (p.areaTargets || []).map(a => a.areaId).join('/') || p.areaId || '未指定';
+      const laborStr = (p.laborSchedule || []).map(l => `${l.trade || l.laborType || ''} × ${l.count || 0}人`).join('、') || '未指定';
+      const extras = [];
+      if (p.buildingNo) extras.push(`楼栋:${p.buildingNo}`);
+      if (p.floorNo) extras.push(`楼层:${p.floorNo}`);
+      if (p.totalManDays) extras.push(`总工日:${p.totalManDays}`);
+      if (p.type) extras.push(`类型:${p.type}`);
+      lines.push(`- [${p.id}] taskName="${p.taskName}" | 区域:${areaStr} | 负责人:${p.owner || '未指定'} | 进度:${p.progress || '0%'} | 状态:${p.status || 'active'} | 劳动力:${laborStr} | 起止:${p.startDate}~${p.endDate}${extras.length ? ' | ' + extras.join(',') : ''}`);
     });
+    lines.push('');
+  } else {
+    lines.push(`## 今日计划（0 条）`);
     lines.push('');
   }
 
+  // ============== 今日完成 ==============
   if (ctx.today.events.length > 0) {
-    lines.push(`## 今日已录事件（避免重复）`);
+    lines.push(`## 今日完成（共 ${ctx.today.events.length} 条）— 来自 dr_events，今天 date=${ctx.date} 录的实际事件`);
+    lines.push(`字段：id, time, type（事件类型）, taskName（任务名）, areaId, planId（关联的计划ID）, owner, progress, headcount, laborRequirements[], completionType（planned/unplanned）, buildingNo, floorNo, status（draft/confirmed）, source`);
     ctx.today.events.slice(0, 20).forEach(e => {
       const laborStr = (e.laborRequirements || []).map(l => `${l.trade}${l.count}人`).join('、');
-      lines.push(`- [${e.id}] ${e.time} ${e.type} ${e.taskName}${e.owner ? ' @' + e.owner : ''} ${e.progress ? e.progress : ''} ${laborStr ? '工种:'+laborStr : ''}`);
+      const planLink = e.planId ? ` planId=${e.planId}` : '';
+      const ct = e.completionType ? ` 完成类型:${e.completionType}` : '';
+      const build = (e.buildingNo || e.floorNo) ? ` 楼栋:${e.buildingNo || '-'}/楼层:${e.floorNo || '-'}` : '';
+      lines.push(`- [${e.id}] ${e.time} ${e.type} taskName="${e.taskName}"${e.owner ? ' @' + e.owner : ''} ${e.progress || ''}${planLink}${ct}${build} ${laborStr ? '工种:'+laborStr : ''} status=${e.status}`);
     });
     if (ctx.today.events.length > 20) lines.push(`... 共 ${ctx.today.events.length} 条`);
     lines.push('');
+  } else {
+    lines.push(`## 今日完成（0 条）`);
+    lines.push('');
   }
 
+  // ============== 待处理项目 ==============
+  if (pendingPlans.length > 0) {
+    lines.push(`## 待处理项目（共 ${pendingPlans.length} 项）— 今日计划中还未生成"今日完成"的任务`);
+    pendingPlans.forEach((p, i) => {
+      const laborStr = (p.laborSchedule || []).map(l => `${l.trade || l.laborType || ''} × ${l.count || 0}人`).join('、');
+      lines.push(`  ${i+1}. [${p.id}] taskName="${p.taskName}" | 区域:${(p.areaTargets || []).map(a => a.areaId).join('/') || '未指定'} | 负责人:${p.owner || '未指定'} | 进度:${p.progress || '0%'} | 劳动力:${laborStr || '未指定'}`);
+    });
+    lines.push('');
+  }
+
+  // ============== 参考数据 ==============
   if (ctx.reference.areas.length > 0) {
-    lines.push(`## 项目区域（用 id 引用）`);
+    lines.push(`## 项目区域（用 areaId 引用，例：BAI-A1）`);
     ctx.reference.areas.forEach(a => {
-      lines.push(`- [${a.id}] ${a.name} | 楼层: ${a.floor || ''} | 负责人: ${a.manager || ''}`);
+      lines.push(`- [${a.id}] ${a.name} | 楼层:${a.floor || ''} | 负责人:${a.manager || ''}`);
     });
     lines.push('');
   }
 
   if (ctx.reference.workers.length > 0) {
-    lines.push(`## 工人列表（按角色分类）`);
+    lines.push(`## 工人列表（按角色分类，用于匹配 owner/负责人）`);
     const byRole = {};
     ctx.reference.workers.forEach(w => {
       if (!byRole[w.role]) byRole[w.role] = [];
@@ -218,7 +283,7 @@ export function contextToText(ctx) {
   }
 
   if (ctx.reference.managementTeam.length > 0) {
-    lines.push(`## 管理人员（用于签到）`);
+    lines.push(`## 管理人员（用于签到 createAttendance）`);
     ctx.reference.managementTeam.forEach(m => {
       lines.push(`- [${m.id}] ${m.position}: ${m.name}`);
     });
@@ -226,9 +291,9 @@ export function contextToText(ctx) {
   }
 
   if (ctx.today.issues.length > 0) {
-    lines.push(`## 未关闭协调（用于去重）`);
+    lines.push(`## 未关闭协调（用于去重，eventId/issueId 引用）`);
     ctx.today.issues.forEach(i => {
-      lines.push(`- [${i.id}] ${i.title} | 区域: ${i.area || '未指定'} | 优先级: ${i.priority} | 创建: ${i.createdDate}`);
+      lines.push(`- [${i.id}] ${i.title} | 区域: ${i.areaId || '未指定'} | 优先级: ${i.priority} | 状态: ${i.status} | 创建: ${i.createdDate}${i.owner ? ' @' + i.owner : ''}`);
     });
     lines.push('');
   }

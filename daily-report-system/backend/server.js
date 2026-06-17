@@ -13,7 +13,6 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { MinMaxClient } from './llm-client.js';
-import { mockParseVoice, mockParsePhoto, mockAggregateWeekly } from './mock-fallback.js';
 import { buildChatContext, contextToText } from './chat-context.js';
 import { executeAction } from './chat-actions.js';
 import { isSensitiveAction, getActionSummary } from './chat-actions.js';
@@ -138,9 +137,8 @@ app.post('/api/parse-voice', async (req, res) => {
     const result = await llm.parseVoice({ text, projectId, areas: areas || [], workers: workers || [], plans: plans || [] });
     res.json({ source: 'llm', latencyMs: Date.now() - start, ...result });
   } catch (e) {
-    console.warn('[降级] LLM 语音解析失败，回退 mock:', e.message);
-    const result = mockParseVoice(text, projectId, areas || [], workers || [], plans || []);
-    res.json({ source: 'mock', latencyMs: Date.now() - start, fallbackReason: e.message, ...result });
+    console.warn('[错误] LLM 语音解析失败:', e.message);
+    res.status(503).json({ source: 'error', latencyMs: Date.now() - start, error: 'LLM 连接失败: ' + e.message });
   }
 });
 
@@ -161,10 +159,8 @@ app.post('/api/parse-photo', async (req, res) => {
     console.log('[照片解析结果]', JSON.stringify(result));
     res.json({ source: 'llm', latencyMs: Date.now() - start, ...result });
   } catch (e) {
-    console.warn('[降级] LLM 照片解析失败，回退 mock:', e.message);
-    const result = mockParsePhoto(caption, projectId, areas || [], type, plans || []);
-    console.log('[Mock解析结果]', JSON.stringify(result));
-    res.json({ source: 'mock', latencyMs: Date.now() - start, fallbackReason: e.message, ...result });
+    console.warn('[错误] LLM 照片解析失败:', e.message);
+    res.status(503).json({ source: 'error', latencyMs: Date.now() - start, error: 'LLM 连接失败: ' + e.message });
   }
 });
 
@@ -178,9 +174,8 @@ app.post('/api/optimize-text', async (req, res) => {
     const result = await llm.optimizeText({ text, projectId, areas: areas || [], plans: plans || [] });
     res.json({ source: 'llm', latencyMs: Date.now() - start, ...result });
   } catch (e) {
-    console.warn('[降级] LLM 文本优化失败，回退 mock:', e.message);
-    const result = mockOptimizeText(text);
-    res.json({ source: 'mock', latencyMs: Date.now() - start, fallbackReason: e.message, ...result });
+    console.warn('[错误] LLM 文本优化失败:', e.message);
+    res.status(503).json({ source: 'error', latencyMs: Date.now() - start, error: 'LLM 连接失败: ' + e.message });
   }
 });
 
@@ -194,9 +189,8 @@ app.post('/api/aggregate-weekly', async (req, res) => {
     const result = await llm.aggregateWeekly({ projectId, projectName, client, weekStart, weekEnd, events, issues, areas });
     res.json({ source: 'llm', latencyMs: Date.now() - start, ...result });
   } catch (e) {
-    console.warn('[降级] LLM 周报聚合失败，回退 mock:', e.message);
-    const result = mockAggregateWeekly({ projectId, projectName, client, weekStart, weekEnd, events, issues, areas });
-    res.json({ source: 'mock', latencyMs: Date.now() - start, fallbackReason: e.message, ...result });
+    console.warn('[错误] LLM 周报聚合失败:', e.message);
+    res.status(503).json({ source: 'error', latencyMs: Date.now() - start, error: 'LLM 连接失败: ' + e.message });
   }
 });
 
@@ -227,7 +221,7 @@ app.post('/api/chat', async (req, res) => {
 
     let reply, actions, source = 'mock';
     try {
-      const result = await llm.chatWithContext({ message, history, contextText: ctxText, permLevel });
+      const result = await llm.chatWithContext({ message, history, contextText: ctxText, permLevel, projectId: pid, date: d });
       reply = result.reply;
       actions = result.actions;
       source = 'llm';
@@ -346,70 +340,7 @@ app.post('/api/chat/inspect', async (req, res) => {
 });
 
 function _mockChatReply(text, permLevel = 'confirm') {
-  const t = text || '';
-  const isAllow = permLevel === 'allow';
-  const isStrict = permLevel === 'strict';
-  const ackText = isAllow ? '已自动' : '将要';
-  const authHint = isAllow ? '' : '需要您授权确认。';
-
-  // 删除/编辑事件
-  const delMatch = t.match(/(?:删除|删掉|移除|去掉)\s*[Ee]?(\w+)/);
-  if (delMatch) {
-    return { reply: ackText + '删除事件 ' + delMatch[0] + (isAllow ? '。' : '，' + authHint), actions: [{ type: 'deleteEvent', data: { eventId: 'E' + delMatch[1] } }] };
-  }
-  const editMatch = t.match(/(?:把|将|给)?\s*[Ee]?(\w+)\s*(?:进度|改成|改为|更新)?\s*(\d+%)?/);
-  if (editMatch && (t.includes('进度') || t.includes('改成') || t.includes('改为') || t.includes('更新'))) {
-    return { reply: ackText + '更新事件 ' + editMatch[1] + (isAllow ? '。' : '，' + authHint), actions: [{ type: 'updateEvent', data: { eventId: 'E' + editMatch[1], progress: editMatch[2] || '' } }] };
-  }
-  // 关闭/删除协调
-  const closeMatch = t.match(/(?:关闭|关掉|完成|解决)\s*[Ii]?(\w+)/);
-  if (closeMatch) {
-    return { reply: ackText + '关闭协调 ' + closeMatch[0] + (isAllow ? '。' : '，' + authHint), actions: [{ type: 'closeIssue', data: { issueId: 'I' + closeMatch[1] } }] };
-  }
-
-  if (t.includes('协调') || t.includes('记录') || t.includes('设计院') || t.includes('图纸') || t.includes('配合')) {
-    // 简单的协调解析
-    const m = t.match(/记录协调[：:]\s*(.+?)[，,。\n]*(?:提出[：:]\s*(.+?))?[，,。\n]*(?:配合[：:]\s*(.+?))?/);
-    if (m) {
-      return {
-        reply: '已记录协调事宜',
-        actions: [{
-          type: 'createIssue',
-          data: { title: m[1] || t, proposeDept: m[2] || '', cooperateDept: m[3] || '', priority: 'medium' }
-        }]
-      };
-    }
-    return { reply: '请补充协调内容', actions: [] };
-  }
-  if (t.includes('签到') || t.includes('请假')) {
-    return {
-      reply: '已记录签到（请在前端确认具体人员）',
-      actions: []
-    };
-  }
-  if (t.includes('完成') || t.includes('进度') || t.includes('施工') || t.includes('木工') || t.includes('瓦工') || t.includes('电工')) {
-    // 提取任务名（取第一个名词短语）
-    const taskMatch = t.match(/(今天|刚才|上午|下午)?(.+?)(完成|进度|开始|进行|进行中)/);
-    const taskName = taskMatch ? taskMatch[2].trim() : t.slice(0, 20);
-    const progressMatch = t.match(/(\d+)\s*%/);
-    const headcountMatch = t.match(/(\d+)\s*人/);
-    return {
-      reply: '已记录进度事件',
-      actions: [{
-        type: 'createEvent',
-        data: {
-          type: 'progress',
-          taskName,
-          progress: progressMatch ? progressMatch[0] : '',
-          headcount: headcountMatch ? parseInt(headcountMatch[1]) : 0
-        }
-      }]
-    };
-  }
-  if (t.includes('周报') || t.includes('生成')) {
-    return { reply: '📊 已为你打开周报预览界面。', actions: [] };
-  }
-  return { reply: '你好！我是 AI 助手，可以帮你记录事件、协调、签到等。试试说"今天木工完成大堂天花龙骨 80%"', actions: [] };
+  return { reply: '⚠️ LLM 连接失败，无法处理您的请求。请检查后端 LLM 配置（API Key / Base URL / 网络连接）后重试。', actions: [] };
 }
 
 // ==================== 数据库 API 路由 ====================

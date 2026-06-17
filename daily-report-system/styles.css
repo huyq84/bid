@@ -2101,7 +2101,40 @@ aside .card { margin-bottom: 0; }
   font-size: 13px;
   line-height: 1.45;
   word-break: break-word;
+  position: relative;
 }
+.ai-message-actions {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  display: none;
+  gap: 2px;
+  background: rgba(0,0,0,0.5);
+  border-radius: 6px;
+  padding: 2px;
+  backdrop-filter: blur(4px);
+  z-index: 5;
+}
+.ai-message.user .ai-message-actions { right: auto; left: 4px; }
+.ai-message:hover .ai-message-actions { display: flex; }
+.ai-message-action-btn {
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: rgba(255,255,255,0.7);
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+  line-height: 1;
+  padding: 0;
+}
+.ai-message-action-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
+.ai-message-action-btn.ai-msg-del:hover { color: #ef4444; }
 .ai-message-bubble br { display: block; content: ''; margin: 2px 0; }
 .ai-message-bubble p { margin: 4px 0; }
 .ai-message-system .ai-message-bubble {

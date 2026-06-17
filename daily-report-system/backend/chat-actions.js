@@ -32,7 +32,7 @@ export async function executeAction(action, ctx) {
 
 // 安全操作（自动执行） vs 敏感操作（需授权）
 export const SAFE_ACTIONS = new Set(['createEvent', 'createIssue', 'createAttendance', 'confirmEvent', 'openWeeklyReport']);
-export const SENSITIVE_ACTIONS = new Set(['updateEvent', 'deleteEvent', 'updateIssue', 'closeIssue', 'deleteIssue', 'updatePlan']);
+export const SENSITIVE_ACTIONS = new Set(['updateEvent', 'deleteEvent', 'batchDelete', 'updateIssue', 'closeIssue', 'deleteIssue', 'updatePlan']);
 
 export function isSensitiveAction(type) {
   return SENSITIVE_ACTIONS.has(type);
@@ -47,6 +47,18 @@ export function getActionSummary(action) {
     case 'createAttendance': return `签到: ${Object.keys(d.records || {}).length} 人`;
     case 'updateEvent': return `编辑事件: ${d.eventId} (${d.taskName || d.progress || ''})`;
     case 'deleteEvent': return `删除事件: ${d.eventId}`;
+    case 'batchDelete': {
+      const conds = [];
+      if (d.date) conds.push(d.date);
+      if (d.timeFrom) conds.push(`从 ${d.timeFrom}`);
+      if (d.timeTo) conds.push(`到 ${d.timeTo}`);
+      if (d.status) conds.push(`状态=${d.status}`);
+      if (d.type) conds.push(`类型=${d.type}`);
+      if (d.taskNameContains) conds.push(`含"${d.taskNameContains}"`);
+      if (d.areaId) conds.push(`区域=${d.areaId}`);
+      if (d.planId) conds.push(`计划=${d.planId}`);
+      return `批量删除今日完成: ${conds.join(' ')}`;
+    }
     case 'updateIssue': return `更新协调: ${d.issueId} (${d.title || d.status || ''})`;
     case 'closeIssue': return `关闭协调: ${d.issueId}`;
     case 'deleteIssue': return `删除协调: ${d.issueId}`;
@@ -60,7 +72,8 @@ export function getActionSummary(action) {
 const handlers = {
   /**
    * 录日报事件
-   * data: { type, areaId, areaName, taskName, planId, owner, progress, headcount, note, time }
+   * data: { type, areaId, areaName, taskName, planId, planName, owner, progress, headcount,
+   *         laborRequirements, completionType, buildingNo, floorNo, note, description, time }
    */
   async createEvent(data, ctx) {
     console.log('[createEvent] ctx.projectId:', ctx.projectId, 'ctx:', JSON.stringify(ctx).slice(0,200));
@@ -69,18 +82,30 @@ const handlers = {
     const id = data.id || newId('E');
     const time = data.time || nowHHMM();
 
+    // 计划匹配：优先用 planId，否则按 planName 模糊匹配
     let planId = data.planId || null;
     if (!planId && data.planName) {
-      const m = ctx.plans?.find(p => p.name.includes(data.planName) || data.planName.includes(p.name));
+      const m = ctx.plans?.find(p => p.taskName?.includes(data.planName) || data.planName.includes(p.taskName || ''));
+      if (m) planId = m.id;
+    }
+    if (!planId && data.taskName) {
+      // 兜底：按 taskName 精确匹配今日计划
+      const m = ctx.plans?.find(p => p.taskName === data.taskName);
       if (m) planId = m.id;
     }
 
+    const completionType = (data.completionType === 'planned' || data.completionType === 'unplanned') ? data.completionType : 'planned';
+
     await query(
-      `INSERT INTO dr_events (id, project_id, date, time, type, area_id, plan_id, payload, submitter, source, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11)
+      `INSERT INTO dr_events
+        (id, project_id, date, time, type, area_id, plan_id, payload, submitter, source, status,
+         completion_type, building_no, floor_no, owner)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15)
        ON CONFLICT (id) DO UPDATE SET
          time=EXCLUDED.time, type=EXCLUDED.type, area_id=EXCLUDED.area_id,
-         plan_id=EXCLUDED.plan_id, payload=EXCLUDED.payload, status=EXCLUDED.status`,
+         plan_id=EXCLUDED.plan_id, payload=EXCLUDED.payload, status=EXCLUDED.status,
+         completion_type=EXCLUDED.completion_type, building_no=EXCLUDED.building_no,
+         floor_no=EXCLUDED.floor_no, owner=EXCLUDED.owner`,
       [
         id, ctx.projectId || 'baicaoyuan', ctx.date, time, eventType,
         data.areaId || null, planId,
@@ -94,7 +119,11 @@ const handlers = {
         }),
         data.submitter || '李华',
         data.source || 'chat',
-        data.status || 'draft'
+        data.status || 'draft',
+        completionType,
+        data.buildingNo || null,
+        data.floorNo || null,
+        data.owner || null
       ]
     );
 
@@ -124,9 +153,18 @@ const handlers = {
     if (data.laborRequirements) payload.laborRequirements = data.laborRequirements;
     if (data.note || data.description) payload.description = data.note || data.description;
 
+    // 顶层列：completion_type / building_no / floor_no / owner
+    const completionType = data.completionType || existing.completion_type || null;
+    const buildingNo = data.buildingNo ?? existing.building_no ?? null;
+    const floorNo = data.floorNo ?? existing.floor_no ?? null;
+    const ownerCol = data.owner ?? existing.owner ?? null;
+
     await query(
-      `UPDATE dr_events SET type=$1, area_id=$2, status=$3, payload=$4::jsonb WHERE id=$5`,
-      [type, areaId, status, JSON.stringify(payload), eventId]
+      `UPDATE dr_events SET type=$1, area_id=$2, status=$3, payload=$4::jsonb,
+         completion_type=$5, building_no=$6, floor_no=$7, owner=$8
+       WHERE id=$9`,
+      [type, areaId, status, JSON.stringify(payload),
+       completionType, buildingNo, floorNo, ownerCol, eventId]
     );
     return { message: `已更新事件 ${eventId}` };
   },
@@ -134,8 +172,126 @@ const handlers = {
   async deleteEvent(data, ctx) {
     const { eventId } = data;
     if (!eventId) throw new Error('eventId 必填');
-    await query('DELETE FROM dr_events WHERE id=$1', [eventId]);
+    const r = await query('DELETE FROM dr_events WHERE id=$1', [eventId]);
+    if (r.rowCount === 0) throw new Error(`未找到事件 ${eventId}，删除失败`);
     return { message: `已删除事件 ${eventId}` };
+  },
+
+  /**
+   * 批量按条件删除事件
+   * data: { date, timeFrom, timeTo, status, type, planId, areaId, taskNameContains, source, ids }
+   *   - date: 必填（YYYY-MM-DD），限定到具体某天
+   *   - timeFrom / timeTo: HH:MM，闭区间
+   *   - status: draft | confirmed
+   *   - type: progress / material / safety / ...
+   *   - planId: 关联的计划ID
+   *   - areaId: 区域ID
+   *   - taskNameContains: 任务名包含（模糊）
+   *   - source: 来源筛选
+   *   - ids: 显式 eventId 列表（与其他条件是 AND 关系）
+   * 安全：必须至少有一个筛选条件；不允许删整张表
+   */
+  async batchDelete(data, ctx) {
+    const filters = [];
+    const params = [];
+    const wheres = [];
+
+    // 必填：项目 + 日期（限定到某一天，避免误删历史）
+    if (data.projectId || ctx.projectId) {
+      params.push(data.projectId || ctx.projectId);
+      wheres.push(`project_id=$${params.length}`);
+    }
+    if (!data.date) {
+      // 没传 date 时，回退到 ctx.date（当前会话日期）
+      if (ctx.date) {
+        params.push(ctx.date);
+        wheres.push(`date=$${params.length}`);
+      } else {
+        throw new Error('batchDelete 需指定 date（YYYY-MM-DD）');
+      }
+    } else {
+      params.push(data.date);
+      wheres.push(`date=$${params.length}`);
+    }
+
+    if (data.timeFrom) {
+      params.push(data.timeFrom);
+      wheres.push(`time>=$${params.length}`);
+    }
+    if (data.timeTo) {
+      params.push(data.timeTo);
+      wheres.push(`time<=$${params.length}`);
+    }
+    if (data.status) {
+      params.push(data.status);
+      wheres.push(`status=$${params.length}`);
+    }
+    if (data.type) {
+      params.push(data.type);
+      wheres.push(`type=$${params.length}`);
+    }
+    if (data.planId) {
+      params.push(data.planId);
+      wheres.push(`plan_id=$${params.length}`);
+    }
+    if (data.areaId) {
+      params.push(data.areaId);
+      wheres.push(`area_id=$${params.length}`);
+    }
+    if (data.taskNameContains) {
+      params.push(`%${data.taskNameContains}%`);
+      wheres.push(`payload->>'taskName' ILIKE $${params.length}`);
+    }
+    if (data.source) {
+      params.push(data.source);
+      wheres.push(`source=$${params.length}`);
+    }
+    if (Array.isArray(data.ids) && data.ids.length > 0) {
+      params.push(data.ids);
+      wheres.push(`id = ANY($${params.length}::text[])`);
+    }
+
+    // 安全：必须至少有一个非必填的过滤条件（time/status/type/planId/areaId/taskNameContains/ids）
+    const filterCount = (data.timeFrom ? 1 : 0) + (data.timeTo ? 1 : 0) +
+                        (data.status ? 1 : 0) + (data.type ? 1 : 0) +
+                        (data.planId ? 1 : 0) + (data.areaId ? 1 : 0) +
+                        (data.taskNameContains ? 1 : 0) +
+                        (data.ids?.length > 0 ? 1 : 0);
+    if (filterCount === 0) {
+      throw new Error('batchDelete 需至少一个筛选条件（timeFrom/timeTo/status/type/planId/areaId/taskNameContains/ids），不能删除整张表');
+    }
+
+    // 先查询匹配的事件（让前端可展示给用户确认）
+    const whereSql = wheres.join(' AND ');
+    const matchRes = await query(
+      `SELECT id, time, type, area_id, payload FROM dr_events WHERE ${whereSql} ORDER BY time`,
+      params
+    );
+    const matched = matchRes.rows;
+    const idsToDelete = matched.map(r => r.id);
+
+    if (idsToDelete.length === 0) {
+      return { message: '没有匹配的事件', deletedCount: 0, deletedIds: [] };
+    }
+
+    // 用 IN 子句删除
+    const deleteRes = await query(
+      `DELETE FROM dr_events WHERE id = ANY($1::text[])`,
+      [idsToDelete]
+    );
+
+    return {
+      message: `已批量删除 ${idsToDelete.length} 条事件`,
+      deletedCount: idsToDelete.length,
+      deletedIds: idsToDelete,
+      deletedEvents: matched.map(r => ({
+        id: r.id,
+        time: r.time,
+        type: r.type,
+        areaId: r.area_id,
+        taskName: r.payload?.taskName || ''
+      }))
+    };
   },
 
   /**

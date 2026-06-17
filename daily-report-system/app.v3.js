@@ -4,6 +4,16 @@
 
 let M = window.MockData;
 
+// 记录已知在 DB 中不存在的事件 ID（幽灵事件），持久化到 localStorage 避免跨页面加载复活
+const _ghostEventIds = new Set();
+try {
+  const saved = JSON.parse(localStorage.getItem('daily_ghost_ids') || '[]');
+  saved.forEach(id => _ghostEventIds.add(id));
+} catch {}
+function _persistGhostIds() {
+  try { localStorage.setItem('daily_ghost_ids', JSON.stringify([..._ghostEventIds])); } catch {}
+}
+
 // 从后端 API 加载真实数据，失败时静默回退到 MockData
 async function loadDataFromAPI() {
   try {
@@ -35,7 +45,7 @@ async function loadDataFromAPI() {
     const localEventIds = new Set(M.EVENTS.map(e => e.id));
     const apiEventIds = new Set(data.EVENTS.map(e => e.id));
     // 本地有但后端没有的（通常是本地刚 saveUnifiedEvent 后，异步 fetch 还没完成前刷新）
-    const localOnlyEvents = M.EVENTS.filter(e => !apiEventIds.has(e.id));
+    const localOnlyEvents = M.EVENTS.filter(e => !apiEventIds.has(e.id) && !_ghostEventIds.has(e.id));
     M.EVENTS.length = 0;
     M.EVENTS.push(...data.EVENTS, ...localOnlyEvents);
     M.HISTORY_EVENTS.length = 0; M.HISTORY_EVENTS.push(...data.HISTORY_EVENTS);
@@ -52,11 +62,9 @@ async function loadDataFromAPI() {
     };
     mergePhotos(M.EVENTS);
     mergePhotos(M.HISTORY_EVENTS);
-    // 持久化合并后的数据到 localStorage（防止下次刷新又丢）—— 仅首次加载时写
-    if (M._initialLoadDone !== true) {
-      if (M.saveEventsToStorage) {
-        try { M.saveEventsToStorage(); } catch {}
-      }
+    // 持久化合并后的数据到 localStorage
+    if (M.saveEventsToStorage) {
+      try { M.saveEventsToStorage(); } catch {}
     }
 
     // 深度合并 PLANS（API + 本地，按 id 去重，API 版本优先）
@@ -370,6 +378,11 @@ document.addEventListener('click', function(e) {
   if (pill.contains(e.target) || dd.contains(e.target)) return;
   dd.style.display = 'none';
 });
+
+function getChatHistory() {
+  if (_activeSessionId && _messageCache[_activeSessionId]) return _messageCache[_activeSessionId];
+  return [];
+}
 
 function switchProject(projectId) {
   const prevPid = currentProjectId;
@@ -805,7 +818,7 @@ function renderIssues() {
 async function closeIssue(issueId) {
   const issue = M.ISSUES.find(i => i.id === issueId);
   if (!issue) return;
-  if (!confirm(`确定将「${issue.title}」标记为已闭环？`)) return;
+  if (!(await showConfirm(`确定将「${issue.title}」标记为已闭环？`, '闭环协调', '✅'))) return;
   issue.status = 'closed';
   renderIssues();
   showToast('已闭环', 'success');
@@ -2703,10 +2716,8 @@ async function parseVoiceText(text) {
     applyVoiceParseResult(parsed);
     if (hint) hint.textContent = `🤖 LLM 真实 · ${parsed.latencyMs || 0}ms · 来源 ${parsed.source}`;
   } catch (e) {
-    // 降级到本地 mock
-    const parsed = M.mockParseVoice(text, currentProjectId, areas, M.WORKERS, plans);
-    applyVoiceParseResult(parsed);
-    if (hint) hint.textContent = `⚙️ Mock 模式（LLM 离线）· ${e.message}`;
+    if (hint) hint.textContent = `❌ LLM 连接失败（${e.message}），请手动填写`;
+    showToast('LLM 解析失败：' + e.message, 'error');
   }
 }
 
@@ -3009,26 +3020,8 @@ async function parseVoiceTextForPhoto() {
     
   } catch (error) {
     console.error('语音解析失败:', error);
-    // 降级到 mock
-    const parsed = M.mockParsePhoto(voiceText, M.AREAS[currentProjectId] || [], plans);
-    document.getElementById('pp-type').value = parsed.type || 'progress';
-    document.getElementById('pp-area').value = parsed.areaId || '';
-    document.getElementById('pp-task').value = parsed.taskHint || parsed.payload?.taskName || '';
-    document.getElementById('pp-owner').value = parsed.payload?.owner || '';
-    document.getElementById('pp-progress').value = parsed.payload?.progress || '';
-    document.getElementById('pp-headcount').value = parsed.payload?.headcount || '';
-    document.getElementById('pp-planId').value = parsed.planId || '';
-    if (!document.getElementById('pp-caption').value) {
-      document.getElementById('pp-caption').value = parsed.caption || voiceText;
-    }
-    document.getElementById('pp-confidence').textContent = `${(parsed.confidence * 100).toFixed(0)}%`;
-    if (hint) hint.textContent = `⚙️ Mock 模式`;
-    showToast('语音解析失败，使用模拟数据', 'warning');
-    
-    // 处理识别到的新区域
-    if (parsed.areaName && !parsed.areaId) {
-      showAreaConfirmDialog(parsed.areaName, 'pp-area');
-    }
+    if (hint) hint.textContent = `❌ LLM 连接失败（${error.message}），请手动填写`;
+    showToast('LLM 解析失败：' + error.message, 'error');
   }
   
   document.getElementById('photoSaveBtn').disabled = false;
@@ -3304,82 +3297,9 @@ function restoreOriginalTextForVoice() {
   }
 }
 
-// Mock文本优化（本地降级）
+// Mock文本优化（本地降级 — 无 LLM 时直接返回原文）
 function mockOptimizeText(text) {
-  // 专业词汇替换
-  const replacements = [
-    // 施工术语优化
-    [/(\d+)个?(\s+)?(人|名|位)/g, '$1人'],
-    [/(\d+)%?(\s+)?(进度|完成|做了)/g, '进度$1%'],
-    [/(\d+)层/g, '$1层楼'],
-    [/(\d+)平米/g, '$1平方米'],
-    [/(\d+)平方/g, '$1平方米'],
-    [/(\d+)米/g, '$1米'],
-    
-    // 规范化表达
-    [/搞|弄|做/g, '进行'],
-    [/弄好|搞好|做好/g, '完成'],
-    [/在搞|在弄|在做/g, '正在进行'],
-    [/已经|已/g, '已'],
-    [/今天|今日/g, '今日'],
-    [/明天/g, '明日'],
-    
-    // 施工任务优化
-    [/刷墙|刮腻子/g, '墙面涂刷'],
-    [/贴砖/g, '瓷砖铺贴'],
-    [/吊顶|天花板/g, '吊顶施工'],
-    [/水电|管线/g, '水电安装'],
-    [/油漆/g, '油漆施工'],
-    [/木工/g, '木工作业'],
-    [/钢筋|绑扎/g, '钢筋绑扎'],
-    [/混凝土|浇筑/g, '混凝土浇筑'],
-    [/防水/g, '防水施工'],
-    [/保温/g, '保温施工'],
-    
-    // 状态描述优化
-    [/差不多|大概|左右/g, '约'],
-    [/很快|马上/g, '即将'],
-    [/好了|完了/g, '完成'],
-    [/没好|没完成/g, '未完成'],
-    
-    // 地点描述优化
-    [/这边|那边/g, '该区域'],
-    [/楼上|楼下/g, '楼上区域|楼下区域'],
-    
-    // 清理冗余词
-    [/然后|然后呢|然后就/g, ''],
-    [/那个|那个什么/g, ''],
-    [/呃|嗯|啊/g, ''],
-    [/吧|嘛|呢/g, ''],
-    
-    // 标点规范化
-    [/。{2,}/g, '。'],
-    [/，{2,}/g, '，'],
-    [/！{2,}/g, '！'],
-    [/\?{2,}/g, '？'],
-  ];
-  
-  let result = text;
-  for (const [pattern, replacement] of replacements) {
-    result = result.replace(pattern, replacement);
-  }
-  
-  // 添加专业术语
-  if (!result.includes('施工') && !result.includes('作业') && !result.includes('安装')) {
-    // 检查是否包含任务关键词
-    const taskKeywords = ['墙面', '地面', '吊顶', '水电', '油漆', '木工', '钢筋', '混凝土', '防水', '保温', '瓷砖'];
-    for (const kw of taskKeywords) {
-      if (result.includes(kw)) {
-        result = result.replace(kw, kw + '施工');
-        break;
-      }
-    }
-  }
-  
-  // 去除首尾空格和多余空格
-  result = result.replace(/\s+/g, ' ').trim();
-  
-  return result;
+  return text;
 }
 
 function handlePhotoUpload(event) {
@@ -3635,23 +3555,8 @@ async function uploadAndParsePhoto(file) {
     
   } catch (error) {
     console.error('照片识别失败:', error);
-    // 降级到 mock
-    const voiceText = document.getElementById('pp-voice-text').value.trim();
-    const parsed = M.mockParsePhoto(voiceText, M.AREAS[currentProjectId] || []);
-    document.getElementById('pp-type').value = parsed.type || 'progress';
-    document.getElementById('pp-area').value = parsed.areaId || '';
-    document.getElementById('pp-task').value = parsed.taskHint || parsed.payload?.taskName || '';
-    document.getElementById('pp-owner').value = parsed.payload?.owner || '';
-    document.getElementById('pp-progress').value = parsed.payload?.progress || '';
-    document.getElementById('pp-headcount').value = parsed.payload?.headcount || '';
-    document.getElementById('pp-caption').value = parsed.caption || '';
-    document.getElementById('pp-confidence').textContent = `${(parsed.confidence * 100).toFixed(0)}%`;
-    if (hint) hint.textContent = `⚙️ Mock 模式（LLM 不可用）`;
-    
-    // 处理识别到的新区域
-    if (parsed.areaName && !parsed.areaId) {
-      showAreaConfirmDialog(parsed.areaName, 'pp-area');
-    }
+    if (hint) hint.textContent = `❌ LLM 连接失败（${error.message}），请手动填写`;
+    showToast('LLM 解析失败：' + error.message, 'error');
   }
   
   // 识别完成，隐藏VLM可视化动画
@@ -3720,18 +3625,8 @@ async function reparsePhoto() {
     
   } catch (error) {
     console.error('重新识别失败:', error);
-    // 降级到 mock
-    const parsed = M.mockParsePhoto();
-    document.getElementById('pp-type').value = parsed.type || 'progress';
-    document.getElementById('pp-area').value = parsed.areaId || '';
-    document.getElementById('pp-task').value = parsed.taskHint || '';
-    document.getElementById('pp-owner').value = '';
-    document.getElementById('pp-progress').value = '';
-    document.getElementById('pp-headcount').value = '';
-    document.getElementById('pp-caption').value = parsed.caption || '';
-    document.getElementById('pp-confidence').textContent = `${(parsed.confidence * 100).toFixed(0)}%`;
-    if (hint) hint.textContent = `⚙️ Mock 模式`;
-    showToast('重新识别失败，使用模拟数据', 'warning');
+    if (hint) hint.textContent = `❌ LLM 连接失败（${error.message}），请手动填写`;
+    showToast('LLM 重新识别失败：' + error.message, 'error');
   }
   
   // 识别完成，隐藏VLM可视化动画
@@ -4000,9 +3895,9 @@ async function parseUnifiedSharedText() {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     parsed = await r.json();
   } catch (e) {
-    parsed = isPhoto
-      ? M.mockParsePhoto(text, M.AREAS[currentProjectId] || [], plans)
-      : M.mockParseVoice(text, currentProjectId, areas, workers, plans);
+    textarea.classList.remove('textarea-fading');
+    showToast('LLM 解析失败：' + e.message, 'error');
+    return;
   }
 
   textarea.classList.remove('textarea-fading');
@@ -4992,10 +4887,8 @@ async function uploadUnifiedPhoto(file) {
 
   } catch (error) {
     console.error('照片识别失败:', error);
-    const parsed = M.mockParsePhoto('', M.AREAS[currentProjectId] || []);
-    applyUnifiedParseResult(parsed, 'photo');
-    fillSharedTextFromParseResult(parsed);
-    if (hint) hint.textContent = '⚙️ Mock 模式（LLM 不可用）';
+    if (hint) hint.textContent = '❌ LLM 连接失败（' + error.message + '），请手动填写';
+    showToast('LLM 照片识别失败：' + error.message, 'error');
   }
 
   // 识别完成，隐藏 VLM 动画
@@ -6136,7 +6029,7 @@ function escapeHtml(s) {
 // ============================================================
 // 周报生成
 // ============================================================
-function openWeeklyReport() {
+async function openWeeklyReport() {
   const today = new Date(M.TODAY);
   const dayOfWeek = today.getDay();
   const monday = new Date(today);
@@ -6147,23 +6040,49 @@ function openWeeklyReport() {
   const weekStart = formatDateObj(monday);
   const weekEnd = formatDateObj(sunday);
   
-  const report = M.mockAggregateWeekly(currentProjectId, weekStart, weekEnd);
+  let report = null;
+  try {
+    const r = await fetch('http://localhost:3010/api/aggregate-weekly', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        projectId: currentProjectId,
+        projectName: M.PROJECTS.find(p => p.id === currentProjectId)?.name || currentProjectId,
+        client: M.PROJECTS.find(p => p.id === currentProjectId)?.client || '',
+        weekStart, weekEnd,
+        events: M.EVENTS,
+        issues: M.ISSUES,
+        areas: M.AREAS[currentProjectId] || []
+      })
+    });
+    if (r.ok) report = await r.json();
+  } catch (e) {
+    console.warn('周报聚合 LLM 失败:', e.message);
+  }
+
+  if (!report) {
+    document.getElementById('weeklyReportContent').innerHTML = `<div style="padding:40px;text-align:center;color:#ef4444;font-size:14px;">❌ 周报聚合需要 LLM 服务，当前不可用（请检查后端连接）</div>`;
+    showModal('modalWeekly');
+    return;
+  }
+
+  const rpt = report;
   
   let html = `
     <div style="margin-bottom:20px; padding-bottom:16px; border-bottom:1px solid #e2e8f0;">
-      <div style="font-size:18px; font-weight:600; color:#0f172a; margin-bottom:4px;">${report.projectName}</div>
-      <div style="font-size:13px; color:#64748b;">${report.client} · ${report.weekRange}</div>
+      <div style="font-size:18px; font-weight:600; color:#0f172a; margin-bottom:4px;">${rpt.projectName || M.PROJECTS.find(p => p.id === currentProjectId)?.name || ''}</div>
+      <div style="font-size:13px; color:#64748b;">${rpt.client || ''} · ${rpt.weekRange || weekStart + ' ~ ' + weekEnd}</div>
     </div>
     
     <div class="weekly-section">
       <div class="weekly-section-title">一、本周概述</div>
-      <div class="weekly-section-content">${report.overview}</div>
+      <div class="weekly-section-content">${rpt.overview || '暂无数据'}</div>
     </div>
     
     <div class="weekly-section">
       <div class="weekly-section-title">二、区域进度</div>
       <div style="padding:0 14px;">
-        ${report.progressByArea.map(area => `
+        ${(rpt.progressByArea || []).map(area => `
           <div class="weekly-area-card">
             <div class="weekly-area-name">📍 ${area.areaName}</div>
             <div class="weekly-area-tasks">负责人：${area.manager}<br>${area.tasks}</div>
@@ -6175,16 +6094,16 @@ function openWeeklyReport() {
     <div class="weekly-section">
       <div class="weekly-section-title">三、专项事项</div>
       <div class="weekly-section-content">
-        总事项数：${report.issuesSummary.total} 项<br>
-        待处理：${report.issuesSummary.open} 项 | 处理中：${report.issuesSummary.inProgress} 项 | 已闭环：${report.issuesSummary.closed} 项<br>
-        <div style="margin-top:8px; white-space:pre-wrap; font-size:13px; color:#475569;">${report.issuesSummary.details}</div>
+        总事项数：${(rpt.issuesSummary || {}).total || 0} 项<br>
+        待处理：${(rpt.issuesSummary || {}).open || 0} 项 | 处理中：${(rpt.issuesSummary || {}).inProgress || 0} 项 | 已闭环：${(rpt.issuesSummary || {}).closed || 0} 项<br>
+        <div style="margin-top:8px; white-space:pre-wrap; font-size:13px; color:#475569;">${(rpt.issuesSummary || {}).details || ''}</div>
       </div>
     </div>
 
     <div class="weekly-section">
       <div class="weekly-section-title">四、协调事宜（未闭环）</div>
       <div style="padding:0 14px;">
-        ${report.coordinationIssues && report.coordinationIssues.length > 0 ? `
+        ${rpt.coordinationIssues && rpt.coordinationIssues.length > 0 ? `
         <table style="width:100%; border-collapse:collapse; font-size:12px; border:1px solid #bae6fd;">
           <thead>
             <tr style="background:#0ea5e9; color:#fff;">
@@ -6195,7 +6114,7 @@ function openWeeklyReport() {
             </tr>
           </thead>
           <tbody>
-            ${report.coordinationIssues.map((c, i) => `
+            ${rpt.coordinationIssues.map((c, i) => `
             <tr style="background:${i % 2 === 0 ? '#dbeafe' : '#eff6ff'};">
               <td style="padding:6px; border:1px solid #bae6fd; text-align:center;">${c.seq}</td>
               <td style="padding:6px; border:1px solid #bae6fd;">${c.title || '—'}</td>
@@ -6211,20 +6130,20 @@ function openWeeklyReport() {
     <div class="weekly-section">
       <div class="weekly-section-title">五、安全与材料</div>
       <div class="weekly-section-content">
-        🔍 安全巡检：${report.safetyStats.checkCount} 次（发现隐患 ${report.safetyStats.issueCount} 项）<br>
-        📦 材料进场：${report.materialStats.inboundCount} 批次
+        🔍 安全巡检：${(rpt.safetyStats || {}).checkCount || 0} 次（发现隐患 ${(rpt.safetyStats || {}).issueCount || 0} 项）<br>
+        📦 材料进场：${(rpt.materialStats || {}).inboundCount || 0} 批次
       </div>
     </div>
     
     <div class="weekly-section">
       <div class="weekly-section-title">六、下周计划</div>
       <div class="weekly-section-content" style="list-style-type:decimal; padding-left:20px;">
-        ${report.nextWeekPlan.map((item, i) => `<li>${item}</li>`).join('')}
+        ${(rpt.nextWeekPlan || []).map((item, i) => `<li>${item}</li>`).join('')}
       </div>
     </div>
     
     <div style="margin-top:20px; padding-top:16px; border-top:1px dashed #cbd5e1; text-align:right; font-size:12px; color:#94a3b8;">
-      生成时间：${new Date().toLocaleString('zh-CN')} | Mock 模式
+      生成时间：${new Date().toLocaleString('zh-CN')} | ${rpt.source === 'llm' ? 'LLM 生成' : '公式生成'}
     </div>
   `;
   
@@ -8706,9 +8625,9 @@ async function switchSession(sessionId) {
     const res = await fetch('http://localhost:3010/api/chat/sessions/' + encodeURIComponent(sessionId) + '/messages');
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const messages = await res.json();
-    _messageCache[sessionId] = messages.map(m => ({ role: m.role, content: m.content }));
+    _messageCache[sessionId] = messages.map(m => ({ id: m.id, role: m.role, content: m.content }));
     for (const m of messages) {
-      appendChatMessage(m.role === 'user' ? 'user' : 'system', m.content, true);
+      appendChatMessage(m.role === 'user' ? 'user' : 'system', m.content, true, m.id);
     }
     scrollChatToBottom();
   } catch (e) {
@@ -8716,7 +8635,7 @@ async function switchSession(sessionId) {
     _messageCache[sessionId] = [];
   }
   if (!container.children.length) {
-    appendChatMessage('ai-message-system', '💬 之前的对话记录已清空，开始新的对话吧！');
+    appendChatMessage('ai-message-system', '💬 之前的对话记录已清空，开始新的对话吧！', true, null);
   }
   updateChatBadge();
 }
@@ -8752,25 +8671,93 @@ function toggleSessionMenu() {
   }
 }
 
-function renameCurrentSession() {
+async function renameCurrentSession() {
   document.getElementById('aiChatSessionMenu').style.display = 'none';
   const sessions = _sessionsByProject[typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan'] || [];
   const s = sessions.find(x => x.id === _activeSessionId);
   if (!s) return;
-  const name = prompt('请输入新名称：', s.name);
+  const name = await showPrompt('请输入新名称：', s.name);
   if (name && name.trim() && name !== s.name) {
     renameSession(_activeSessionId, name.trim());
   }
 }
 
-function deleteCurrentSession() {
+async function deleteCurrentSession() {
   document.getElementById('aiChatSessionMenu').style.display = 'none';
   if (!_activeSessionId) return;
-  if (confirm('确定删除当前对话？此操作不可恢复。')) {
+  if (await showConfirm('确定删除当前对话？此操作不可恢复。', '删除对话', '🗑️')) {
     deleteSession(_activeSessionId);
   }
 }
 
+// ------ 消息操作（清空/删除/编辑/复制）------
+async function clearChatMessages() {
+  const menu = document.getElementById('aiChatSessionMenu');
+  if (menu) menu.style.display = 'none';
+  if (!_activeSessionId) return;
+  if (!(await showConfirm('确定清空当前对话的所有消息吗？', '清空对话', '🗑️'))) return;
+  const container = document.getElementById('aiChatMessages');
+  if (container) container.innerHTML = '';
+  _messageCache[_activeSessionId] = [];
+  try {
+    await fetch('http://localhost:3010/api/chat/sessions/' + encodeURIComponent(_activeSessionId) + '/messages', { method: 'DELETE' });
+  } catch (e) { console.warn('[chat] 清空失败:', e); }
+  appendChatMessage('ai-message-system', '🗑️ 当前对话已清空', true, null);
+}
+
+async function deleteChatMessage(btn) {
+  const msgEl = btn?.closest('.ai-message');
+  if (!msgEl) return;
+  const msgId = msgEl.getAttribute('data-msg-id');
+  if (!msgId) { msgEl.remove(); return; }
+  if (!(await showConfirm('确定删除这条消息吗？', '删除消息', '🗑️'))) return;
+  if (_messageCache[_activeSessionId]) {
+    _messageCache[_activeSessionId] = _messageCache[_activeSessionId].filter(m => m.id !== msgId);
+  }
+  msgEl.remove();
+  try {
+    await fetch('http://localhost:3010/api/chat/messages/' + encodeURIComponent(msgId), { method: 'DELETE' });
+  } catch (e) { console.warn('[chat] 删除消息失败:', e); }
+}
+
+function editChatMessage(btn) {
+  const msgEl = btn?.closest('.ai-message');
+  if (!msgEl) return;
+  const msgId = msgEl.getAttribute('data-msg-id');
+  const msgContent = msgEl.getAttribute('data-msg-content');
+  if (!msgContent) return;
+  const input = document.getElementById('aiChatInput');
+  if (!input) return;
+  input.value = msgContent;
+  input.setAttribute('data-edit-msg', msgId || '');
+  input.focus();
+  const sendBtn = document.getElementById('aiChatSendBtn');
+  if (sendBtn) sendBtn.textContent = '✏️';
+}
+
+function copyChatMessage(btn) {
+  const msgEl = btn?.closest('.ai-message');
+  if (!msgEl) return;
+  const bubble = msgEl.querySelector('.ai-message-bubble');
+  if (!bubble) return;
+  // 克隆 bubble 排除操作按钮，避免把 📋✏️✕ 复制到剪贴板
+  const clone = bubble.cloneNode(true);
+  const actions = clone.querySelector('.ai-message-actions');
+  if (actions) actions.remove();
+  const text = clone.textContent || clone.innerText || '';
+  if (!text.trim()) return;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text.trim()).catch(() => {});
+  } else {
+    const ta = document.createElement('textarea');
+    ta.value = text.trim();
+    ta.style.position = 'fixed'; ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch(e) {}
+    document.body.removeChild(ta);
+  }
+}
 // ------ 消息发送 ------
 function toggleChat() {
   const w = document.getElementById('aiChatWidget');
@@ -8798,9 +8785,25 @@ function toggleChat() {
   }
 }
 
-function sendChatMessage() {
+async function sendChatMessage() {
   const input = document.getElementById('aiChatInput');
-  const text = input?.value.trim();
+  let text = input?.value.trim();
+  // 如果正在编辑消息，从 data-edit-msg 获取真正的内容
+  const editMsgId = input?.getAttribute('data-edit-msg');
+  if (editMsgId) {
+    text = input?.value.trim();
+    if (!text) return;
+    input.removeAttribute('data-edit-msg');
+    document.getElementById('aiChatSendBtn').textContent = '➤';
+    // 删除旧消息
+    const oldEl = document.querySelector(`.ai-message[data-msg-id="${editMsgId}"]`);
+    if (oldEl) {
+      const oldContent = oldEl.getAttribute('data-msg-content') || '';
+      oldEl.remove();
+      _messageCache[_activeSessionId] = (_messageCache[_activeSessionId] || []).filter(m => m.id !== editMsgId);
+      fetch('http://localhost:3010/api/chat/messages/' + encodeURIComponent(editMsgId), { method: 'DELETE' }).catch(()=>{});
+    }
+  }
   if (!text || !_activeSessionId) return;
   input.value = '';
   document.getElementById('aiChatSendBtn').disabled = true;
@@ -8809,20 +8812,20 @@ function sendChatMessage() {
   if (/^(确认|继续|执行|好的|可以|是|嗯|对|授权|同意|批准|好|行|干|做|来吧)/i.test(text)) {
     const cards = document.querySelectorAll('.ai-auth-btn-confirm:not(:disabled)');
     if (cards.length > 0) {
-      appendChatMessage('user', text);
+      appendChatMessage('user', text, false, null);
       if (!_messageCache[_activeSessionId]) _messageCache[_activeSessionId] = [];
-      _messageCache[_activeSessionId].push({ role: 'user', content: text });
+      _messageCache[_activeSessionId].push({ id: null, role: 'user', content: text });
       saveMsgToDB(_activeSessionId, 'user', text);
       cards.forEach(btn => authorizeAction(btn));
       return;
     }
   }
 
-  // 1. 显示并保存用户消息
-  appendChatMessage('user', text);
+  // 1. 保存并显示用户消息
+  const savedId = await saveMsgToDB(_activeSessionId, 'user', text);
   if (!_messageCache[_activeSessionId]) _messageCache[_activeSessionId] = [];
-  _messageCache[_activeSessionId].push({ role: 'user', content: text });
-  saveMsgToDB(_activeSessionId, 'user', text);
+  _messageCache[_activeSessionId].push({ id: savedId, role: 'user', content: text });
+  appendChatMessage('user', text, false, savedId);
 
   showChatTyping();
   _callChatLLM(text);
@@ -8830,19 +8833,22 @@ function sendChatMessage() {
 
 async function saveMsgToDB(sessionId, role, content) {
   try {
-    await fetch('http://localhost:3010/api/chat/messages', {
+    const res = await fetch('http://localhost:3010/api/chat/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId, role, content })
     });
+    const data = await res.json();
+    return data.id || null;
   } catch (e) {
     console.warn('[chat] 保存消息失败:', e.message);
+    return null;
   }
 }
 
 async function _callChatLLM(text) {
   const pid = typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan';
-  const history = (_messageCache[_activeSessionId] || []).slice(-10);
+  const history = (_messageCache[_activeSessionId] || []).slice(-10).map(m => ({ role: m.role, content: m.content }));
   try {
     const res = await fetch('http://localhost:3010/api/chat', {
       method: 'POST',
@@ -8860,18 +8866,45 @@ async function _callChatLLM(text) {
     hideChatTyping();
 
     if (data.reply) {
-      _messageCache[_activeSessionId].push({ role: 'assistant', content: data.reply });
-      appendChatMessage('system', data.reply);
-      saveMsgToDB(_activeSessionId, 'assistant', data.reply);
+      const savedId = await saveMsgToDB(_activeSessionId, 'assistant', data.reply);
+      _messageCache[_activeSessionId].push({ id: savedId, role: 'assistant', content: data.reply });
+      appendChatMessage('system', data.reply, false, savedId);
     }
 
     // 自动执行结果（安全操作）
     if (data.results && data.results.length > 0) {
       data.results.forEach(r => {
-        appendChatMessage('system', (r.ok ? '✅ ' : '❌ ') + (r.message || r.error || '执行'));
+        appendChatMessage('system', (r.ok ? '✅ ' : '❌ ') + (r.message || r.error || '执行'), false, null);
       });
-      if (data.results.some(r => r.ok)) {
-        _refreshAfterChat(data.results.filter(r => r.ok).map(r => r.action.type));
+      // 预删除本地事件，避免 loadDataFromAPI 的 localOnlyEvents 把已删事件加回来
+      // 即使删除失败（DB 中不存在，幽灵事件）也清理本地
+      data.results.forEach(r => {
+          if (r.action.type === 'deleteEvent' && r.action.data?.eventId) {
+            const errNoRow = !r.ok && /未找到/.test(r.error || '');
+            if (r.ok || errNoRow) {
+              _ghostEventIds.add(r.action.data.eventId);
+              _persistGhostIds();
+              const idx = M.EVENTS.findIndex(e => e.id === r.action.data.eventId);
+              if (idx >= 0) M.EVENTS.splice(idx, 1);
+            }
+        }
+        if (r.action.type === 'batchDelete' && Array.isArray(r.data?.deletedIds) && r.data.deletedIds.length > 0) {
+          r.data.deletedIds.forEach(id => _ghostEventIds.add(id));
+          _persistGhostIds();
+          const ids = new Set(r.data.deletedIds);
+          for (let i = M.EVENTS.length - 1; i >= 0; i--) {
+            if (ids.has(M.EVENTS[i].id)) M.EVENTS.splice(i, 1);
+          }
+        }
+      });
+      // 有成功执行或已清理幽灵事件就刷新
+      const needRefresh = data.results.some(r => {
+        if (r.ok) return true;
+        if (r.action.type === 'deleteEvent' && /未找到/.test(r.error || '')) return true;
+        return false;
+      });
+      if (needRefresh) {
+        _refreshAfterChat(data.results.filter(r => r.ok || (r.action.type === 'deleteEvent' && /未找到/.test(r.error || ''))).map(r => r.action.type));
       }
     } else if (data.actions && data.actions.length > 0) {
       data.actions.forEach(a => executeChatAction(a));
@@ -8934,16 +8967,30 @@ async function authorizeAction(btn) {
     // 直接从本地 M.EVENTS/M.ISSUES 同步，避免 loadDataFromAPI 的保护逻辑或时序问题
     const act = data.action || {};
     if (act.type === 'deleteEvent' && act.data?.eventId) {
-      M.EVENTS = (M.EVENTS || []).filter(e => e.id !== act.data.eventId);
-      if (typeof renderFilteredEvents === 'function') renderFilteredEvents();
-      if (typeof renderStats === 'function') renderStats();
-      if (typeof updateCalendar === 'function') updateCalendar();
-      if (typeof renderDailyPlanCard === 'function') renderDailyPlanCard();
+      _ghostEventIds.add(act.data.eventId);
+      _persistGhostIds();
+      const filtered = (M.EVENTS || []).filter(e => e.id !== act.data.eventId);
+      M.EVENTS.length = 0; M.EVENTS.push(...filtered);
+      renderFilteredEvents(); renderStats(); updateCalendar(); renderDailyPlanCard();
+      await _refreshAfterChat(['deleteEvent']);
+    } else if (act.type === 'batchDelete') {
+      // 收集要移除的 ID：先用原 action 的显式 ids，否则用后端返回的 deletedIds，否则用全部条件
+      const idsToRemove = new Set();
+      if (Array.isArray(act.data?.ids)) act.data.ids.forEach(id => idsToRemove.add(id));
+      if (Array.isArray(data.result?.deletedIds)) data.result.deletedIds.forEach(id => idsToRemove.add(id));
+      if (idsToRemove.size > 0) {
+        idsToRemove.forEach(id => _ghostEventIds.add(id));
+        _persistGhostIds();
+        const filtered = (M.EVENTS || []).filter(e => !idsToRemove.has(e.id));
+        M.EVENTS.length = 0; M.EVENTS.push(...filtered);
+        renderFilteredEvents(); renderStats(); updateCalendar(); renderDailyPlanCard();
+      }
+      await _refreshAfterChat(['batchDelete']);
     } else if ((act.type === 'deleteIssue' || act.type === 'closeIssue') && act.data?.issueId) {
       M.ISSUES = (M.ISSUES || []).filter(i => i.id !== act.data.issueId);
-      if (typeof renderIssues === 'function') renderIssues();
+      renderIssues();
+      await _refreshAfterChat([act.type]);
     } else if (act.type === 'updateEvent' && act.data?.eventId) {
-      // 直接更新本地事件缓存 + 后台刷新
       const ev = (M.EVENTS || []).find(e => e.id === act.data.eventId);
       if (ev) {
         if (act.data.taskName) ev.payload.taskName = act.data.taskName;
@@ -8986,37 +9033,13 @@ async function rejectAction(btn) {
   }
 }
 
-// 离线 mock 回复
-function _mockChatReplyLocal(text) {
-  setTimeout(() => {
-    let reply = '';
-    const actions = [];
-    const t = text || '';
-    if (t.includes('协调') || t.includes('记录')) {
-      reply = '好的，我来帮你记录协调事宜。请填写以下信息：\n1. 需协调事项：________\n2. 提出部门：________\n3. 配合部门：________\n或者直接告诉我完整信息，例如"设计院未回复图纸，项目部提出，设计院配合"。';
-    } else if (t.includes('今日计划') || t.includes('进度')) {
-      const plans = (typeof M !== 'undefined' && M.PLANS && pid && M.PLANS[pid]) || [];
-      const today = (typeof M !== 'undefined' && M.TODAY) || '';
-      const todayPlans = plans.filter(p => p.startDate && p.endDate && p.startDate <= today && p.endDate >= today);
-      reply = todayPlans.length > 0
-        ? '📋 **今日进度计划**\n' + todayPlans.map((p, i) => i+1 + '. ' + (p.taskName || '施工任务') + '（' + p.startDate + '~' + p.endDate + '）' + (p.progress ? '📊 ' + p.progress : '')).join('\n')
-        : '今日暂无进度计划。你可以通过「今日计划」卡片新建。';
-    } else if (t.includes('周报') || t.includes('生成')) {
-      reply = '📊 正在生成周报…\n已为你打开周报预览，请点击「周报」按钮查看详情。';
-      actions.push({ type: 'openWeeklyReport' });
-    } else if (t.includes('木工') || t.includes('电工') || t.includes('安装') || t.includes('龙骨') || t.includes('砌筑') || t.includes('抹灰') || t.includes('钢筋') || t.includes('混凝土') || t.includes('完成') || t.includes('号楼')) {
-      actions.push({ type: 'createEvent', data: { type: t.includes('安全') ? 'safety' : (t.includes('材料') ? 'material' : (t.includes('考勤') ? 'attendance' : 'progress')), areaId: (t.match(/(\d+)号楼/) || [])[0] ? ('BAI-B' + t.match(/(\d+)号楼/)[1]) : null, taskName: t.slice(0, 20) + (t.length > 20 ? '...' : ''), owner: '', progress: (t.match(/(\d+)%/) || [])[0] || '', headcount: parseInt((t.match(/(\d+)人/) || [])[1]) || 0, note: t }});
-      reply = '已从你的描述中提取事件信息...';
-    } else {
-      reply = '收到！我支持以下操作：\n• 📋 记录协调事宜\n• 📅 查看今日进度计划\n• 📊 生成周报\n• 🔨 描述施工进度直接录入日报\n请告诉我你需要什么帮助？';
-    }
-    if (reply) {
-      _messageCache[_activeSessionId]?.push({ role: 'assistant', content: reply });
-      appendChatMessage('system', reply);
-      saveMsgToDB(_activeSessionId, 'assistant', reply);
-    }
-    actions.forEach(a => executeChatAction(a));
-  }, 600 + Math.random() * 400);
+// 离线 mock 回复 — 不模拟任何操作，仅提示连接失败
+async function _mockChatReplyLocal(text) {
+  const reply = '⚠️ 无法连接后端服务，请确认后端已启动（http://localhost:3010）。LLM 功能暂不可用。';
+  const savedId = await saveMsgToDB(_activeSessionId, 'assistant', reply);
+  if (!_messageCache[_activeSessionId]) _messageCache[_activeSessionId] = [];
+  _messageCache[_activeSessionId].push({ id: savedId, role: 'assistant', content: reply });
+  appendChatMessage('system', reply, false, savedId);
 }
 
 // ------ 生命周期 ------
@@ -9164,20 +9187,27 @@ async function _refreshAfterChat(actionTypes) {
 }
 
 // ------ Markdown 渲染 + 消息显示 ------
-function appendChatMessage(role, content, skipCache) {
+function appendChatMessage(role, content, skipCache, msgId) {
   const container = document.getElementById('aiChatMessages');
   if (!container) return;
   const div = document.createElement('div');
+  if (msgId) div.setAttribute('data-msg-id', msgId);
+  if (content) div.setAttribute('data-msg-content', content);
+  const rendered = renderMarkdownInline(content);
+  const actionsHtml = msgId ? '<div class="ai-message-actions">' +
+    '<button class="ai-message-action-btn" onclick="copyChatMessage(this)" title="复制">📋</button>' +
+    (role === 'user' ? '<button class="ai-message-action-btn" onclick="editChatMessage(this)" title="编辑">✏️</button>' : '') +
+    '<button class="ai-message-action-btn ai-msg-del" onclick="deleteChatMessage(this)" title="删除">✕</button>' +
+  '</div>' : '';
   if (role === 'user') {
     div.className = 'ai-message user';
-    div.innerHTML = '<div class="ai-message-avatar">👤</div><div class="ai-message-bubble">' + renderMarkdownInline(content) + '</div>';
+    div.innerHTML = '<div class="ai-message-avatar">👤</div><div class="ai-message-bubble">' + rendered + actionsHtml + '</div>';
   } else if (role === 'ai-proactive') {
     div.className = 'ai-message ai-proactive';
-    div.innerHTML = '<div class="ai-message-bubble" style="background:transparent;padding:0;">' + renderMarkdownInline(content) + '</div>';
+    div.innerHTML = '<div class="ai-message-bubble" style="background:transparent;padding:0;">' + rendered + '</div>';
   } else {
     div.className = 'ai-message ai-message-system';
-    const rendered = renderMarkdownInline(content);
-    div.innerHTML = '<div class="ai-message-avatar"><img src="assets/avatar-construction-girl.png" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></div><div class="ai-message-bubble">' + rendered + '</div>';
+    div.innerHTML = '<div class="ai-message-avatar"><img src="assets/avatar-construction-girl.png" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></div><div class="ai-message-bubble">' + rendered + actionsHtml + '</div>';
   }
   container.appendChild(div);
   // 保险：元素入 DOM 后检查 <table> 前是否有 <br>，有则清理（防御外部修改）
@@ -9447,4 +9477,98 @@ function _escapeHtml(s) {
   const d = document.createElement('div');
   d.textContent = s;
   return d.innerHTML;
+}
+
+// ============== 系统设置 ==============
+let _settingsCache = { llm_permission: { level: 'confirm' }, inspection_times: { times: ['08:30', '13:00', '17:30'], interval: 60 } };
+
+async function loadSettings() {
+  try {
+    const res = await fetch('http://localhost:3010/api/settings');
+    if (res.ok) _settingsCache = await res.json();
+  } catch {}
+  return _settingsCache;
+}
+
+function openSettings() {
+  loadSettings().then(s => {
+    _settingsCache = s;
+    const perm = s.llm_permission?.level || 'confirm';
+    document.querySelectorAll('input[name="llmPermission"]').forEach(el => { el.checked = el.value === perm; });
+    renderInspectionTimes(s.inspection_times?.times || ['08:30', '13:00', '17:30']);
+    const intervalSel = document.getElementById('inspectionInterval');
+    if (intervalSel) intervalSel.value = String(s.inspection_times?.interval || 60);
+    showModal('modalSettings');
+  });
+}
+
+function renderInspectionTimes(times) {
+  const list = document.getElementById('inspectionTimesList');
+  if (!list) return;
+  list.innerHTML = times.map((t, i) =>
+    '<span class="settings-time-chip">' + t +
+    '<span class="remove" onclick="removeInspectionTime(' + i + ')">✕</span></span>'
+  ).join('');
+  list._times = times;
+}
+
+function removeInspectionTime(idx) {
+  const list = document.getElementById('inspectionTimesList');
+  if (!list || !list._times) return;
+  list._times.splice(idx, 1);
+  renderInspectionTimes(list._times);
+}
+
+function addInspectionTime() {
+  const list = document.getElementById('inspectionTimesList');
+  if (!list || !list._times) return;
+  const now = new Date();
+  const h = String(now.getHours()).padStart(2, '0');
+  const m = String(now.getMinutes()).padStart(2, '0');
+  list._times.push(h + ':' + m);
+  list._times.sort();
+  renderInspectionTimes(list._times);
+}
+
+function onPermissionChange() {}
+function onInspectionChange() {}
+let _audioCtx = null;
+async function _ensureAudioCtx() {
+  if (!_audioCtx) {
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) return null;
+    _audioCtx = new Ctor();
+  }
+  if (_audioCtx.state === 'suspended') await _audioCtx.resume();
+  return _audioCtx;
+}
+document.addEventListener('click', () => { if (!_audioCtx) { const Ctor = window.AudioContext || window.webkitAudioContext; if (Ctor) _audioCtx = new Ctor(); } }, { once: true });
+
+async function saveSettings() {
+  const permEl = document.querySelector('input[name="llmPermission"]:checked');
+  const permLevel = permEl?.value || 'confirm';
+  const list = document.getElementById('inspectionTimesList');
+  const interval = parseInt(document.getElementById('inspectionInterval')?.value || '60');
+  const payload = {
+    llm_permission: { level: permLevel },
+    inspection_times: { times: list?._times || ['08:30', '13:00', '17:30'], interval }
+  };
+  try {
+    const res = await fetch('http://localhost:3010/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    await fetch('http://localhost:3010/api/settings/inspection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ times: list?._times || ['08:30', '13:00', '17:30'], interval })
+    });
+    _settingsCache = payload;
+    showToast('设置已保存', 'success');
+    closeModal('modalSettings');
+  } catch (e) {
+    showToast('保存失败: ' + e.message, 'error');
+  }
 }

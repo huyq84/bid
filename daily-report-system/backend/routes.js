@@ -651,6 +651,33 @@ router.post('/api/chat/messages', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// 清空会话内的所有消息（保留会话）
+router.delete('/api/chat/sessions/:id/messages', async (req, res) => {
+  try {
+    await query('DELETE FROM dr_chat_messages WHERE session_id=$1', [req.params.id]);
+    await query('UPDATE dr_chat_sessions SET updated_at=NOW() WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// 删除单条消息
+router.delete('/api/chat/messages/:id', async (req, res) => {
+  try {
+    await query('DELETE FROM dr_chat_messages WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// 编辑单条消息内容
+router.put('/api/chat/messages/:id', async (req, res) => {
+  try {
+    const { content } = req.body;
+    if (!content) return res.status(400).json({ error: 'content required' });
+    await query('UPDATE dr_chat_messages SET content=$1 WHERE id=$2', [content, req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ==================== 系统设置 ====================
 router.get('/api/settings', async (req, res) => {
   try {

@@ -7,6 +7,8 @@
 //   - 响应：{content: [{type: 'text', text: '...'}], ...}
 // ============================================================
 
+import { executeTool, getToolDescriptions } from './llm-tools.js';
+
 export class MinMaxClient {
   constructor(config) {
     this.apiKey = config.apiKey;
@@ -455,145 +457,193 @@ ${text}`;
     }
   }
 
-  // P0 新增：带完整上下文的对话（注入项目数据 + 行动指令）
-  async chatWithContext({ message, history = [], contextText = '', permLevel = 'confirm' }) {
+  // ==================== ReAct 循环对话 ====================
+  async chatWithContext({ message, history = [], contextText = '', permLevel = 'confirm', projectId, date }) {
+    const pi = projectId || 'baicaoyuan';
+    const dt = date || new Date().toISOString().slice(0, 10);
+
     const permHint = permLevel === 'allow'
-      ? '**当前权限=直接操作**：所有 action 都会被后端自动执行（包括敏感操作），不需要用户授权。回复时直接说"已执行/已删除/已更新"+结果摘要，**不要**说"请点击授权执行"或"请确认"。'
+      ? '当前权限=直接操作：所有操作（含敏感操作）都会被自动执行，不需要用户授权。但注意：仍需在回复末尾输出 actions JSON 代码块，否则操作不会被执行。'
       : permLevel === 'strict'
-      ? '**当前权限=禁止危险操作**：敏感操作（update/delete/close 等）会被后端直接拒绝。只生成安全操作。'
-      : '**当前权限=需授权**：敏感操作会生成操作但需要用户点击 ✅ 授权卡片才执行。回复里需要明确告诉用户"请点击下方卡片上的 ✅ 授权执行 按钮"，并列出待授权操作。';
+      ? '当前权限=禁止危险操作：敏感操作（update/delete/close 等）会被拒绝。只生成安全操作。'
+      : '当前权限=需授权：敏感操作需要用户点击 ✅ 授权卡片才执行。请列出待授权操作告知用户。';
 
-    const systemMsg = `你是【百草园城市更新项目】的 AI 工程助手。
+    const systemMsg = `你是一个施工现场日报系统的 AI 工程助手。
 
-## 权限提示（重要）
+## 核心原则
+- 不确定用户意图时，**先用工具查数据**，不要假设用户要录入
+- "今天完成的工作"、"做了啥"、"有哪些"等是查询，不是录入
+- 用户提到具体任务+进度/人数时才是录入（如"木工完成大堂龙骨 80%"）
+- 先思考再行动：**宁可多查一步，不要贸然操作**
+
+## 可用工具（优先用工具查数据，再做决定）
+${getToolDescriptions()}
+
+工具用法示例：
+- 用户问"今天完成的工作都完善吗" → 先调 comparePlansVsActuals 查对比数据，再回复
+- 用户问"今天做了啥" → 先调 queryEvents 查今日事件，再回复
+- 用户问"今日计划有什么" → 先调 queryPlans 查今日计划，再回复
+- 用户说"木工完成80%" → 不需要查数据，直接生成 createEvent
+
+## 可用操作（最终输出给用户的 actions）
+安全操作（自动执行）：
+- createEvent: 录入今日完成。data: { type(必填), taskName(必填), areaId, areaName, planId, owner, progress, headcount, laborRequirements, completionType(planned|unplanned), buildingNo, floorNo, note }
+- createIssue: 录协调事宜。data: { title(必填), type, areaId, priority, proposeDept, cooperateDept, owner, description }
+- createAttendance: 签到。data: { records: { managerId, present, reason } }
+- confirmEvent: 确认事件。data: { eventId }
+
+敏感操作（需授权）：
+- updateEvent: data: { eventId(必填), taskName, owner, progress, headcount, laborRequirements, type, status, areaId, completionType, buildingNo, floorNo }
+- deleteEvent: data: { eventId(必填) }
+- batchDelete: data: { date(必填YYYY-MM-DD), 至少一个其他条件: timeFrom/timeTo/status/type/planId/areaId/taskNameContains/ids }
+- updateIssue: data: { issueId(必填), title, status, priority, owner, description }
+- closeIssue: data: { issueId(必填) }
+- deleteIssue: data: { issueId(必填) }
+- updatePlan: data: { planId(必填), areaId, areaName, owner, progress, buildingNo, floorNo, laborRequirements, taskName, status }
+
+字段约定：始终用驼峰（taskName, areaId, laborRequirements, completionType, buildingNo, floorNo, headcount, proposeDept, cooperateDept）
+
+## 项目数据
+${contextText}
+
+## 权限
 ${permHint}
 
-## 你的能力
-通过自然语言帮用户完成所有日报系统操作：
+## 回复格式（非常重要，请严格遵守）
+**情况 1 — 需要查询数据时：** 只输出下面这一行 JSON，不要加其他文字：
+{"tool":"工具名","params":{参数}}
+示例：{"tool":"queryEvents","params":{"date":"2026-06-17"}}
 
-【安全操作】自动执行，用户可见结果：
-- createEvent: 录日报事件（type, taskName, 可选: areaId, owner, progress, headcount=各工种人数之和, laborRequirements=[{trade:"工种",count:人数}]）
-- createIssue: 录协调事宜（title, type, areaId, proposeDept, cooperateDept, priority, owner, description）
-- createAttendance: 签到（records: { managerId: { present, reason } }）
-- confirmEvent: 确认事件为已完成（eventId）
+**情况 2 — 已有足够信息回复用户时：** 直接输出回复内容（纯文本或 Markdown），可以任意包含【】「」"" 等符号。
 
-【敏感操作】需用户授权后执行：
-- updateEvent: 编辑已有事件（eventId, taskName, owner, progress, headcount, type, status）
-- deleteEvent: 删除事件（eventId）
-- updateIssue: 更新协调（issueId, title, status, priority, owner, description）
-- closeIssue: 关闭协调（issueId）
-- deleteIssue: 删除协调（issueId）
-- updatePlan: 完善日计划字段（planId 必填；可选：areaId, areaName, owner, progress, buildingNo, floorNo, laborRequirements, taskName, status）
-
-## 匹配规则
-- 区域名 → 从下面的"项目区域"中找匹配的 id
-- 负责人 → 从下面的"工人列表"或"今日计划"中找
-- 计划名 → 从下面的"今日进行中的计划"中找匹配的 id
-- 进度保留原格式（"80%" 或 80）
-- 事件ID/协调ID → 从"今日已录事件"/"未关闭协调"中匹配
-
-## 缺信息处理
-- 缺区域 → 留空 areaId
-- 缺负责人 → 留空 owner
-- 缺进度 → 留空
-- 真的猜不出来 → 在 reply 里反问
-
-## 字段必填规则（重要）
-createEvent:
-  - 必填: type（事件类型）, taskName（任务名称）
-  - 可选: areaId（区域）, owner（负责人）, progress（进度百分比）, headcount（总人数=各工种人数之和）, laborRequirements（工种×人数明细，如[{trade:"木工",count:3},{trade:"电工",count:2}]）, note（备注）, planId（计划ID）
-  - 默认值: type=progress, source=chat
-createIssue:
-  - 必填: title
-  - 可选: type, areaId, priority, proposeDept, cooperateDept, owner, description
-  - 默认值: type=coordination, priority=medium
-createAttendance:
-  - 必填: records (至少 1 条)
-  - 每条 record: managerId (必填), present (默认 true), reason (可选)
-
-## 反问规则（重要）
-- 如果用户想创建事件但没说任务内容（taskName），必须反问："请问要记录什么任务？"
-- 如果用户想创建协调但没说标题（title），必须反问："请问协调什么事？"
-- 如果用户想签到但没说谁签到，必须反问："请问哪些人要签到？"
-- 其他可选字段（areaId, owner, progress, headcount）缺失时直接留空，不要反问
-- 用户说"录入今日完成"之类模糊表述时，反问具体任务内容
-
-## 回复格式
-1. 一句中文回复（友好、简洁）
-2. 如果有操作，输出 JSON 块，用代码块包裹（\`\`\`json ... \`\`\`）：
-
+**⚠️ 如果执行操作，必须在回复末尾附加 JSON 代码块，否则操作无效：**
 \`\`\`json
-{ "actions": [
-  { "type": "createEvent", "data": { "type": "progress", "areaId": "BAI-A1", "taskName": "大堂天花龙骨", "progress": "80%", "owner": "鲍永春", "headcount": 5, "laborRequirements": [{ "trade": "木工", "count": 3 }, { "trade": "电工", "count": 2 }] } }
-] }
+{"actions":[{"type":"createEvent","data":{"taskName":"大堂龙骨","progress":"80%"}}]}
 \`\`\`
 
-## 编辑/删除示例（敏感操作类型）
-- "把 E849 进度改成 100%" / "把 E849 改成 50%" / "E849 更新进度为 80%" → updateEvent: { eventId: "E849", progress: "50%" }
-- "删掉 E849" / "删除事件 E849" / "移除 E849" → deleteEvent: { eventId: "E849" }
-- "关闭 I123" / "关掉协调 I123" / "解决 I123" → closeIssue: { issueId: "I123" }
-- "把 I123 优先级改成高" / "更新 I123，负责人改王工" → updateIssue: { issueId: "I123", priority: "high" }
-- "删除协调 I123" / "删掉 I123" → deleteIssue: { issueId: "I123" }
-- 涉及事件/协调的修改删除必须用 eventId/issueId 引用
-- 即使用户提到的 eventId 不在今日事件中，也要生成对应操作（后端会校验是否存在）
+**规则（必须遵守）：**
+- 任何操作都必须在回复末尾输出 actions JSON 代码块
+- **不能只描述操作而不输出 actions JSON**。只描述操作但不输出 JSON = 操作不会执行。系统只通过 JSON 代码块中的 actions 来执行操作，回复里的文字描述仅供用户阅读，不会触发任何实际操作。
+- 一个回复可以包含多个 actions（如同时录木工+电工）
+- actions 里不需要的字段不传
+- 不需要操作时输出纯文本，不要 JSON 代码块
+- 先调工具查数据，看到结果后再决定下一步
+- 缺必填字段时反问用户（如没说明 taskName，反问"请问要记录什么任务？"）
+- 可选字段缺失直接留空，不反问
+- 不要输出任何图片引用，用纯文本或 Markdown 表格
+- **回复内容里不要有思考过程**，思考过程不输出给用户。回复要说人话，像工友之间交流一样自然。
+`;
 
-## 完善计划示例（updatePlan）
-- "把 PLAN101 区域改成 A 栋办公，负责人改成侯帅" → updatePlan: { planId: "PLAN101", areaId: "BAI-A1", owner: "侯帅" }
-- "PLAN823 进度设为 100%" / "更新 PLAN823 进度为 100%" → updatePlan: { planId: "PLAN823", progress: "100%" }
-- "PLAN751 区域改为 A 栋办公，负责人张二，进度 0%" → updatePlan: { planId: "PLAN751", areaId: "BAI-A1", owner: "张二", progress: "0%" }
-- 完善计划字段属于敏感操作，必须让用户点击授权卡片
+    const messages = this._buildMessages(history, message);
 
-## 注意事项
-- 一个用户消息可以包含多个操作（比如"木工完成 80%，电工完成 60%"→ 2 个 createEvent）
-- 时间默认用当前时间
-- source 标 "chat"
-- 敏感操作告诉用户「请点击卡片上的 ✅ 授权执行 按钮」即可，不要回复"请回复确认"（系统只认按钮点击，不认文字确认）
-- **绝对不要输出任何图片引用（如 ![alt](url)）、截图链接、或图片占位符。所有信息用纯文本或表格展示。**
-- 如果需要展示数据，用 Markdown 表格，不要用图片
+    // ReAct 循环
+    const maxIters = 6;
+    for (let i = 0; i < maxIters; i++) {
+      const body = await this._call(systemMsg, messages);
+      const text = body?.content?.[0]?.text || '';
+      if (!text) return { reply: '抱歉，暂时无法处理，请重试。', actions: [] };
 
-========================================
-## 项目实时数据（必读）
-${contextText}
-========================================`;
+      // 1) 尝试提取工具调用 JSON：{"tool":"xxx","params":{...}}
+      const toolCall = this._extractToolCall(text);
+      if (toolCall) {
+        try {
+          const result = await executeTool(toolCall.tool, toolCall.params || {}, { projectId: pi, date: dt });
+          messages.push({ role: 'assistant', content: text });
+          messages.push({ role: 'user', content: `工具 "${toolCall.tool}" 返回：\n${JSON.stringify(result, null, 2)}\n\n根据这个结果继续。` });
+        } catch (e) {
+          messages.push({ role: 'assistant', content: text });
+          messages.push({ role: 'user', content: `工具 "${toolCall.tool}" 执行失败: ${e.message}。请跳过继续。` });
+        }
+        continue;
+      }
 
-    const messages = (history || []).map(m => ({
-      role: m.role === 'user' ? 'user' : 'assistant',
-      content: m.content
-    }));
-    messages.push({ role: 'user', content: message });
+      // 2) 最终回复：文本 + 可选的 actions JSON 块
+      const actions = this._extractActions(text);
+      const reply = actions.length > 0 ? text.replace(/```json[\s\S]*?```/, '').trim() : text;
+      return { reply, actions };
+    }
 
-    const body = await this._call(systemMsg, messages);
-    const text = body?.content?.[0]?.text || '';
-
-    return this._parseChatReply(text);
+    return { reply: '抱歉，处理步骤太多无法完成，请简化问题。', actions: [] };
   }
 
-  _parseChatReply(text) {
-    let reply = text;
-    let actions = [];
+  _buildMessages(history, userMessage) {
+    const msgs = (history || []).map(m => ({
+      role: m.role === 'user' ? 'user' : 'assistant',
+      content: typeof m.content === 'string' ? m.content : (m.content?.text || '')
+    }));
+    msgs.push({ role: 'user', content: userMessage });
+    return msgs;
+  }
 
-    // 提取 ```json ... ``` 代码块
-    const jsonBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonBlockMatch) {
-      try {
-        const parsed = JSON.parse(jsonBlockMatch[1].trim());
-        if (Array.isArray(parsed.actions)) actions = parsed.actions;
-        else if (parsed.action) actions = [parsed.action];
-        reply = text.replace(jsonBlockMatch[0], '').trim();
-      } catch (e) {
-        // 解析失败，尝试用宽松正则
-        const actionMatch = text.match(/\{[\s\S]*?"action"[\s\S]*?\}/);
-        if (actionMatch) {
-          try {
-            const parsed = JSON.parse(actionMatch[0]);
-            if (parsed.action) actions = [parsed.action];
-            reply = text.replace(actionMatch[0], '').trim();
-          } catch {}
-        }
+  // 提取工具调用 JSON：{"tool":"xxx","params":{...}}
+  _extractToolCall(text) {
+    if (!text) return null;
+
+    // 1) 尝试整个文本就是 JSON（标准情况）
+    {
+      let trimmed = text.trim();
+      if (trimmed.startsWith('```')) {
+        trimmed = trimmed.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/, '');
+      }
+      const fullMatch = trimmed.match(/^\{[\s\S]*\}$/);
+      if (fullMatch) {
+        try {
+          const obj = JSON.parse(fullMatch[0]);
+          if (obj && typeof obj.tool === 'string') {
+            return { tool: obj.tool, params: obj.params || {} };
+          }
+        } catch {}
       }
     }
 
-    return { reply, actions };
+    // 2) 从文本中搜索 tool 相关 JSON（LLM 可能在中文前后缀中嵌入工具调用）
+    {
+      // 先找 ```json 或 ``` 包裹的块
+      const codeMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?"tool"[\s\S]*?\})\s*```/);
+      if (codeMatch) {
+        try {
+          const obj = JSON.parse(codeMatch[1]);
+          if (obj && typeof obj.tool === 'string') {
+            return { tool: obj.tool, params: obj.params || {} };
+          }
+        } catch {}
+      }
+      // 逐行搜索 {"tool":"xxx",...} 形式的 JSON
+      const lines = text.split('\n').filter(l => l.trim());
+      for (const line of lines) {
+        try {
+          const obj = JSON.parse(line.trim());
+          if (obj && typeof obj.tool === 'string') {
+            return { tool: obj.tool, params: obj.params || {} };
+          }
+        } catch {}
+      }
+      // 全文搜索 {"tool" 开头的 JSON 子串（同一行内前有中文）
+      const inlineMatch = text.match(/\{"tool"\s*:\s*"[^"]+"[\s\S]*?\}\s*/);
+      if (inlineMatch) {
+        try {
+          const obj = JSON.parse(inlineMatch[0].trim());
+          if (obj && typeof obj.tool === 'string') {
+            return { tool: obj.tool, params: obj.params || {} };
+          }
+        } catch {}
+      }
+    }
+
+    return null;
+  }
+
+  // 从回复文本中提取 ```json\n{...}\n``` 块里的 actions
+  _extractActions(text) {
+    if (!text) return [];
+    const match = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (!match) return [];
+    try {
+      const parsed = JSON.parse(match[1].trim());
+      return Array.isArray(parsed.actions) ? parsed.actions : [];
+    } catch {
+      return [];
+    }
   }
 
   async _call(system, messages) {
