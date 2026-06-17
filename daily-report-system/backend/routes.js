@@ -651,4 +651,40 @@ router.post('/api/chat/messages', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ==================== 系统设置 ====================
+router.get('/api/settings', async (req, res) => {
+  try {
+    const result = await query('SELECT key, value FROM dr_settings ORDER BY key');
+    const settings = {};
+    result.rows.forEach(r => { settings[r.key] = r.value; });
+    res.json(settings);
+  } catch (e) {
+    // DB 不可用时返回默认值
+    res.json(getDefaultSettings());
+  }
+});
+
+router.post('/api/settings', async (req, res) => {
+  try {
+    const entries = req.body; // { key: value, ... }
+    for (const [key, value] of Object.entries(entries)) {
+      await query(
+        `INSERT INTO dr_settings (key, value, updated_at) VALUES ($1, $2::jsonb, NOW())
+         ON CONFLICT (key) DO UPDATE SET value = $2::jsonb, updated_at = NOW()`,
+        [key, JSON.stringify(value)]
+      );
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+function getDefaultSettings() {
+  return {
+    llm_permission: { level: 'confirm' },
+    inspection_times: { times: ['08:30', '13:00', '17:30'], interval: 60 }
+  };
+}
+
 export default router;

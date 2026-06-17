@@ -1246,6 +1246,57 @@
     </div>
   </div>
 
+  <!-- ============== 模态框：系统设置 ============== -->
+  <div class="modal-mask" id="modalSettings">
+    <div class="modal" style="max-width:520px;">
+      <div class="modal-header">
+        <div class="modal-title">⚙️ 系统设置</div>
+        <button class="modal-close" onclick="closeModal('modalSettings')">✕</button>
+      </div>
+      <div class="modal-body" style="max-height:60vh;overflow-y:auto;">
+        <div class="settings-section">
+          <div class="settings-label">🤖 LLM 操作权限</div>
+          <div class="settings-desc">控制 LLM 是否可以执行敏感操作（删除、修改事件/协调）</div>
+          <label class="settings-radio">
+            <input type="radio" name="llmPermission" value="strict"><span class="settings-radio-mark"></span>
+            <div><div class="settings-radio-title">🛑 禁止危险操作</div><div class="settings-radio-desc">LLM 不能删除或修改任何数据</div></div>
+          </label>
+          <label class="settings-radio">
+            <input type="radio" name="llmPermission" value="confirm" checked><span class="settings-radio-mark"></span>
+            <div><div class="settings-radio-title">🔒 授权后允许（当前）</div><div class="settings-radio-desc">敏感操作需用户点击授权按钮确认后执行</div></div>
+          </label>
+          <label class="settings-radio">
+            <input type="radio" name="llmPermission" value="allow"><span class="settings-radio-mark"></span>
+            <div><div class="settings-radio-title">✅ 允许危险操作</div><div class="settings-radio-desc">LLM 可直接删除/修改，无需授权</div></div>
+          </label>
+        </div>
+        <div class="settings-divider"></div>
+        <div class="settings-section">
+          <div class="settings-label">🔔 巡检提醒频率</div>
+          <div class="settings-desc">设置自动巡检的触发时间点和检查间隔</div>
+          <div class="settings-inspection-row">
+            <span>触发时间：</span>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;" id="inspectionTimesList"></div>
+            <button class="settings-add-time" onclick="addInspectionTime()">+ 添加</button>
+          </div>
+          <div class="settings-inspection-row">
+            <span>检查间隔：</span>
+            <select id="inspectionInterval" class="settings-select">
+              <option value="30">30 秒</option>
+              <option value="60" selected>1 分钟</option>
+              <option value="120">2 分钟</option>
+              <option value="300">5 分钟</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('modalSettings')">取消</button>
+        <button class="btn btn-primary" onclick="saveSettings()">💾 保存设置</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ============== 模态框：LLM 设置 ============== -->
   <div class="modal-mask" id="modalLLM">
     <div class="modal">
@@ -1294,8 +1345,12 @@
             <div class="ai-chat-status"><span class="status-dot"></span>在线 · 快如闪电</div>
           </div>
         </div>
-        <button class="ai-chat-close" onclick="toggleChat()">✕</button>
+        <div style="display:flex;gap:4px;align-items:center;">
+          <button class="ai-chat-header-btn" onclick="openSettings()" title="设置">⚙️</button>
+          <button class="ai-chat-close" onclick="toggleChat()">✕</button>
+        </div>
       </div>
+
       <div class="ai-chat-messages" id="aiChatMessages">
         <div class="ai-message ai-message-system">
           <div class="ai-message-avatar">🤖</div>
@@ -1311,7 +1366,7 @@
         <span class="ai-chip" onclick="quickChatAction('1号楼木工3人完成龙骨安装80%')">🔨 录进度</span>
       </div>
       <div class="ai-chat-input-area">
-        <input type="file" id="aiChatPhotoInput" accept="image/*" capture="environment" style="display:none" onchange="handleChatPhoto(this)">
+        <input type="file" id="aiChatPhotoInput" accept="image/*" capture="environment" multiple style="display:none" onchange="handleChatPhoto(this)">
         <button class="ai-chat-ico-btn" onclick="document.getElementById('aiChatPhotoInput').click()" title="拍照上传">📷</button>
         <button class="ai-chat-ico-btn" id="aiChatVoiceBtn" onclick="toggleChatVoice()" title="语音输入">🎤</button>
         <input type="text" id="aiChatInput" class="ai-chat-input" placeholder="说进度、协调、考勤等，一键录入..." autocomplete="off">

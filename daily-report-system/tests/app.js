@@ -6878,7 +6878,7 @@ function sendChatMessage() {
   _mockChatReply(text);
 }
 
-function _mockChatReply(text) {
+function _mockChatReply(text, isContinuation = false) {
   setTimeout(() => {
     let reply = '';
     const actions = [];
@@ -6912,6 +6912,15 @@ function _mockChatReply(text) {
         headcount: _headMatch ? parseInt(_headMatch[1]) : 0,
         note: t
       }});
+      reply = '已从你的描述中提取事件信息...';
+    } else if (t.includes('剩余') || isContinuation) {
+      const planMatch = t.match(/(\d+)号楼/);
+      if (planMatch) {
+        actions.push({ type: 'createEvent', data: { type: 'progress', areaId: 'BAI-B' + planMatch[1], taskName: planMatch[0] + '施工', owner: '', progress: '50%', headcount: 2, note: '' }});
+        reply = '已补充 ' + planMatch[0] + ' 的进度事件...';
+      } else {
+        reply = '✅ 全部已完成（mock 模式下无更多数据）';
+      }
     } else {
       reply = '收到！我支持以下操作：\n• 📋 记录协调事宜\n• 📅 查看今日进度计划\n• 📊 生成周报\n• 🔨 描述施工进度直接录入日报\n请告诉我你需要什么帮助？';
     }
@@ -6926,8 +6935,23 @@ function appendChatMessage(role, content) {
   const container = document.getElementById('aiChatMessages');
   if (!container) return;
   const div = document.createElement('div');
-  div.className = role === 'user' ? 'ai-message user' : 'ai-message ai-message-system';
-  div.innerHTML = `<div class="ai-message-avatar">${role === 'user' ? '👤' : '🤖'}</div><div class="ai-message-bubble">${_escapeHtml(content).replace(/\n/g, '<br>')}</div>`;
+  let html = renderMarkdownInline(content);
+  const tableIdx = html.indexOf('<table');
+  if (tableIdx > 0) {
+    let prefix = html.slice(0, tableIdx);
+    prefix = prefix.replace(/<br\s*\/?>/gi, '');
+    html = prefix + html.slice(tableIdx);
+  }
+  if (role === 'user') {
+    div.className = 'ai-message user';
+    div.innerHTML = '<div class="ai-message-avatar">👤</div><div class="ai-message-bubble">' + html + '</div>';
+  } else if (role === 'ai-proactive') {
+    div.className = 'ai-message ai-proactive';
+    div.innerHTML = '<div class="ai-message-bubble" style="background:transparent;padding:0;">' + html + '</div>';
+  } else {
+    div.className = 'ai-message ai-message-system';
+    div.innerHTML = '<div class="ai-message-avatar">🤖</div><div class="ai-message-bubble">' + html + '</div>';
+  }
   container.appendChild(div);
   scrollChatToBottom();
 }
@@ -7025,45 +7049,76 @@ function createEventFromChat(data) {
 }
 
 async function handleChatPhoto(input) {
-  const file = input?.files?.[0];
-  if (!file) return;
+  const files = Array.from(input?.files || []);
+  if (files.length === 0) return;
   input.value = '';
-  appendChatMessage('user', '📷 [上传照片中...]');
-  showChatTyping();
-  try {
-    const reader = new FileReader();
-    const base64 = await new Promise((resolve, reject) => {
-      reader.onload = () => resolve(reader.result.split(',')[1]);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-    const projectId = typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan';
-    const areas = typeof M !== 'undefined' && M.AREAS ? M.AREAS[projectId] || [] : [];
-    const plans = typeof M !== 'undefined' && M.PLANS ? M.PLANS[projectId] || [] : [];
-    const res = await fetch('http://localhost:3010/api/parse-photo', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageBase64: base64, caption: '', projectId, areas, plans })
-    });
-    hideChatTyping();
-    if (!res.ok) throw new Error('解析照片失败');
-    const result = await res.json();
-    const data = result || {};
-    createEventFromChat({
-      type: data.type || 'progress',
-      areaId: data.areaId || null,
-      taskName: data.payload?.taskName || data.taskHint || '拍照记录',
-      owner: data.payload?.owner || '',
-      progress: data.payload?.progress || '',
-      headcount: data.payload?.headcount || 0,
-      note: data.caption || ''
-    });
-    appendChatMessage('system', '📸 照片已解析并保存为日报事件。');
-  } catch (e) {
-    hideChatTyping();
-    appendChatMessage('system', '⚠️ 照片解析失败：' + e.message + '，已降级为普通记录。');
-    createEventFromChat({ type: 'progress', taskName: file.name || '拍照记录', note: '照片上传记录' });
+  const total = files.length;
+  const single = total === 1;
+  const projectId = typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan';
+  const areas = typeof M !== 'undefined' && M.AREAS ? M.AREAS[projectId] || [] : [];
+  const plans = typeof M !== 'undefined' && M.PLANS ? M.PLANS[projectId] || [] : [];
+  if (single) {
+    appendChatMessage('user', '📷 [上传照片中...]');
+  } else {
+    appendChatMessage('user', '📷 批量上传 ' + total + ' 张照片，逐一识别中...');
   }
+  showChatTyping();
+  let successCount = 0;
+  let failCount = 0;
+  const results = [];
+  for (let i = 0; i < total; i++) {
+    const file = files[i];
+    const seqLabel = single ? '' : '第 ' + (i + 1) + '/' + total + ' 张 ';
+    try {
+      document.getElementById('aiChatInput')?.setAttribute('placeholder', seqLabel + '识别中...');
+      const reader = new FileReader();
+      const base64 = await new Promise(function(resolve, reject) { reader.onload = function() { resolve(reader.result.split(',')[1]); }; reader.onerror = reject; reader.readAsDataURL(file); });
+      const res = await fetch('http://localhost:3010/api/parse-photo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: base64, caption: '', projectId, areas, plans })
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const result = await res.json();
+      const data = result || {};
+      const ev = { type: data.type || 'progress', areaId: data.areaId || null, taskName: data.payload?.taskName || data.taskHint || file.name || '拍照记录', owner: data.payload?.owner || '', progress: data.payload?.progress || '', headcount: data.payload?.headcount || 0, note: data.caption || '' };
+      _createEventFromChatSilent(ev);
+      results.push({ file: file.name, ok: true, taskName: ev.taskName, type: ev.type, areaId: ev.areaId, progress: ev.progress, headcount: ev.headcount });
+      successCount++;
+    } catch (e) {
+      failCount++;
+      _createEventFromChatSilent({ type: 'progress', taskName: file.name || '拍照记录', note: '照片上传记录（识别失败）' });
+      results.push({ file: file.name, ok: false, error: e.message });
+    }
+  }
+  hideChatTyping();
+  document.getElementById('aiChatInput')?.setAttribute('placeholder', '说进度、协调、考勤等，一键录入...');
+  if (single) {
+    if (successCount > 0) appendChatMessage('system', '📸 照片已解析并保存为日报事件。');
+    else appendChatMessage('system', '⚠️ 照片解析失败，已降级为普通记录。');
+  } else {
+    let summary = '🎉 批量识别完成：共 ' + total + ' 张，成功 ' + successCount + ' 张';
+    if (failCount > 0) summary += '，失败 ' + failCount + ' 张';
+    summary += '\n\n| 序号 | 文件名 | 类型 | 任务 | 区域 | 进度 | 人数 |\n|---|---|---|---|---|---|---|\n';
+    results.forEach(function(r, idx) {
+      summary += '| ' + (idx + 1) + ' | ' + (r.file || '') + ' | ' + (r.ok ? (r.type || 'progress') : '❌') + ' | ' + (r.ok ? (r.taskName || '-') : (r.error || '失败')) + ' | ' + (r.ok ? (r.areaId || '-') : '-') + ' | ' + (r.ok ? (r.progress || '-') : '-') + ' | ' + (r.ok ? (r.headcount || '-') : '-') + ' |\n';
+    });
+    appendChatMessage('system', summary);
+  }
+}
+
+function _createEventFromChatSilent(data) {
+  if (typeof M === 'undefined' || !M.EVENTS) return;
+  const projectId = typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan';
+  const today = M.TODAY || new Date().toISOString().slice(0, 10);
+  const ev = { id: 'E' + String(Date.now()).slice(-3), projectId: projectId, date: today, time: new Date().toTimeString().slice(0, 5), type: data.type || 'progress', areaId: data.areaId || null, planId: data.planId || undefined, payload: { taskName: data.taskName || '', owner: data.owner || '', progress: typeof data.progress === 'string' ? data.progress : (data.progress != null ? data.progress + '%' : ''), headcount: data.headcount || 0, description: data.note || '' }, submitter: '张明', source: 'chat', confidence: 0.9, status: 'draft', note: data.note || '' };
+  M.EVENTS.unshift(ev);
+  if (M.saveEventsToStorage) M.saveEventsToStorage();
+  if (typeof renderFilteredEvents === 'function') renderFilteredEvents();
+  if (typeof renderDailyPlanCard === 'function') renderDailyPlanCard();
+  if (typeof renderStats === 'function') renderStats();
+  if (typeof updateCalendar === 'function') updateCalendar();
+  fetch('http://localhost:3010/api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ev) }).catch(function(){});
 }
 
 let _chatRecognition = null;
@@ -7109,6 +7164,136 @@ function toggleChatVoice() {
   btn.classList.add('recording');
   btn.textContent = '⏺';
   _chatRecognition.start();
+}
+
+// ============== 系统设置 ==============
+let _settingsCache = { llm_permission: { level: 'confirm' }, inspection_times: { times: ['08:30', '13:00', '17:30'], interval: 60 } };
+async function loadSettings() {
+  try { const res = await fetch('http://localhost:3010/api/settings'); if (res.ok) _settingsCache = await res.json(); } catch {}
+  return _settingsCache;
+}
+function openSettings() {
+  loadSettings().then(s => {
+    _settingsCache = s;
+    const perm = s.llm_permission?.level || 'confirm';
+    document.querySelectorAll('input[name="llmPermission"]').forEach(el => { el.checked = el.value === perm; });
+    renderInspectionTimes(s.inspection_times?.times || ['08:30', '13:00', '17:30']);
+    const intervalSel = document.getElementById('inspectionInterval');
+    if (intervalSel) intervalSel.value = String(s.inspection_times?.interval || 60);
+    showModal('modalSettings');
+  });
+}
+function renderInspectionTimes(times) {
+  const list = document.getElementById('inspectionTimesList');
+  if (!list) return;
+  list.innerHTML = times.map((t, i) => '<span class="settings-time-chip">' + t + '<span class="remove" onclick="removeInspectionTime(' + i + ')">✕</span></span>').join('');
+  list._times = times;
+}
+function removeInspectionTime(idx) {
+  const list = document.getElementById('inspectionTimesList');
+  if (!list || !list._times) return;
+  list._times.splice(idx, 1); renderInspectionTimes(list._times);
+}
+function addInspectionTime() {
+  const list = document.getElementById('inspectionTimesList');
+  if (!list || !list._times) return;
+  const now = new Date();
+  list._times.push(String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0'));
+  list._times.sort(); renderInspectionTimes(list._times);
+}
+async function saveSettings() {
+  const permEl = document.querySelector('input[name="llmPermission"]:checked');
+  const list = document.getElementById('inspectionTimesList');
+  const interval = parseInt(document.getElementById('inspectionInterval')?.value || '60');
+  const payload = { llm_permission: { level: permEl?.value || 'confirm' }, inspection_times: { times: list?._times || ['08:30', '13:00', '17:30'], interval } };
+  try {
+    await fetch('http://localhost:3010/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    await fetch('http://localhost:3010/api/settings/inspection', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ times: list?._times, interval }) });
+    _settingsCache = payload;
+    showToast('设置已保存', 'success');
+    closeModal('modalSettings');
+  } catch (e) { showToast('保存失败: ' + e.message, 'error'); }
+}
+
+// ------ Markdown 渲染 ------
+function renderMarkdownInline(text) {
+  if (!text) return '';
+  // 预清理：吃掉表格前的所有连续换行（防止多余 <br>）
+  text = text.replace(/\n+(?=\|)/g, '\n');
+  let html = _escapeHtml(text);
+  const codeBlocks = [];
+  const mermaidBlocks = [];
+  html = html.replace(/```mermaid\n([\s\S]*?)```/g, function(_, code) {
+    const idx = mermaidBlocks.length;
+    mermaidBlocks.push(code.trim());
+    return '%%MERMAID_' + idx + '%%';
+  });
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
+    const idx = codeBlocks.length;
+    codeBlocks.push({ lang, code: code.trim() });
+    return '%%CODEBLOCK_' + idx + '%%';
+  });
+  const lines = html.split('\n');
+  const out = [];
+  let inTable = false;
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    const isTableRow = /^\|.+\|$/.test(line);
+    if (inTable && !isTableRow) {
+      out[out.length - 1] += '</tbody></table>';
+      inTable = false;
+    }
+    const hm = line.match(/^(#{1,4})\s+(.+)/);
+    if (hm) {
+      const sizes = { 1: '15px', 2: '14px', 3: '13px', 4: '12px' };
+      line = '<div style="font-size:' + (sizes[hm[1].length] || '13px') + ';font-weight:700;color:#f1f5f9;margin:10px 0 4px 0;">' + hm[2] + '</div>';
+    } else if (isTableRow) {
+      if (/^\|[\s\-:]+\|$/.test(line)) continue;
+      const rawCells = line.split('|').filter(c => c.trim() !== '');
+      if (rawCells.length === 0) continue;
+      if (!inTable) {
+        line = '<table style="width:100%;border-collapse:collapse;margin:6px 0;font-size:12px;"><tbody>';
+        inTable = true;
+      } else {
+        line = '';
+      }
+      line += '<tr>' + rawCells.map(c => '<td style="border:1px solid rgba(255,255,255,0.1);padding:4px 8px;text-align:left;">' + c.trim() + '</td>').join('') + '</tr>';
+    } else if (/^---+$/.test(line)) {
+      line = '<hr style="border:none;border-top:1px solid rgba(255,255,255,0.1);margin:8px 0;">';
+    } else if (/^[-*]\s+(.+)/.test(line)) {
+      line = '<li style="margin:2px 0 2px 16px;">' + line.replace(/^[-*]\s+/, '') + '</li>';
+    } else if (line.trim() === '') {
+      continue;
+    }
+    out.push(line);
+  }
+  if (inTable) out[out.length - 1] += '</tbody></table>';
+  html = out.join('\n');
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  html = html.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>');
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '');
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  html = html.replace(/%%CODEBLOCK_(\d+)%%/g, function(_, idx) {
+    const b = codeBlocks[parseInt(idx)];
+    return '<pre><code class="language-' + _escapeHtml(b.lang) + '">' + b.code + '</code></pre>';
+  });
+  html = html.replace(/%%MERMAID_(\d+)%%/g, function(_, idx) {
+    return '<div class="mermaid">' + mermaidBlocks[parseInt(idx)] + '</div>';
+  });
+  html = html.replace(/\n/g, '<br>');
+  html = html.replace(/<\/div>\s*<br>/g, '</div>');
+  html = html.replace(/<\/li>\s*<br>/g, '</li>');
+  html = html.replace(/<\/table>\s*<br>/g, '</table>');
+  html = html.replace(/<br>\s*<li /g, '<li ');
+  html = html.replace(/<br>\s*<div /g, '<div ');
+  html = html.replace(/<br>\s*<hr /g, '<hr ');
+  html = html.replace(/(?:<br\s*\/?>\s*)+(?=<table)/g, '');
+  html = html.replace(/(<br\s*\/?>\s*){2,}/g, '<br>');
+  html = html.replace(/<table[^>]*>\s*<\/table>/g, '');
+  html = html.replace(/<img[^>]*alt=["\s]*["\s][^>]*src=["\s]*["\s][^>]*\/?>/gi, '');
+  return html;
 }
 
 function _escapeHtml(s) {

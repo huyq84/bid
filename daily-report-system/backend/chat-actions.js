@@ -32,7 +32,7 @@ export async function executeAction(action, ctx) {
 
 // 安全操作（自动执行） vs 敏感操作（需授权）
 export const SAFE_ACTIONS = new Set(['createEvent', 'createIssue', 'createAttendance', 'confirmEvent', 'openWeeklyReport']);
-export const SENSITIVE_ACTIONS = new Set(['updateEvent', 'deleteEvent', 'updateIssue', 'closeIssue', 'deleteIssue']);
+export const SENSITIVE_ACTIONS = new Set(['updateEvent', 'deleteEvent', 'updateIssue', 'closeIssue', 'deleteIssue', 'updatePlan']);
 
 export function isSensitiveAction(type) {
   return SENSITIVE_ACTIONS.has(type);
@@ -52,6 +52,7 @@ export function getActionSummary(action) {
     case 'deleteIssue': return `删除协调: ${d.issueId}`;
     case 'openWeeklyReport': return '打开周报';
     case 'confirmEvent': return `确认事件: ${d.eventId}`;
+    case 'updatePlan': return `完善计划: ${d.planId} (${d.taskName || d.owner || d.progress || d.areaId || '更新字段'})`;
     default: return t;
   }
 }
@@ -240,6 +241,59 @@ const handlers = {
       [eventId]
     );
     return { message: `已确认事件 ${eventId}` };
+  },
+
+  /**
+   * 完善计划字段（区域、负责人、进度、楼栋/楼层、劳动力等）
+   * data: { planId, areaId?, areaName?, owner?, progress?, buildingNo?, floorNo?, laborRequirements?, status? }
+   */
+  async updatePlan(data, ctx) {
+    const { planId } = data;
+    if (!planId) throw new Error('planId 必填');
+    const cur = await query('SELECT * FROM dr_daily_plans WHERE id=$1', [planId]);
+    if (cur.rows.length === 0) throw new Error(`计划 ${planId} 不存在`);
+    const existing = cur.rows[0];
+    const extra = existing.extra || {};
+
+    const sets = []; const params = []; let idx = 1;
+
+    // 顶层列：progress / status
+    if (data.progress != null && data.progress !== '') { sets.push(`progress=$${idx++}`); params.push(String(data.progress)); }
+    if (data.status) { sets.push(`status=$${idx++}`); params.push(data.status); }
+
+    // areaId 写入 area_targets（[{ areaId, name }]）的 areaId 字段
+    if (data.areaId) {
+      let areaTargets = existing.area_targets || [];
+      if (!Array.isArray(areaTargets) || areaTargets.length === 0) {
+        areaTargets = [{ areaId: data.areaId }];
+      } else {
+        areaTargets = [{ ...areaTargets[0], areaId: data.areaId }, ...areaTargets.slice(1)];
+      }
+      sets.push(`area_targets=$${idx++}::jsonb`); params.push(JSON.stringify(areaTargets));
+    }
+
+    // 其它字段统一写到 extra JSONB
+    const extraChanged = [];
+    if (data.owner) { extra.owner = data.owner; extraChanged.push('owner'); }
+    if (data.buildingNo) { extra.buildingNo = data.buildingNo; extraChanged.push('buildingNo'); }
+    if (data.floorNo) { extra.floorNo = data.floorNo; extraChanged.push('floorNo'); }
+    if (data.taskName) { extra.taskName = data.taskName; extraChanged.push('taskName'); }
+    if (data.laborRequirements) { extra.laborRequirements = data.laborRequirements; extraChanged.push('laborRequirements'); }
+    if (data.areaName) { extra.areaName = data.areaName; extraChanged.push('areaName'); }
+
+    if (extraChanged.length > 0) {
+      sets.push(`extra=$${idx++}::jsonb`);
+      params.push(JSON.stringify(extra));
+    }
+
+    if (sets.length === 0) throw new Error('没有要更新的字段');
+
+    sets.push(`updated_at=$${idx++}`);
+    params.push(new Date().toISOString());
+    params.push(planId);
+
+    await query(`UPDATE dr_daily_plans SET ${sets.join(', ')} WHERE id=$${idx}`, params);
+    return { planId, updatedFields: [...extraChanged, ...(data.progress ? ['progress'] : []), ...(data.areaId ? ['areaId'] : []), ...(data.status ? ['status'] : [])], message: `已完善计划 ${planId}` };
   }
 };
 

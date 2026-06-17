@@ -456,8 +456,17 @@ ${text}`;
   }
 
   // P0 新增：带完整上下文的对话（注入项目数据 + 行动指令）
-  async chatWithContext({ message, history = [], contextText = '' }) {
+  async chatWithContext({ message, history = [], contextText = '', permLevel = 'confirm' }) {
+    const permHint = permLevel === 'allow'
+      ? '**当前权限=直接操作**：所有 action 都会被后端自动执行（包括敏感操作），不需要用户授权。回复时直接说"已执行/已删除/已更新"+结果摘要，**不要**说"请点击授权执行"或"请确认"。'
+      : permLevel === 'strict'
+      ? '**当前权限=禁止危险操作**：敏感操作（update/delete/close 等）会被后端直接拒绝。只生成安全操作。'
+      : '**当前权限=需授权**：敏感操作会生成操作但需要用户点击 ✅ 授权卡片才执行。回复里需要明确告诉用户"请点击下方卡片上的 ✅ 授权执行 按钮"，并列出待授权操作。';
+
     const systemMsg = `你是【百草园城市更新项目】的 AI 工程助手。
+
+## 权限提示（重要）
+${permHint}
 
 ## 你的能力
 通过自然语言帮用户完成所有日报系统操作：
@@ -474,6 +483,7 @@ ${text}`;
 - updateIssue: 更新协调（issueId, title, status, priority, owner, description）
 - closeIssue: 关闭协调（issueId）
 - deleteIssue: 删除协调（issueId）
+- updatePlan: 完善日计划字段（planId 必填；可选：areaId, areaName, owner, progress, buildingNo, floorNo, laborRequirements, taskName, status）
 
 ## 匹配规则
 - 区域名 → 从下面的"项目区域"中找匹配的 id
@@ -526,6 +536,12 @@ createAttendance:
 - "删除协调 I123" / "删掉 I123" → deleteIssue: { issueId: "I123" }
 - 涉及事件/协调的修改删除必须用 eventId/issueId 引用
 - 即使用户提到的 eventId 不在今日事件中，也要生成对应操作（后端会校验是否存在）
+
+## 完善计划示例（updatePlan）
+- "把 PLAN101 区域改成 A 栋办公，负责人改成侯帅" → updatePlan: { planId: "PLAN101", areaId: "BAI-A1", owner: "侯帅" }
+- "PLAN823 进度设为 100%" / "更新 PLAN823 进度为 100%" → updatePlan: { planId: "PLAN823", progress: "100%" }
+- "PLAN751 区域改为 A 栋办公，负责人张二，进度 0%" → updatePlan: { planId: "PLAN751", areaId: "BAI-A1", owner: "张二", progress: "0%" }
+- 完善计划字段属于敏感操作，必须让用户点击授权卡片
 
 ## 注意事项
 - 一个用户消息可以包含多个操作（比如"木工完成 80%，电工完成 60%"→ 2 个 createEvent）

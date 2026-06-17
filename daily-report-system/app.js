@@ -376,6 +376,7 @@ function switchProject(projectId) {
   const prevPid = currentProjectId;
   currentProjectId = projectId;
   localStorage.setItem('current_project_id', projectId);
+  updateChatBadge();
   // 同步 mock-data.js 的 CURRENT_PROJECT_ID（确保签到/节点等按项目隔离）
   try { M.setCurrentProjectId && M.setCurrentProjectId(projectId); } catch {}
   // 重置 milestone 缓存，使下次打开时从 M.MILESTONE_PLANS[新项目] 重新读取
@@ -405,6 +406,14 @@ function switchProject(projectId) {
     // 更新徽章为当前项目未读数
     updateChatBadge();
   }, 100);
+  // 切换后加载新项目的会话并切换到最新一条（后台加载不阻塞）
+  setTimeout(() => {
+    loadSessions(projectId).then(sessions => {
+      if (sessions.length > 0) {
+        switchSession(sessions[0].id);
+      }
+    }).catch(() => {});
+  }, 500);
 }
 
 // ============================================================
@@ -8593,6 +8602,35 @@ function handleProactiveReminders(reminders) {
     }
   });
   updateChatBadge();
+  notifyInspectionResult();
+}
+
+async function notifyInspectionResult() {
+  const btn = document.getElementById('aiChatBtn');
+  if (btn) {
+    btn.classList.remove('shake');
+    void btn.offsetWidth;
+    btn.classList.add('shake');
+    setTimeout(() => btn.classList.remove('shake'), 1600);
+  }
+  try {
+    const ctx = await _ensureAudioCtx();
+    if (!ctx) return;
+    for (let i = 0; i < 3; i++) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      const t = ctx.currentTime + i * 1.0;
+      osc.frequency.setValueAtTime(880, t);
+      osc.frequency.setValueAtTime(1100, t + 0.12);
+      gain.gain.setValueAtTime(0.3, t);
+      gain.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
+      osc.start(t);
+      osc.stop(t + 0.4);
+    }
+  } catch(e) { /* 静默降级 */ }
 }
 
 function updateChatBadge() {
@@ -8841,9 +8879,12 @@ async function saveMsgToDB(sessionId, role, content) {
   }
 }
 
-async function _callChatLLM(text) {
+async function _callChatLLM(text, isContinuation = false) {
   const pid = typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan';
   const history = (_messageCache[_activeSessionId] || []).slice(-10);
+  // 用当前选中的日期（用户在日历上点击查看的日期），而不是固定的 M.TODAY，
+  // 这样用户说"今日完成"时，LLM 看到的是用户视角下的"今天"
+  const chatDate = (Array.isArray(selectedDates) && selectedDates.length > 0) ? selectedDates[0] : (typeof M !== 'undefined' && M.TODAY ? M.TODAY : '');
   try {
     const res = await fetch('http://localhost:3010/api/chat', {
       method: 'POST',
@@ -8852,7 +8893,7 @@ async function _callChatLLM(text) {
         message: text,
         history,
         projectId: pid,
-        date: typeof M !== 'undefined' && M.TODAY ? M.TODAY : '',
+        date: chatDate,
         sessionId: _activeSessionId
       })
     });
@@ -8867,15 +8908,18 @@ async function _callChatLLM(text) {
     }
 
     // 自动执行结果（安全操作）
+    let anyExecuted = false;
     if (data.results && data.results.length > 0) {
       data.results.forEach(r => {
         appendChatMessage('system', (r.ok ? '✅ ' : '❌ ') + (r.message || r.error || '执行'));
       });
       if (data.results.some(r => r.ok)) {
+        anyExecuted = true;
         _refreshAfterChat(data.results.filter(r => r.ok).map(r => r.action.type));
       }
     } else if (data.actions && data.actions.length > 0) {
       data.actions.forEach(a => executeChatAction(a));
+      anyExecuted = true;
     }
 
     // 待授权操作（敏感操作）
@@ -8883,19 +8927,62 @@ async function _callChatLLM(text) {
       data.pendingActions.forEach(pa => {
         appendPendingActionCard(pa);
       });
+      anyExecuted = true;
+    }
+
+    // 被禁止的操作（strict 模式）
+    if (data.blockedActions && data.blockedActions.length > 0) {
+      data.blockedActions.forEach(ba => {
+        appendChatMessage('system', '🛑 操作被禁止（权限：禁止危险操作）: ' + (ba.action?.type || '') + ' ' + (ba.reason || ''));
+      });
+    }
+
+    // 自动续批：根据后端 hasMore 信号，带着剩余项目清单继续完成
+    // 但如果本轮所有动作都是破坏性的（删除/关闭/取消），不要自动续批
+    const destructiveTypes = new Set(['deleteEvent', 'deleteIssue', 'closeIssue', 'deletePlan']);
+    const allExecutedTypes = [
+      ...(data.results || []).filter(r => r.ok).map(r => r.action?.type),
+      ...(data.pendingActions || []).map(pa => pa.type)
+    ];
+    const onlyDestructive = allExecutedTypes.length > 0 && allExecutedTypes.every(t => destructiveTypes.has(t));
+    if (data.hasMore && data.remainingItems && data.remainingItems.length > 0 && !onlyDestructive) {
+      const itemCount = data.remainingItems.length;
+      const itemsList = data.remainingItems.join('、');
+      setTimeout(() => {
+        const contMsg = `继续完成下面剩余 ${itemCount} 项：${itemsList}`;
+        appendChatMessage('user', `⏩ 还有 ${itemCount} 项未完成`);
+        _messageCache[_activeSessionId].push({ role: 'user', content: contMsg });
+        saveMsgToDB(_activeSessionId, 'user', contMsg);
+        showChatTyping();
+        _callChatLLM(contMsg, true);
+      }, 1200);
+    } else {
+      if (isContinuation && anyExecuted) {
+        appendChatMessage('system', '✅ 批量操作已完成');
+      }
+      if (isContinuation && anyExecuted) {
+        appendChatMessage('system', '✅ 批量操作已完成');
+      }
     }
   } catch (e) {
     hideChatTyping();
-    _mockChatReplyLocal(text);
+    _mockChatReplyLocal(text, isContinuation);
   }
 }
 
 // 渲染待授权操作卡片
 function appendPendingActionCard(pa) {
   const container = document.getElementById('aiChatMessages');
-  if (!container) return;
+  if (!container) {
+    // 容错：container 还没就绪，延迟重试
+    setTimeout(() => appendPendingActionCard(pa), 200);
+    return;
+  }
+  // 检查是否已有同 id 的卡片（防重复）
+  if (container.querySelector('[data-paid="' + pa.id + '"]')) return;
   const div = document.createElement('div');
   div.className = 'ai-message ai-message-system';
+  div.setAttribute('data-paid', pa.id);
   div.innerHTML =
     '<div class="ai-message-avatar"><img src="assets/avatar-construction-girl.png" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></div>' +
     '<div class="ai-message-bubble" style="border:1px solid rgba(245,158,11,0.3);background:rgba(245,158,11,0.06);">' +
@@ -8988,7 +9075,7 @@ async function rejectAction(btn) {
 }
 
 // 离线 mock 回复
-function _mockChatReplyLocal(text) {
+function _mockChatReplyLocal(text, isContinuation = false) {
   setTimeout(() => {
     let reply = '';
     const actions = [];
@@ -9008,6 +9095,15 @@ function _mockChatReplyLocal(text) {
     } else if (t.includes('木工') || t.includes('电工') || t.includes('安装') || t.includes('龙骨') || t.includes('砌筑') || t.includes('抹灰') || t.includes('钢筋') || t.includes('混凝土') || t.includes('完成') || t.includes('号楼')) {
       actions.push({ type: 'createEvent', data: { type: t.includes('安全') ? 'safety' : (t.includes('材料') ? 'material' : (t.includes('考勤') ? 'attendance' : 'progress')), areaId: (t.match(/(\d+)号楼/) || [])[0] ? ('BAI-B' + t.match(/(\d+)号楼/)[1]) : null, taskName: t.slice(0, 20) + (t.length > 20 ? '...' : ''), owner: '', progress: (t.match(/(\d+)%/) || [])[0] || '', headcount: parseInt((t.match(/(\d+)人/) || [])[1]) || 0, note: t }});
       reply = '已从你的描述中提取事件信息...';
+    } else if (t.includes('剩余') || isContinuation) {
+      // 续批模式模拟：如果提到剩余任务名（如"1号楼"），模拟创建事件
+      const planMatch = t.match(/(\d+)号楼/);
+      if (planMatch) {
+        actions.push({ type: 'createEvent', data: { type: 'progress', areaId: 'BAI-B' + planMatch[1], taskName: planMatch[0] + '施工', owner: '', progress: '50%', headcount: 2, note: '' }});
+        reply = '已补充 ' + planMatch[0] + ' 的进度事件...';
+      } else {
+        reply = '✅ 全部已完成（mock 模式下无更多数据）';
+      }
     } else {
       reply = '收到！我支持以下操作：\n• 📋 记录协调事宜\n• 📅 查看今日进度计划\n• 📊 生成周报\n• 🔨 描述施工进度直接录入日报\n请告诉我你需要什么帮助？';
     }
@@ -9025,6 +9121,7 @@ function _mockChatReplyLocal(text) {
   const pid = typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan';
   initChatWebSocket();
   updateChatProjectLabel();
+  updateChatBadge();
   // 预加载会话
   loadSessions(pid);
 })();
@@ -9161,6 +9258,12 @@ async function _refreshAfterChat(actionTypes) {
     }
     if (types.has('createAttendance')) { if (typeof loadDataFromAPI === 'function') await loadDataFromAPI(); }
     if (types.has('createDrawing')) { if (typeof loadDataFromAPI === 'function') await loadDataFromAPI(); }
+    if (types.has('updatePlan')) {
+      if (typeof loadDataFromAPI === 'function') { await loadDataFromAPI(); if (typeof renderDailyPlanCard === 'function') renderDailyPlanCard(); if (typeof renderFilteredEvents === 'function') renderFilteredEvents(); }
+      // 当前活动页若是 Gantt/施工段页，重新渲染
+      const curPage = document.querySelector('#reportPageNav button.active[data-page]')?.dataset.page;
+      if ((curPage === '10' || curPage === '11') && typeof switchMappingTab === 'function') switchMappingTab(curPage);
+    }
   } catch (e) { console.warn('[chat] 刷新数据失败:', e); }
 }
 
@@ -9169,17 +9272,44 @@ function appendChatMessage(role, content, skipCache) {
   const container = document.getElementById('aiChatMessages');
   if (!container) return;
   const div = document.createElement('div');
+  let html = renderMarkdownInline(content);
+  const tableIdx = html.indexOf('<table');
+  if (tableIdx > 0) {
+    let prefix = html.slice(0, tableIdx);
+    prefix = prefix.replace(/<br\s*\/?>/gi, '');
+    html = prefix + html.slice(tableIdx);
+  }
+  // DEBUG: 把清理后的 html 开头写到页面标题
+  if (html.indexOf('<table') > -1) {
+    const head = html.slice(0, html.indexOf('<table'));
+    if (head.includes('<br')) {
+      document.title = '❌ br残留: ' + head.replace(/<br>/g, '{BR}').slice(-40);
+    } else {
+      document.title = '✅ 已清理: ' + head.slice(-30);
+    }
+  }
   if (role === 'user') {
     div.className = 'ai-message user';
-    div.innerHTML = '<div class="ai-message-avatar">👤</div><div class="ai-message-bubble">' + renderMarkdownInline(content) + '</div>';
+    div.innerHTML = '<div class="ai-message-avatar">👤</div><div class="ai-message-bubble">' + html + '</div>';
   } else if (role === 'ai-proactive') {
     div.className = 'ai-message ai-proactive';
-    div.innerHTML = '<div class="ai-message-bubble" style="background:transparent;padding:0;">' + renderMarkdownInline(content) + '</div>';
+    div.innerHTML = '<div class="ai-message-bubble" style="background:transparent;padding:0;">' + html + '</div>';
   } else {
     div.className = 'ai-message ai-message-system';
-    div.innerHTML = '<div class="ai-message-avatar"><img src="assets/avatar-construction-girl.png" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></div><div class="ai-message-bubble">' + renderMarkdownInline(content) + '</div>';
+    div.innerHTML = '<div class="ai-message-avatar"><img src="assets/avatar-construction-girl.png" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></div><div class="ai-message-bubble">' + html + '</div>';
   }
   container.appendChild(div);
+  // 保险：入 DOM 后再次检查 <table> 前是否有 <br>
+  const bubble = div.querySelector('.ai-message-bubble');
+  if (bubble && bubble.innerHTML.includes('<table')) {
+    const before = bubble.innerHTML.substring(0, bubble.innerHTML.indexOf('<table'));
+    const brCount = (before.match(/<br>/g) || []).length;
+    if (brCount > 0) {
+      console.log('[br-guard] DOM内发现 ' + brCount + ' 个 <br> 在 <table> 前，清理前: ' + JSON.stringify(before.slice(-50)));
+      bubble.innerHTML = bubble.innerHTML.replace(/(?:<br\s*\/?>\s*)+(?=<table)/gi, '');
+      console.log('[br-guard] 清理完成');
+    }
+  }
   scrollChatToBottom();
   // 渲染 mermaid
   renderMermaidDiagrams();
@@ -9187,6 +9317,8 @@ function appendChatMessage(role, content, skipCache) {
 
 function renderMarkdownInline(text) {
   if (!text) return '';
+  // 预清理：吃掉表格前的所有连续换行（防止多余 <br>）
+  text = text.replace(/\n+(?=\|)/g, '\n');
   let html = _escapeHtml(text);
 
   // 1. 提取代码块 / mermaid
@@ -9246,6 +9378,10 @@ function renderMarkdownInline(text) {
     else if (/^[-*]\s+(.+)/.test(line)) {
       line = '<li style="margin:2px 0 2px 16px;">' + line.replace(/^[-*]\s+/, '') + '</li>';
     }
+    // 空行跳过（防止表格上方多余 <br>）
+    else if (line.trim() === '') {
+      continue;
+    }
     out.push(line);
   }
   if (inTable) out[out.length - 1] += '</tbody></table>';
@@ -9278,7 +9414,8 @@ function renderMarkdownInline(text) {
   html = html.replace(/<br>\s*<li /g, '<li ');
   html = html.replace(/<br>\s*<div /g, '<div ');
   html = html.replace(/<br>\s*<hr /g, '<hr ');
-  html = html.replace(/(?:<br>\s*)+<table/g, '<table');
+  // 移除所有 <table 之前的连缀 <br>（包括中间可能有空白）
+  html = html.replace(/(?:<br\s*\/?>\s*)+(?=<table)/g, '');
   html = html.replace(/(<br\s*\/?>\s*){2,}/g, '<br>');
 
   // 6. 清理空表格和坏图片
@@ -9369,33 +9506,76 @@ function createEventFromChat(data) {
 }
 
 async function handleChatPhoto(input) {
-  const file = input?.files?.[0];
-  if (!file) return;
+  const files = Array.from(input?.files || []);
+  if (files.length === 0) return;
   input.value = '';
-  appendChatMessage('user', '📷 [上传照片中...]');
-  showChatTyping();
-  try {
-    const reader = new FileReader();
-    const base64 = await new Promise((resolve, reject) => { reader.onload = () => resolve(reader.result.split(',')[1]); reader.onerror = reject; reader.readAsDataURL(file); });
-    const projectId = typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan';
-    const areas = typeof M !== 'undefined' && M.AREAS ? M.AREAS[projectId] || [] : [];
-    const plans = typeof M !== 'undefined' && M.PLANS ? M.PLANS[projectId] || [] : [];
-    const res = await fetch('http://localhost:3010/api/parse-photo', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageBase64: base64, caption: '', projectId, areas, plans })
-    });
-    hideChatTyping();
-    if (!res.ok) throw new Error('解析照片失败');
-    const result = await res.json();
-    const data = result || {};
-    createEventFromChat({ type: data.type || 'progress', areaId: data.areaId || null, taskName: data.payload?.taskName || data.taskHint || '拍照记录', owner: data.payload?.owner || '', progress: data.payload?.progress || '', headcount: data.payload?.headcount || 0, note: data.caption || '' });
-    appendChatMessage('system', '📸 照片已解析并保存为日报事件。');
-  } catch (e) {
-    hideChatTyping();
-    appendChatMessage('system', '⚠️ 照片解析失败：' + e.message + '，已降级为普通记录。');
-    createEventFromChat({ type: 'progress', taskName: file.name || '拍照记录', note: '照片上传记录' });
+  const total = files.length;
+  const single = total === 1;
+  const projectId = typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan';
+  const areas = typeof M !== 'undefined' && M.AREAS ? M.AREAS[projectId] || [] : [];
+  const plans = typeof M !== 'undefined' && M.PLANS ? M.PLANS[projectId] || [] : [];
+  if (single) {
+    appendChatMessage('user', '📷 [上传照片中...]');
+  } else {
+    appendChatMessage('user', '📷 批量上传 ' + total + ' 张照片，逐一识别中...');
   }
+  showChatTyping();
+  let successCount = 0;
+  let failCount = 0;
+  const results = [];
+  for (let i = 0; i < total; i++) {
+    const file = files[i];
+    const seqLabel = single ? '' : '第 ' + (i + 1) + '/' + total + ' 张 ';
+    try {
+      document.getElementById('aiChatInput')?.setAttribute('placeholder', seqLabel + '识别中...');
+      const reader = new FileReader();
+      const base64 = await new Promise(function(resolve, reject) { reader.onload = function() { resolve(reader.result.split(',')[1]); }; reader.onerror = reject; reader.readAsDataURL(file); });
+      const res = await fetch('http://localhost:3010/api/parse-photo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: base64, caption: '', projectId, areas, plans })
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const result = await res.json();
+      const data = result || {};
+      const ev = { type: data.type || 'progress', areaId: data.areaId || null, taskName: data.payload?.taskName || data.taskHint || file.name || '拍照记录', owner: data.payload?.owner || '', progress: data.payload?.progress || '', headcount: data.payload?.headcount || 0, note: data.caption || '' };
+      _createEventFromChatSilent(ev);
+      results.push({ file: file.name, ok: true, taskName: ev.taskName, type: ev.type, areaId: ev.areaId, progress: ev.progress, headcount: ev.headcount });
+      successCount++;
+    } catch (e) {
+      failCount++;
+      _createEventFromChatSilent({ type: 'progress', taskName: file.name || '拍照记录', note: '照片上传记录（识别失败）' });
+      results.push({ file: file.name, ok: false, error: e.message });
+    }
+  }
+  hideChatTyping();
+  document.getElementById('aiChatInput')?.setAttribute('placeholder', '说进度、协调、考勤等，一键录入...');
+  if (single) {
+    if (successCount > 0) appendChatMessage('system', '📸 照片已解析并保存为日报事件。');
+    else appendChatMessage('system', '⚠️ 照片解析失败，已降级为普通记录。');
+  } else {
+    let summary = '🎉 批量识别完成：共 ' + total + ' 张，成功 ' + successCount + ' 张';
+    if (failCount > 0) summary += '，失败 ' + failCount + ' 张';
+    summary += '\n\n| 序号 | 文件名 | 类型 | 任务 | 区域 | 进度 | 人数 |\n|---|---|---|---|---|---|---|\n';
+    results.forEach(function(r, idx) {
+      summary += '| ' + (idx + 1) + ' | ' + (r.file || '') + ' | ' + (r.ok ? (r.type || 'progress') : '❌') + ' | ' + (r.ok ? (r.taskName || '-') : (r.error || '失败')) + ' | ' + (r.ok ? (r.areaId || '-') : '-') + ' | ' + (r.ok ? (r.progress || '-') : '-') + ' | ' + (r.ok ? (r.headcount || '-') : '-') + ' |\n';
+    });
+    appendChatMessage('system', summary);
+  }
+}
+
+function _createEventFromChatSilent(data) {
+  if (typeof M === 'undefined' || !M.EVENTS) return;
+  const projectId = typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan';
+  const today = M.TODAY || new Date().toISOString().slice(0, 10);
+  const ev = { id: 'E' + String(Date.now()).slice(-3), projectId: projectId, date: today, time: new Date().toTimeString().slice(0, 5), type: data.type || 'progress', areaId: data.areaId || null, planId: data.planId || undefined, payload: { taskName: data.taskName || '', owner: data.owner || '', progress: typeof data.progress === 'string' ? data.progress : (data.progress != null ? data.progress + '%' : ''), headcount: data.headcount || 0, description: data.note || '' }, submitter: '张明', source: 'chat', confidence: 0.9, status: 'draft', note: data.note || '' };
+  M.EVENTS.unshift(ev);
+  if (M.saveEventsToStorage) M.saveEventsToStorage();
+  if (typeof renderFilteredEvents === 'function') renderFilteredEvents();
+  if (typeof renderDailyPlanCard === 'function') renderDailyPlanCard();
+  if (typeof renderStats === 'function') renderStats();
+  if (typeof updateCalendar === 'function') updateCalendar();
+  fetch('http://localhost:3010/api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ev) }).catch(function(){});
 }
 
 let _chatRecognition = null;
@@ -9428,6 +9608,102 @@ function toggleChatVoice() {
   };
   _chatRecogRunning = true; btn.classList.add('recording'); btn.textContent = '⏺';
   _chatRecognition.start();
+}
+
+// ============== 系统设置 ==============
+let _settingsCache = { llm_permission: { level: 'confirm' }, inspection_times: { times: ['08:30', '13:00', '17:30'], interval: 60 } };
+
+async function loadSettings() {
+  try {
+    const res = await fetch('http://localhost:3010/api/settings');
+    if (res.ok) _settingsCache = await res.json();
+  } catch {}
+  return _settingsCache;
+}
+
+function openSettings() {
+  loadSettings().then(s => {
+    _settingsCache = s;
+    const perm = s.llm_permission?.level || 'confirm';
+    document.querySelectorAll('input[name="llmPermission"]').forEach(el => { el.checked = el.value === perm; });
+    renderInspectionTimes(s.inspection_times?.times || ['08:30', '13:00', '17:30']);
+    const intervalSel = document.getElementById('inspectionInterval');
+    if (intervalSel) intervalSel.value = String(s.inspection_times?.interval || 60);
+    showModal('modalSettings');
+  });
+}
+
+function renderInspectionTimes(times) {
+  const list = document.getElementById('inspectionTimesList');
+  if (!list) return;
+  list.innerHTML = times.map((t, i) =>
+    '<span class="settings-time-chip">' + t +
+    '<span class="remove" onclick="removeInspectionTime(' + i + ')">✕</span></span>'
+  ).join('');
+  list._times = times;
+}
+
+function removeInspectionTime(idx) {
+  const list = document.getElementById('inspectionTimesList');
+  if (!list || !list._times) return;
+  list._times.splice(idx, 1);
+  renderInspectionTimes(list._times);
+}
+
+function addInspectionTime() {
+  const list = document.getElementById('inspectionTimesList');
+  if (!list || !list._times) return;
+  const now = new Date();
+  const h = String(now.getHours()).padStart(2, '0');
+  const m = String(now.getMinutes()).padStart(2, '0');
+  list._times.push(h + ':' + m);
+  list._times.sort();
+  renderInspectionTimes(list._times);
+}
+
+function onPermissionChange() {}
+function onInspectionChange() {}
+let _audioCtx = null;
+async function _ensureAudioCtx() {
+  if (!_audioCtx) {
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) return null;
+    _audioCtx = new Ctor();
+  }
+  if (_audioCtx.state === 'suspended') await _audioCtx.resume();
+  return _audioCtx;
+}
+// 首次用户点击时预创建 audio context（解锁浏览器的音频限制）
+document.addEventListener('click', () => { if (!_audioCtx) { const Ctor = window.AudioContext || window.webkitAudioContext; if (Ctor) _audioCtx = new Ctor(); } }, { once: true });
+
+async function saveSettings() {
+  const permEl = document.querySelector('input[name="llmPermission"]:checked');
+  const permLevel = permEl?.value || 'confirm';
+  const list = document.getElementById('inspectionTimesList');
+  const interval = parseInt(document.getElementById('inspectionInterval')?.value || '60');
+  const payload = {
+    llm_permission: { level: permLevel },
+    inspection_times: { times: list?._times || ['08:30', '13:00', '17:30'], interval }
+  };
+  try {
+    const res = await fetch('http://localhost:3010/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    // 通知后端更新巡检调度
+    await fetch('http://localhost:3010/api/settings/inspection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ times: list?._times || ['08:30', '13:00', '17:30'], interval })
+    });
+    _settingsCache = payload;
+    showToast('设置已保存', 'success');
+    closeModal('modalSettings');
+  } catch (e) {
+    showToast('保存失败: ' + e.message, 'error');
+  }
 }
 
 function _escapeHtml(s) {

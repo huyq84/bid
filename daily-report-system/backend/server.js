@@ -214,19 +214,26 @@ app.post('/api/chat', async (req, res) => {
     const pid = projectId || 'baicaoyuan';
     const d = date || new Date().toISOString().slice(0, 10);
 
+    // 0. 读取权限级别
+    let permLevel = 'confirm';
+    try {
+      const permRes = await query("SELECT value FROM dr_settings WHERE key='llm_permission'");
+      if (permRes.rows.length > 0) permLevel = permRes.rows[0].value.level || 'confirm';
+    } catch {}
+
     // 1. 拉取项目上下文
     const ctx = await buildChatContext(pid, d);
-    const ctxText = contextToText(ctx);
+    const ctxText = contextToText(ctx) + (permLevel ? '\n\n## 当前权限\n' + permLevel : '');
 
     let reply, actions, source = 'mock';
     try {
-      const result = await llm.chatWithContext({ message, history, contextText: ctxText });
+      const result = await llm.chatWithContext({ message, history, contextText: ctxText, permLevel });
       reply = result.reply;
       actions = result.actions;
       source = 'llm';
     } catch (e) {
       console.warn('[chat] LLM 失败，降级 mock:', e.message);
-      const mock = _mockChatReply(message);
+      const mock = _mockChatReply(message, permLevel);
       reply = mock.reply;
       actions = mock.actions;
     }
@@ -235,10 +242,13 @@ app.post('/api/chat', async (req, res) => {
     const enrichedCtx = { ...ctx, date: d, projectId: pid, plans: ctx.today.plans };
     const results = [];
     const pendingActions = [];
+    const blockedActions = [];
 
     for (const action of (actions || [])) {
-      if (isSensitiveAction(action.type)) {
-        // 敏感操作 -> 暂存，等用户授权
+      const sensitive = isSensitiveAction(action.type);
+      if (sensitive && permLevel === 'strict') {
+        blockedActions.push({ action, reason: '权限设置为禁止危险操作' });
+      } else if (sensitive && permLevel === 'confirm') {
         const paId = 'pa_' + (++_paSeq);
         _pendingActions.set(paId, { action, ctx: enrichedCtx });
         pendingActions.push({
@@ -248,13 +258,38 @@ app.post('/api/chat', async (req, res) => {
           data: action.data
         });
       } else {
-        // 安全操作 -> 立即执行
+        // allow 模式 或 安全操作 → 立即执行
         const r = await executeAction(action, enrichedCtx);
         results.push({ action, ...r });
       }
     }
 
-    res.json({ reply, actions, results, pendingActions, latencyMs: Date.now() - start, source, sessionId });
+    // 4. 任何模式下，若没有待授权操作（allow 已自动执行 / strict 被拒绝），清掉 reply 里误导的"请授权"措辞
+    if (pendingActions.length === 0 && reply && (permLevel === 'allow' || permLevel === 'strict' || (permLevel === 'confirm' && results.length > 0))) {
+      reply = reply
+        .replace(/请点击(?:下方)?卡片上的\s*✅\s*授权执行\s*按钮[。.，,！!]*/g, '')
+        .replace(/需要您授权确认[。.，,！!]*/g, '')
+        .replace(/请(?:您)?(?:点击|确认|授权)[。.，,！!]*/g, '')
+        .replace(/已(?:生成|为你生成).*?操作[，,]?\s*/g, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+    }
+
+    // 3. 计算是否还有待处理项目（用于续批）
+    let hasMore = false;
+    let remainingItems = [];
+    if (results.length > 0 || pendingActions.length > 0) {
+      try {
+        const freshCtx = await buildChatContext(pid, d);
+        const recordedNames = new Set(freshCtx.today.events.map(e => e.taskName));
+        remainingItems = freshCtx.today.plans
+          .filter(p => !recordedNames.has(p.name))
+          .map(p => `${p.name}（${(p.areas || []).join('/') || ''} 负责人:${p.owner || '-'} 进度:${p.progress || '0%'}）`);
+        hasMore = remainingItems.length > 0;
+      } catch {}
+    }
+
+    res.json({ reply, actions, results, pendingActions, blockedActions, hasMore, remainingItems, latencyMs: Date.now() - start, source, sessionId, permLevel });
   } catch (e) {
     console.error('[chat] error:', e);
     const mock = _mockChatReply(req.body?.message || '');
@@ -287,6 +322,19 @@ app.post('/api/chat/reject', async (req, res) => {
   res.json({ ok: true });
 });
 
+// 更新巡检设置（立即生效）
+app.post('/api/settings/inspection', async (req, res) => {
+  try {
+    const { times, interval } = req.body;
+    if (times) _inspectionTriggers = times.map(t => { const p = t.split(':').map(Number); return [p[0] || 8, p[1] || 0]; });
+    if (interval && interval >= 1) _inspectionInterval = interval;
+    clearInterval(schedulerInterval);
+    schedulerInterval = setInterval(scheduler, _inspectionInterval * 1000);
+    scheduler(); // 立即执行一次，防止跨过本周期的触发时间
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // 手动触发巡检（前端可调用，立即执行并推送）
 app.post('/api/chat/inspect', async (req, res) => {
   try {
@@ -297,22 +345,26 @@ app.post('/api/chat/inspect', async (req, res) => {
   }
 });
 
-function _mockChatReply(text) {
+function _mockChatReply(text, permLevel = 'confirm') {
   const t = text || '';
+  const isAllow = permLevel === 'allow';
+  const isStrict = permLevel === 'strict';
+  const ackText = isAllow ? '已自动' : '将要';
+  const authHint = isAllow ? '' : '需要您授权确认。';
 
   // 删除/编辑事件
   const delMatch = t.match(/(?:删除|删掉|移除|去掉)\s*[Ee]?(\w+)/);
   if (delMatch) {
-    return { reply: '将要删除事件 ' + delMatch[0] + '，需要您授权确认。', actions: [{ type: 'deleteEvent', data: { eventId: 'E' + delMatch[1] } }] };
+    return { reply: ackText + '删除事件 ' + delMatch[0] + (isAllow ? '。' : '，' + authHint), actions: [{ type: 'deleteEvent', data: { eventId: 'E' + delMatch[1] } }] };
   }
   const editMatch = t.match(/(?:把|将|给)?\s*[Ee]?(\w+)\s*(?:进度|改成|改为|更新)?\s*(\d+%)?/);
   if (editMatch && (t.includes('进度') || t.includes('改成') || t.includes('改为') || t.includes('更新'))) {
-    return { reply: '将要更新事件 ' + editMatch[1] + '，需要您授权确认。', actions: [{ type: 'updateEvent', data: { eventId: 'E' + editMatch[1], progress: editMatch[2] || '' } }] };
+    return { reply: ackText + '更新事件 ' + editMatch[1] + (isAllow ? '。' : '，' + authHint), actions: [{ type: 'updateEvent', data: { eventId: 'E' + editMatch[1], progress: editMatch[2] || '' } }] };
   }
   // 关闭/删除协调
   const closeMatch = t.match(/(?:关闭|关掉|完成|解决)\s*[Ii]?(\w+)/);
   if (closeMatch) {
-    return { reply: '将要关闭协调 ' + closeMatch[0] + '，需要您授权确认。', actions: [{ type: 'closeIssue', data: { issueId: 'I' + closeMatch[1] } }] };
+    return { reply: ackText + '关闭协调 ' + closeMatch[0] + (isAllow ? '。' : '，' + authHint), actions: [{ type: 'closeIssue', data: { issueId: 'I' + closeMatch[1] } }] };
   }
 
   if (t.includes('协调') || t.includes('记录') || t.includes('设计院') || t.includes('图纸') || t.includes('配合')) {
@@ -416,29 +468,56 @@ async function runInspection() {
   }
 }
 
-// 调度器：每小时检查一次（实际触发由 _lastRunHour 控制）
+// 调度器：每分钟检查，触发时间从设置读取
 let _lastRunHour = -1;
+let _inspectionTriggers = [[8, 30], [13, 0], [17, 30]];
+let _inspectionInterval = 60;
+
+async function loadInspectionSettings() {
+  try {
+    const res = await query("SELECT value FROM dr_settings WHERE key='inspection_times'");
+    if (res.rows.length > 0) {
+      const val = res.rows[0].value;
+      if (val.times && Array.isArray(val.times)) {
+        _inspectionTriggers = val.times.map(t => {
+          const parts = t.split(':').map(Number);
+          return [parts[0] || 8, parts[1] || 0];
+        });
+      }
+      if (val.interval && val.interval >= 1) _inspectionInterval = val.interval;
+    }
+  } catch {}
+}
+
 function scheduler() {
   const now = new Date();
-  const hour = now.getHours();
-  const minute = now.getMinutes();
-  // 在 8:30, 13:00, 17:30 触发
-  const triggers = [[8, 30], [13, 0], [17, 30]];
-  for (const [h, m] of triggers) {
-    if (hour === h && minute === m && _lastRunHour !== hour) {
-      _lastRunHour = hour;
+  const totalMinutes = now.getHours() * 60 + now.getMinutes();
+  // 窗口宽度 = max(1, interval/60) 分钟，防止跳过触发点
+  const windowMin = Math.max(1, Math.ceil(_inspectionInterval / 60));
+  for (const [h, m] of _inspectionTriggers) {
+    const triggerMin = h * 60 + m;
+    // 当前时间在 [触发时间, 触发时间+窗口) 内，且该小时未跑过
+    if (totalMinutes >= triggerMin && totalMinutes < triggerMin + windowMin && _lastRunHour !== h) {
+      _lastRunHour = h;
       runInspection();
       return;
     }
   }
   // 启动时跑一次（如果是 8:00-22:00 之间）
-  if (_lastRunHour === -1 && hour >= 8 && hour <= 22) {
-    _lastRunHour = -2; // 防止启动后立即重复
+  if (_lastRunHour === -1 && totalMinutes >= 480 && totalMinutes <= 1320) {
+    _lastRunHour = -2;
     setTimeout(runInspection, 5000);
   }
 }
-setInterval(scheduler, 60 * 1000);  // 每分钟检查一次
-setTimeout(scheduler, 3000);  // 启动 3 秒后初始化
+let schedulerInterval = setInterval(scheduler, 60000);
+
+// 第一次启动后加载设置并重新设置 interval
+setTimeout(async () => {
+  await loadInspectionSettings();
+  clearInterval(schedulerInterval);
+  schedulerInterval = setInterval(scheduler, _inspectionInterval * 1000);
+  scheduler();
+}, 3000);
 
 // ==================== 启动 ====================
 const PORT = process.env.BACKEND_PORT || 3010;
@@ -483,8 +562,6 @@ server.listen(PORT, '0.0.0.0', async () => {
   wss.on('connection', (ws) => {
     connectedClients.add(ws);
     console.log(`[WS] 客户端连接 (当前 ${connectedClients.size} 个)`);
-    // 连接时主动推一次巡检
-    setTimeout(() => runInspection(), 1000);
     ws.on('close', () => {
       connectedClients.delete(ws);
       console.log(`[WS] 客户端断开 (剩余 ${connectedClients.size} 个)`);

@@ -125,6 +125,26 @@ export async function buildChatContext(projectId, date) {
  */
 export function contextToText(ctx) {
   const lines = [];
+
+  // 计算待处理项目：进行中的计划里，哪些还没有对应的已录事件
+  const planEventNames = new Set(ctx.today.events.map(e => e.taskName));
+  const pendingPlans = ctx.today.plans.filter(p => !planEventNames.has(p.name));
+
+  lines.push(`## 批量操作规则（重要）`);
+  lines.push(`- 如果用户要求批量处理（如"完善今日计划""录入所有"），你必须一次性输出所有操作，严禁分批`);
+  lines.push(`- 对照"待处理项目"清单，对每一项生成对应的 action`);
+  lines.push(`- 例如有 5 条待处理项目，就输出 5 个 createEvent 或对应的 action`);
+  lines.push(`- 如果某些项目不需要操作，在 reply 中说明原因`);
+  lines.push('');
+  if (pendingPlans.length > 0) {
+    lines.push(`## 待处理项目（共 ${pendingPlans.length} 项）`);
+    pendingPlans.forEach((p, i) => {
+      const laborStr = (p.labor || []).map(l => `${l.trade || ''} × ${l.count || 0}人`).join('、');
+      lines.push(`  ${i+1}. [${p.id}] ${p.name} | 区域: ${(p.areas || []).join('/') || '未指定'} | 负责人: ${p.owner || '未指定'} | 进度: ${p.progress || '0%'} | 劳动力: ${laborStr || '未指定'}`);
+    });
+    lines.push('');
+  }
+
   lines.push(`## 可用操作（返回 JSON actions 数组，每项含 type + data）`);
   lines.push(`安全操作（自动执行）：`);
   lines.push(`  - createEvent: [必填] type（事件类型）+ taskName（任务名称）| [可选] areaId（区域）, owner（负责人）, progress（进度百分比）, headcount（总人数=各工种人数之和）, laborRequirements（工种×人数明细）, note（备注）, planId（计划ID）`);
@@ -138,6 +158,7 @@ export function contextToText(ctx) {
   lines.push(`  - updateIssue: [必填] issueId | [可选] title, status, priority, owner, description`);
   lines.push(`  - closeIssue: [必填] issueId`);
   lines.push(`  - deleteIssue: [必填] issueId`);
+  lines.push(`  - updatePlan: [必填] planId | [可选] areaId（区域）, areaName, owner（负责人）, progress（进度）, buildingNo（楼栋）, floorNo（楼层）, laborRequirements（工种×人数）, taskName, status（完善计划字段）`);
   lines.push(``);
   lines.push(`## 反问规则`);
   lines.push(`- 缺少[必填]字段时必须反问用户，不要生成 action`);

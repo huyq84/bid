@@ -275,6 +275,13 @@ CREATE TABLE IF NOT EXISTS dr_page03_photo (
   caption TEXT DEFAULT '管理人员合影',
   updated_at TEXT
 );
+
+-- 系统设置（key-value）
+CREATE TABLE IF NOT EXISTS dr_settings (
+  key TEXT PRIMARY KEY,
+  value JSONB NOT NULL DEFAULT '{}',
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
 `;
 
 // Seed data from mock-data.js
