@@ -7,7 +7,8 @@
 //   - 响应：{content: [{type: 'text', text: '...'}], ...}
 // ============================================================
 
-import { executeTool, getToolDescriptions } from './llm-tools.js';
+import { executeTool } from './llm-tools.js';
+import { createMemory, getMemorySummary, recordQuery, recordAction } from './chat-memory.js';
 
 export class MinMaxClient {
   constructor(config) {
@@ -468,7 +469,7 @@ ${text}`;
       ? '当前权限=禁止危险操作：敏感操作（update/delete/close 等）会被拒绝。只生成安全操作。'
       : '当前权限=需授权：敏感操作需要用户点击 ✅ 授权卡片才执行。请列出待授权操作告知用户。';
 
-    const systemMsg = `你是一个施工现场日报系统的 AI 工程助手。
+    let systemMsg = `你是施工日报系统的 AI 助手。**最重要：你必须用 tool_use 调用工具，不要只在文字里描述"已完成"。** 文字描述不等于实际执行——只有调工具才有效。
 
 ## 核心原则
 - 不确定用户意图时，**先用工具查数据**，不要假设用户要录入
@@ -476,94 +477,412 @@ ${text}`;
 - 用户提到具体任务+进度/人数时才是录入（如"木工完成大堂龙骨 80%"）
 - 先思考再行动：**宁可多查一步，不要贸然操作**
 
-## 可用工具（优先用工具查数据，再做决定）
-${getToolDescriptions()}
+## ✅ 工具调用协议（**必须严格遵守**）
+**你拥有 native tool_use 能力**——直接调用系统提供的工具，不要输出文本 JSON 块来"模拟"工具调用。
+
+**工作流程：**
+1. 需要数据时，**直接调用对应的工具**（如 queryEvents / queryPlans / queryIssues / getStats / comparePlansVsActuals）
+2. 拿到工具返回结果后，**基于真实数据**回复用户
+3. 需要写入数据时：
+   - **安全操作**（创建事件 createEvent、创建协调 createIssue）：直接调用对应的 mutate 工具
+   - **敏感操作**（修改 updateEvent/updateIssue/updatePlan、关闭 closeIssue、删除 deleteEventsByQuery）：
+     - 如果**用户已明确指令**（如"把 E123 改成 90%"、"删掉今天木工的所有事件"、"关掉 I007"）：**直接调 mutate 工具的 dryRun=false 执行**（前提：permLevel=allow；如果 permLevel=confirm 会被系统拦截走待授权卡片，不用担心）
+     - 如果**用户描述模糊**（如"看看那条事件能不能改"）：先 dryRun=true 预览，让用户确认
+4. 不要在文本里输出 \`\`\`json {"tool":"..."} \`\`\` 这种"老格式"——这会被系统忽略
+
+**⚠️ 关于 confirm 模式**：当 permLevel=confirm 时，敏感操作必须**直接调用 mutate 工具的 dryRun=false**——系统会自动把 action 推为"待授权卡片"（pendingActions），前端会显示 ✅ 按钮让用户点击。**不要在 confirm 模式下"等用户在文字里确认"——必须调工具！** 文字确认不等于系统授权。
+
+## 可用工具（通过 native tool_use 调用）
+- **查询类（5 个）**：
+  - queryEvents: 查询日报事件（按日期/类型/区域/状态/任务名）
+  - queryPlans: 查询施工计划
+  - queryIssues: 查询协调事项
+  - getStats: 统计摘要
+  - comparePlansVsActuals: 计划 vs 实际对比
+
+- **写入类（6 个，全部支持 dryRun）**：
+  - createEvent: 创建日报事件（safe，**直接调用**）
+  - createIssue: 创建协调事项（safe，**直接调用**）
+  - updateEvent: 修改事件（sensitive，先 dryRun 后真做）
+  - updateIssue: 修改协调（sensitive，先 dryRun 后真做）
+  - closeIssue: 关闭协调（sensitive，先 dryRun 后真做）
+  - updatePlan: 完善计划（sensitive，先 dryRun 后真做）
+  - deleteEventsByQuery: 按条件批量删除（sensitive，先 dryRun 后真做）
 
 工具用法示例：
-- 用户问"今天完成的工作都完善吗" → 先调 comparePlansVsActuals 查对比数据，再回复
-- 用户问"今天做了啥" → 先调 queryEvents 查今日事件，再回复
-- 用户问"今日计划有什么" → 先调 queryPlans 查今日计划，再回复
-- 用户说"木工完成80%" → 不需要查数据，直接生成 createEvent
-
-## 可用操作（最终输出给用户的 actions）
-安全操作（自动执行）：
-- createEvent: 录入今日完成。data: { type(必填), taskName(必填), areaId, areaName, planId, owner, progress, headcount, laborRequirements, completionType(planned|unplanned), buildingNo, floorNo, note }
-- createIssue: 录协调事宜。data: { title(必填), type, areaId, priority, proposeDept, cooperateDept, owner, description }
-- createAttendance: 签到。data: { records: { managerId, present, reason } }
-- confirmEvent: 确认事件。data: { eventId }
-
-敏感操作（需授权）：
-- updateEvent: data: { eventId(必填), taskName, owner, progress, headcount, laborRequirements, type, status, areaId, completionType, buildingNo, floorNo }
-- deleteEvent: data: { eventId(必填) }
-- batchDelete: data: { date(必填YYYY-MM-DD), 至少一个其他条件: timeFrom/timeTo/status/type/planId/areaId/taskNameContains/ids }
-- updateIssue: data: { issueId(必填), title, status, priority, owner, description }
-- closeIssue: data: { issueId(必填) }
-- deleteIssue: data: { issueId(必填) }
-- updatePlan: data: { planId(必填), areaId, areaName, owner, progress, buildingNo, floorNo, laborRequirements, taskName, status }
-
-字段约定：始终用驼峰（taskName, areaId, laborRequirements, completionType, buildingNo, floorNo, headcount, proposeDept, cooperateDept）
-
-## 项目数据
-${contextText}
+- 用户问"今天完成的工作都完善吗" → 调 comparePlansVsActuals 查对比数据
+- 用户问"今天做了啥" → 调 queryEvents 查今日事件
+- 用户问"今日计划有什么" → 调 queryPlans 查今日计划
+- 用户说"木工完成80%" → 直接调 createEvent（safe，不需要 dryRun）
+- 用户说"把 E123 改成 90%" → 先调 queryEvents 验证 ID 真实存在，再调 updateEvent(dryRun=true)，告诉用户，确认后调 updateEvent(dryRun=false)
+- 用户说"删掉今天的草稿" → 先调 deleteEventsByQuery(dryRun=true) 列出匹配项，确认后调 deleteEventsByQuery(dryRun=false, forceDelete=true)
 
 ## 权限
 ${permHint}
 
-## 回复格式（非常重要，请严格遵守）
-**情况 1 — 需要查询数据时：** 只输出下面这一行 JSON，不要加其他文字：
-{"tool":"工具名","params":{参数}}
-示例：{"tool":"queryEvents","params":{"date":"2026-06-17"}}
+## 项目数据
+${contextText}
 
-**情况 2 — 已有足够信息回复用户时：** 直接输出回复内容（纯文本或 Markdown），可以任意包含【】「」"" 等符号。
+## 字段约定
+始终用驼峰：taskName, areaId, laborRequirements, completionType, buildingNo, floorNo, headcount, proposeDept, cooperateDept, planId, eventId, issueId
 
-**⚠️ 如果执行操作，必须在回复末尾附加 JSON 代码块，否则操作无效：**
-\`\`\`json
-{"actions":[{"type":"createEvent","data":{"taskName":"大堂龙骨","progress":"80%"}}]}
-\`\`\`
-
-**规则（必须遵守）：**
-- 任何操作都必须在回复末尾输出 actions JSON 代码块
-- **不能只描述操作而不输出 actions JSON**。只描述操作但不输出 JSON = 操作不会执行。系统只通过 JSON 代码块中的 actions 来执行操作，回复里的文字描述仅供用户阅读，不会触发任何实际操作。
-- 一个回复可以包含多个 actions（如同时录木工+电工）
-- actions 里不需要的字段不传
-- 不需要操作时输出纯文本，不要 JSON 代码块
-- 先调工具查数据，看到结果后再决定下一步
-- 缺必填字段时反问用户（如没说明 taskName，反问"请问要记录什么任务？"）
-- 可选字段缺失直接留空，不反问
+## 决策规则
+- **缺必填字段时反问用户**（如没说明 taskName，反问"请问要记录什么任务？"）
+- **可选字段缺失直接留空**，不反问
+- **ID 字段**（eventId/issueId/planId）**严禁编造**——必须先调 query 工具拿到真实 ID
+- **区域 ID**（areaId）必须从项目数据的"项目区域"列表中选；找不到就置空 areaId 并填 areaName
 - 不要输出任何图片引用，用纯文本或 Markdown 表格
 - **回复内容里不要有思考过程**，思考过程不输出给用户。回复要说人话，像工友之间交流一样自然。
 `;
 
     const messages = this._buildMessages(history, message);
+    const nativeTools = this._getNativeTools();  // ✅ 原生 tool_use schema
+
+    // ✅ 短期对话记忆
+    const memory = createMemory();
+
+    // ✅ 长期记忆 — 注入摘要到 system prompt
+    import('./long-term-memory.js').then(async m => {
+      const summary = await m.getMemorySummary(pi);
+      if (summary) systemMsg += '\n\n' + summary;
+    }).catch(() => {});
 
     // ReAct 循环
     const maxIters = 6;
+    const mutateActions = [];  // ✅ 收集 mutate 工具产生的 actions（confirm 模式下的待授权 + allow 模式下的已执行）
     for (let i = 0; i < maxIters; i++) {
-      const body = await this._call(systemMsg, messages);
-      const text = body?.content?.[0]?.text || '';
-      if (!text) return { reply: '抱歉，暂时无法处理，请重试。', actions: [] };
+      // 注入 memory summary（每轮可能更新）
+      const memSummary = getMemorySummary(memory);
+      if (memSummary) systemMsg += '\n\n' + memSummary;
 
-      // 1) 尝试提取工具调用 JSON：{"tool":"xxx","params":{...}}
-      const toolCall = this._extractToolCall(text);
-      if (toolCall) {
-        try {
-          const result = await executeTool(toolCall.tool, toolCall.params || {}, { projectId: pi, date: dt });
-          messages.push({ role: 'assistant', content: text });
-          messages.push({ role: 'user', content: `工具 "${toolCall.tool}" 返回：\n${JSON.stringify(result, null, 2)}\n\n根据这个结果继续。` });
-        } catch (e) {
-          messages.push({ role: 'assistant', content: text });
-          messages.push({ role: 'user', content: `工具 "${toolCall.tool}" 执行失败: ${e.message}。请跳过继续。` });
+      const body = await this._call(systemMsg, messages, { tools: nativeTools, temperature: 0.2 });
+      const content = body?.content || [];
+      if (content.length === 0) return { reply: '抱歉，暂时无法处理，请重试。', actions: [], toolsCalled: 0, memory };
+
+      // 1) ✅ 优先用原生 tool_use 协议
+      const toolUseBlocks = content.filter(b => b.type === 'tool_use');
+      if (toolUseBlocks.length > 0) {
+        // 把 assistant 的完整 content 数组（包含 text 和 tool_use）追加到消息
+        messages.push({ role: 'assistant', content });
+
+        // 依次执行每个 tool_use，把结果作为 tool_result 回灌
+        const toolResults = [];
+        for (const toolUse of toolUseBlocks) {
+          try {
+            const result = await executeTool(
+              toolUse.name,
+              toolUse.input || {},
+              { projectId: pi, date: dt, permLevel }  // ✅ 把 permLevel 传给工具
+            );
+            // ✅ 如果 mutate 工具返回了 pendingAction（如 confirm 模式），收集起来
+            if (result?.pendingAction) {
+              mutateActions.push({ ...result.pendingAction, _source: 'tool' });
+            } else if (result?.ok && result?.data?.id && toolUse.name.match(/^(create|update|close)/)) {
+              // ✅ mutate 工具成功执行（allow 模式），把它的 action 也收集起来（让前端能记录）
+              mutateActions.push({ type: toolUse.name, data: toolUse.input, _source: 'tool', _result: result });
+            }
+            // ✅ 记录到短期记忆
+            const resultCount = Array.isArray(result) ? result.length :
+              (result?.data?.deletedCount || result?.data?.count || 0);
+            recordQuery(memory, toolUse.name, toolUse.input, resultCount);
+            if (toolUse.name.match(/^(create|update|close|delete)/)) {
+              recordAction(memory, toolUse.name, result?.eventId || result?.issueId || result?.data?.id || toolUse.input?.eventId || toolUse.input?.issueId);
+            }
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: typeof result === 'string' ? result : JSON.stringify(result, null, 2)
+            });
+          } catch (e) {
+            const recovery = this._classifyError(e);
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              is_error: true,
+              content: `${e.message}\n\n[恢复建议] ${recovery}`
+            });
+          }
         }
-        continue;
+        messages.push({ role: 'user', content: toolResults });
+        continue;  // 进入下一轮，让 LLM 继续思考
       }
 
-      // 2) 最终回复：文本 + 可选的 actions JSON 块
-      const actions = this._extractActions(text);
-      const reply = actions.length > 0 ? text.replace(/```json[\s\S]*?```/, '').trim() : text;
-      return { reply, actions };
+      // 2) 没有 tool_use，取 text 作为最终回复
+      const text = content.find(b => b.type === 'text')?.text || '';
+      if (!text) {
+        return { reply: '抱歉，暂时无法处理，请重试。', actions: mutateActions, toolsCalled: 0, memory };
+      }
+
+      // 3) 兼容路径：LLM 可能输出 ```json {"actions":[...]} ``` 块（MiniMax-M3 训练倾向）
+      //    把它解析后并入 mutateActions
+      const legacyActions = this._extractActions(text);
+      // ✅ 合并：mutate 工具产生的 actions + LLM 输出 JSON 块里的 actions
+      const allActions = [...mutateActions, ...legacyActions];
+      const reply = allActions.length > 0 ? text.replace(/```json[\s\S]*?```/, '').trim() : text;
+      return { reply, actions: allActions, toolsCalled: 0, memory };
     }
 
-    return { reply: '抱歉，处理步骤太多无法完成，请简化问题。', actions: [] };
+    // ✅ 保存长期偏好（异步，不阻塞返回）
+    this.saveLongTermMemory(projectId, memory);
+    
+    // ✅ 评估闭环 — 自动检测幻觉并记录
+    this.recordEvaluation(sessionId, lastMessage, reply, mutateActions.length, toolsCalled);
+
+    return { reply, actions: allActions, toolsCalled, memory };
+  }
+
+  async saveLongTermMemory(projectId, memory) {
+  try {
+    const m = await import('./long-term-memory.js');
+    await m.initMemoryTable();
+    await m.saveLongTermPrefs(projectId, memory);
+  } catch (e) {
+    console.warn('[long-term-memory] save failed:', e.message);
+  }
+}
+
+async recordEvaluation(sessionId, lastMessage, reply, actionsTaken, toolsCalled) {
+  try {
+    const e = await import('./evaluation.js');
+    await e.initEvalTable();
+    const hallucination = e.detectHallucination(reply, actionsTaken > 0 ? [] : null, []);
+    await e.recordEvaluation(sessionId, 'baicaoyuan', {
+      message: lastMessage,
+      reply,
+      actionsTaken,
+      toolsCalled,
+      hallucinationDetected: hallucination
+    });
+  } catch (e) {
+    console.warn('[evaluation] record failed:', e.message);
+  }
+}
+
+  // ✅ 把所有工具转成 Anthropic 原生 tool_use schema
+  // 5 个查询 + 6 个写入
+  _getNativeTools() {
+    return [
+      // ============ 查询工具 ============
+      {
+        name: 'queryEvents',
+        description: '查询施工日报事件。可按日期、类型、区域、状态、任务名模糊筛选。返回事件列表（含 id/time/type/taskName/progress/owner/areaId/planId）。',
+        input_schema: {
+          type: 'object',
+          properties: {
+            date: { type: 'string', description: 'YYYY-MM-DD 格式日期，不传默认今日' },
+            type: { type: 'string', enum: ['progress', 'material', 'safety', 'coordination', 'attendance', 'issue', 'drawing'] },
+            areaId: { type: 'string', description: '区域 ID（从项目数据中的 areas 列表选取）' },
+            taskNameContains: { type: 'string', description: '任务名关键词，模糊匹配' },
+            status: { type: 'string', enum: ['draft', 'confirmed'] },
+            limit: { type: 'number', description: '最多返回条数，默认 50' }
+          }
+        }
+      },
+      {
+        name: 'queryPlans',
+        description: '查询施工计划（dr_daily_plans）。返回今日处于起止区间内的计划列表。',
+        input_schema: {
+          type: 'object',
+          properties: {
+            date: { type: 'string', description: 'YYYY-MM-DD 格式日期，不传默认今日' },
+            status: { type: 'string', enum: ['active', 'completed', 'paused'] },
+            areaId: { type: 'string' }
+          }
+        }
+      },
+      {
+        name: 'queryIssues',
+        description: '查询协调事项（dr_issues）。默认只返回未关闭的。',
+        input_schema: {
+          type: 'object',
+          properties: {
+            status: { type: 'string', enum: ['open', 'in_progress', 'closed'] },
+            type: { type: 'string' },
+            areaId: { type: 'string' }
+          }
+        }
+      },
+      {
+        name: 'getStats',
+        description: '获取指定日期的统计摘要（计划数、事件数、完成率等）。',
+        input_schema: {
+          type: 'object',
+          properties: {
+            date: { type: 'string', description: 'YYYY-MM-DD 格式日期' }
+          }
+        }
+      },
+      {
+        name: 'comparePlansVsActuals',
+        description: '对比指定日期的计划 vs 实际完成情况，返回已完成/未完成/计划外完成三类。',
+        input_schema: {
+          type: 'object',
+          properties: {
+            date: { type: 'string', description: 'YYYY-MM-DD 格式日期' }
+          }
+        }
+      },
+
+      // ============ 写入工具（mutate）============
+      {
+        name: 'createEvent',
+        description: '创建一条施工日报事件。type + taskName 必填。⚠️ 警告：安全操作，会直接写入数据库。areaId/planId/owner/progress/headcount 等可选。',
+        input_schema: {
+          type: 'object',
+          required: ['type', 'taskName'],
+          properties: {
+            dryRun: { type: 'boolean', description: 'true=只返回将创建的数据，不真写库' },
+            type: { type: 'string', enum: ['progress', 'material', 'safety', 'coordination', 'attendance', 'issue', 'drawing'] },
+            taskName: { type: 'string', description: '任务名（必填）' },
+            areaId: { type: 'string' },
+            planId: { type: 'string', description: '⚠️ 必须从 queryPlans 返回的 ID 中选，不要编造' },
+            owner: { type: 'string' },
+            progress: { type: 'string' },
+            headcount: { type: 'number' },
+            laborRequirements: { type: 'array', items: { type: 'object' } },
+            completionType: { type: 'string', enum: ['planned', 'unplanned'] },
+            buildingNo: { type: 'string' },
+            floorNo: { type: 'string' },
+            note: { type: 'string' }
+          }
+        }
+      },
+      {
+        name: 'createIssue',
+        description: '创建一条协调事项。title 必填。⚠️ 警告：安全操作，会直接写入数据库。',
+        input_schema: {
+          type: 'object',
+          required: ['title'],
+          properties: {
+            dryRun: { type: 'boolean' },
+            title: { type: 'string', description: '标题（必填）' },
+            type: { type: 'string' },
+            areaId: { type: 'string' },
+            priority: { type: 'string', enum: ['low', 'medium', 'high'] },
+            proposeDept: { type: 'string' },
+            cooperateDept: { type: 'string' },
+            owner: { type: 'string' },
+            description: { type: 'string' }
+          }
+        }
+      },
+      {
+        name: 'updateEvent',
+        description: '修改一条日报事件。eventId 必填（必须从 queryEvents 拿真实 ID）。⚠️ 敏感操作：permLevel=allow 直接执行；permLevel=confirm 返回待授权；permLevel=strict 拒绝。',
+        input_schema: {
+          type: 'object',
+          required: ['eventId'],
+          properties: {
+            dryRun: { type: 'boolean' },
+            eventId: { type: 'string', description: '事件 ID（必填，必须真实存在）' },
+            taskName: { type: 'string' },
+            owner: { type: 'string' },
+            progress: { type: 'string' },
+            headcount: { type: 'number' },
+            laborRequirements: { type: 'array' },
+            type: { type: 'string' },
+            status: { type: 'string', enum: ['draft', 'confirmed'] },
+            areaId: { type: 'string' },
+            completionType: { type: 'string', enum: ['planned', 'unplanned'] },
+            buildingNo: { type: 'string' },
+            floorNo: { type: 'string' }
+          }
+        }
+      },
+      {
+        name: 'updateIssue',
+        description: '修改协调事项。issueId 必填（必须从 queryIssues 拿真实 ID）。⚠️ 敏感操作。',
+        input_schema: {
+          type: 'object',
+          required: ['issueId'],
+          properties: {
+            dryRun: { type: 'boolean' },
+            issueId: { type: 'string', description: '协调 ID（必填）' },
+            title: { type: 'string' },
+            status: { type: 'string', enum: ['open', 'in_progress', 'closed'] },
+            priority: { type: 'string', enum: ['low', 'medium', 'high'] },
+            owner: { type: 'string' },
+            description: { type: 'string' }
+          }
+        }
+      },
+      {
+        name: 'closeIssue',
+        description: '关闭协调事项。issueId 必填。⚠️ 敏感操作。',
+        input_schema: {
+          type: 'object',
+          required: ['issueId'],
+          properties: {
+            dryRun: { type: 'boolean' },
+            issueId: { type: 'string', description: '协调 ID（必填）' }
+          }
+        }
+      },
+      {
+        name: 'updatePlan',
+        description: '完善计划字段。planId 必填（必须从 queryPlans 拿真实 ID）。⚠️ 敏感操作。',
+        input_schema: {
+          type: 'object',
+          required: ['planId'],
+          properties: {
+            dryRun: { type: 'boolean' },
+            planId: { type: 'string', description: '计划 ID（必填）' },
+            areaId: { type: 'string' },
+            areaName: { type: 'string' },
+            owner: { type: 'string' },
+            progress: { type: 'string' },
+            buildingNo: { type: 'string' },
+            floorNo: { type: 'string' },
+            laborRequirements: { type: 'array' },
+            taskName: { type: 'string' },
+            status: { type: 'string', enum: ['active', 'completed', 'paused'] }
+          }
+        }
+      },
+      {
+        name: 'deleteEventsByQuery',
+        description: '⚠️ 危险操作！按条件批量删除事件。date 必填，必须至少给一个其他条件。先 dryRun=true 看会删哪些，确认后 dryRun=false + forceDelete=true 真删。',
+        input_schema: {
+          type: 'object',
+          required: ['date'],
+          properties: {
+            dryRun: { type: 'boolean', description: 'true=只列出会删什么' },
+            forceDelete: { type: 'boolean', description: 'true=真删（需要 dryRun=false）' },
+            date: { type: 'string', description: 'YYYY-MM-DD 必填' },
+            timeFrom: { type: 'string', description: 'HH:MM' },
+            timeTo: { type: 'string', description: 'HH:MM' },
+            status: { type: 'string', enum: ['draft', 'confirmed'] },
+            type: { type: 'string' },
+            planId: { type: 'string' },
+            areaId: { type: 'string' },
+            taskNameContains: { type: 'string' },
+            ids: { type: 'array', items: { type: 'string' }, description: '显式 eventId 列表' },
+            confirmConditions: { type: 'string', description: '中文描述"要删什么"，给用户看' }
+          }
+        }
+      }
+    ];
+  }
+
+  // ✅ 错误分类：给 LLM 恢复建议
+  _classifyError(e) {
+    const msg = e.message || '';
+    if (msg.includes('不存在') || msg.includes('not found')) {
+      return '该 ID 已被删除或你查到的 ID 已过期。请重新调用 query 工具获取最新 ID 列表。';
+    }
+    if (msg.includes('权限') || msg.includes('permission')) {
+      return '该操作需要更高级别权限。告诉用户当前权限不足，建议换个方式。';
+    }
+    if (msg.includes('UNIQUE') || msg.includes('duplicate')) {
+      return '数据重复。请改用 update 而不是 create，或调整参数避免冲突。';
+    }
+    if (msg.includes('network') || msg.includes('timeout') || msg.includes('aborted')) {
+      return '网络/超时问题。请稍后重试，或改用其他信息继续。';
+    }
+    if (msg.includes('batchDelete')) {
+      return 'batchDelete 至少需要一个筛选条件。检查 params 是否有 timeFrom/timeTo/status/type/planId/areaId/taskNameContains/ids 之一。';
+    }
+    return '请检查参数是否正确，或换一种方式完成。';
   }
 
   _buildMessages(history, userMessage) {
@@ -646,7 +965,8 @@ ${permHint}
     }
   }
 
-  async _call(system, messages) {
+  async _call(system, messages, options = {}) {
+    const { tools, temperature } = options;
     let lastErr;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -658,9 +978,13 @@ ${permHint}
           system,
           messages,
           max_tokens: this.maxTokens,
-          temperature: this.temperature
+          temperature: temperature ?? this.temperature
         };
         if (this.groupId) body.metadata = { group_id: this.groupId };
+        // ✅ 原生 Anthropic tool_use 协议
+        if (tools && tools.length > 0) {
+          body.tools = tools;
+        }
         const apiUrl = this.baseUrl.endsWith('/v1') ? `${this.baseUrl}/messages` : `${this.baseUrl}/v1/messages`;
         const res = await fetch(apiUrl, {
           method: 'POST',
@@ -679,8 +1003,9 @@ ${permHint}
           continue;
         }
         const data = await res.json();
-        const text = data?.content?.[0]?.text;
-        if (text) return data;
+        // ✅ 接受 text 块 或 tool_use 块（不再要求必须有 text）
+        const content = data?.content || [];
+        if (content.length > 0) return data;
         lastErr = new Error('空响应');
         continue;
       } catch (e) {

@@ -1,5 +1,6 @@
 // chat-actions.js - LLM 返回的 action 的执行器
 import { query } from './db.js';
+import { validateEventData, validatePlanData, validateIssueId } from './llm-validator.js';
 
 function nowHHMM() {
   const d = new Date();
@@ -21,6 +22,15 @@ export async function executeAction(action, ctx) {
   if (!handler) {
     return { ok: false, error: `不支持的操作类型: ${action.type}` };
   }
+  // 敏感操作的权限检查（仅在非 allow 模式下生效）
+  if (SENSITIVE_ACTIONS.has(action.type) && ctx?.permLevel === 'strict') {
+    return {
+      ok: false,
+      error: `当前权限=strict，禁止 ${action.type} 这类敏感操作`,
+      needsConfirm: false,
+      blocked: true
+    };
+  }
   try {
     const result = await handler(action.data, ctx);
     return { ok: true, data: result, message: result.message || '已执行' };
@@ -32,8 +42,7 @@ export async function executeAction(action, ctx) {
 
 // 安全操作（自动执行） vs 敏感操作（需授权）
 export const SAFE_ACTIONS = new Set(['createEvent', 'createIssue', 'createAttendance', 'confirmEvent', 'openWeeklyReport']);
-export const SENSITIVE_ACTIONS = new Set(['updateEvent', 'deleteEvent', 'batchDelete', 'updateIssue', 'closeIssue', 'deleteIssue', 'updatePlan']);
-
+export const SENSITIVE_ACTIONS = new Set(['updateEvent', 'deleteEvent', 'batchDelete', 'updateIssue', 'closeIssue', 'deleteIssue', 'updatePlan', 'deleteEventsByQuery']);
 export function isSensitiveAction(type) {
   return SENSITIVE_ACTIONS.has(type);
 }
@@ -57,7 +66,17 @@ export function getActionSummary(action) {
       if (d.taskNameContains) conds.push(`含"${d.taskNameContains}"`);
       if (d.areaId) conds.push(`区域=${d.areaId}`);
       if (d.planId) conds.push(`计划=${d.planId}`);
-      return `批量删除今日完成: ${conds.join(' ')}`;
+      if (d.ids) conds.push(`IDs=${d.ids.length}个`);
+      return `批量删除: ${conds.join(' ')}`;
+    }
+    case 'deleteEventsByQuery': {
+      const conds = [];
+      if (d.date) conds.push(d.date);
+      if (d.taskNameContains) conds.push(`含"${d.taskNameContains}"`);
+      if (d.areaId) conds.push(`区域=${d.areaId}`);
+      if (d.type) conds.push(`类型=${d.type}`);
+      if (d.ids) conds.push(`${d.ids.length}个ID`);
+      return `批量删除今日事件: ${conds.join(' ') || '按条件'}${d.confirmConditions ? ' (' + d.confirmConditions + ')' : ''}`;
     }
     case 'updateIssue': return `更新协调: ${d.issueId} (${d.title || d.status || ''})`;
     case 'closeIssue': return `关闭协调: ${d.issueId}`;
@@ -77,13 +96,24 @@ const handlers = {
    */
   async createEvent(data, ctx) {
     console.log('[createEvent] ctx.projectId:', ctx.projectId, 'ctx:', JSON.stringify(ctx).slice(0,200));
+
+    // ✅ 幻觉校验 — 拦截 LLM 编造的 ID
+    const v = await validateEventData(data, ctx);
+    if (!v.ok) {
+      throw new Error(`幻觉校验失败: ${v.warnings.join(', ')}`);
+    }
+    // 应用校验后的值（cleaned areaId/planId 等）
+    const cleanedData = { ...data, ...v.validated };
+    // 合并 warnings 到 message 中
+    const warnings = v.warnings.length > 0 ? ` [幻觉警告: ${v.warnings.join('; ')}]` : '';
+
     const type = data.type || 'progress';
     const eventType = ['progress', 'material', 'safety', 'coordination', 'attendance', 'issue', 'drawing'].includes(type) ? type : 'progress';
     const id = data.id || newId('E');
     const time = data.time || nowHHMM();
 
-    // 计划匹配：优先用 planId，否则按 planName 模糊匹配
-    let planId = data.planId || null;
+    // 计划匹配：优先用 planId（校验后），否则按 planName 模糊匹配
+    let planId = cleanedData.planId || null;
     if (!planId && data.planName) {
       const m = ctx.plans?.find(p => p.taskName?.includes(data.planName) || data.planName.includes(p.taskName || ''));
       if (m) planId = m.id;
@@ -108,7 +138,7 @@ const handlers = {
          floor_no=EXCLUDED.floor_no, owner=EXCLUDED.owner`,
       [
         id, ctx.projectId || 'baicaoyuan', ctx.date, time, eventType,
-        data.areaId || null, planId,
+        cleanedData.areaId || null, planId,
         JSON.stringify({
           taskName: data.taskName || '',
           owner: data.owner || '',
@@ -129,7 +159,7 @@ const handlers = {
 
     return {
       id, type: eventType, time,
-      message: `已记录${getTypeName(eventType)}: ${data.taskName || '事件'}`
+      message: `已记录${getTypeName(eventType)}: ${data.taskName || '事件'}${warnings}`
     };
   },
 
@@ -143,9 +173,24 @@ const handlers = {
     const existing = cur.rows[0];
     const payload = existing.payload || {};
 
-    const type = data.type || existing.type;
-    const areaId = data.areaId ?? existing.area_id;
+    // ✅ 幻觉校验 — areaId 必须存在于已知区域
+    let warnings = [];
+    let areaId = data.areaId;
+    if (areaId !== undefined) {
+      const areaCheck = await query(
+        `SELECT DISTINCT area_id FROM dr_events WHERE area_id IS NOT NULL AND area_id != '' LIMIT 100`,
+        []
+      );
+      const knownAreaIds = new Set(areaCheck.rows.map(r => r.area_id));
+      if (!knownAreaIds.has(areaId)) {
+        warnings.push(`areaId "${areaId}" 不存在，已忽略`);
+        areaId = existing.area_id; // 回退到原值
+      }
+    } else {
+      areaId = existing.area_id;
+    }
     const status = data.status || existing.status;
+    const type = data.type || existing.type;
     if (data.taskName) payload.taskName = data.taskName;
     if (data.owner) payload.owner = data.owner;
     if (data.progress) payload.progress = data.progress;
@@ -166,7 +211,9 @@ const handlers = {
       [type, areaId, status, JSON.stringify(payload),
        completionType, buildingNo, floorNo, ownerCol, eventId]
     );
-    return { message: `已更新事件 ${eventId}` };
+
+    const warnSuffix = warnings.length > 0 ? ` [幻觉警告: ${warnings.join('; ')}]` : '';
+    return { message: `已更新事件 ${eventId}${warnSuffix}` };
   },
 
   async deleteEvent(data, ctx) {
@@ -294,6 +341,12 @@ const handlers = {
     };
   },
 
+  // ✅ deleteEventsByQuery 是 LLM mutate 工具名，server.js 把它当作 batchDelete 的别名
+  // （避免 LLM 用了工具名作为 action type 时 server.js 找不到 handler）
+  async deleteEventsByQuery(data, ctx) {
+    return await handlers.batchDelete(data, ctx);
+  },
+
   /**
    * 录协调事宜
    */
@@ -411,6 +464,19 @@ const handlers = {
     const existing = cur.rows[0];
     const extra = existing.extra || {};
 
+    // ✅ 幻觉校验 — areaId 必须存在于已知区域
+    let planAreaId = data.areaId;
+    if (planAreaId) {
+      const areaCheck = await query(
+        `SELECT DISTINCT area_id FROM dr_events WHERE area_id IS NOT NULL AND area_id != '' LIMIT 100`,
+        []
+      );
+      const knownAreaIds = new Set(areaCheck.rows.map(r => r.area_id));
+      if (!knownAreaIds.has(planAreaId)) {
+        planAreaId = null; // 幻觉 ID 直接丢弃
+      }
+    }
+
     const sets = []; const params = []; let idx = 1;
 
     // 顶层列：progress / status
@@ -418,12 +484,12 @@ const handlers = {
     if (data.status) { sets.push(`status=$${idx++}`); params.push(data.status); }
 
     // areaId 写入 area_targets（[{ areaId, name }]）的 areaId 字段
-    if (data.areaId) {
+    if (planAreaId) {
       let areaTargets = existing.area_targets || [];
       if (!Array.isArray(areaTargets) || areaTargets.length === 0) {
-        areaTargets = [{ areaId: data.areaId }];
+        areaTargets = [{ areaId: planAreaId }];
       } else {
-        areaTargets = [{ ...areaTargets[0], areaId: data.areaId }, ...areaTargets.slice(1)];
+        areaTargets = [{ ...areaTargets[0], areaId: planAreaId }, ...areaTargets.slice(1)];
       }
       sets.push(`area_targets=$${idx++}::jsonb`); params.push(JSON.stringify(areaTargets));
     }

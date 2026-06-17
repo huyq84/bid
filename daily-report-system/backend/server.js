@@ -208,22 +208,27 @@ app.post('/api/chat', async (req, res) => {
     const pid = projectId || 'baicaoyuan';
     const d = date || new Date().toISOString().slice(0, 10);
 
-    // 0. 读取权限级别
+    // 0. 读取权限级别（请求里显式传的 permLevel 优先于 DB 设置）
     let permLevel = 'confirm';
-    try {
-      const permRes = await query("SELECT value FROM dr_settings WHERE key='llm_permission'");
-      if (permRes.rows.length > 0) permLevel = permRes.rows[0].value.level || 'confirm';
-    } catch {}
+    if (req.body.permLevel && ['allow', 'confirm', 'strict'].includes(req.body.permLevel)) {
+      permLevel = req.body.permLevel;
+    } else {
+      try {
+        const permRes = await query("SELECT value FROM dr_settings WHERE key='llm_permission'");
+        if (permRes.rows.length > 0) permLevel = permRes.rows[0].value.level || 'confirm';
+      } catch {}
+    }
 
     // 1. 拉取项目上下文
     const ctx = await buildChatContext(pid, d);
     const ctxText = contextToText(ctx) + (permLevel ? '\n\n## 当前权限\n' + permLevel : '');
 
-    let reply, actions, source = 'mock';
+    let reply, actions, memory, source = 'mock';
     try {
       const result = await llm.chatWithContext({ message, history, contextText: ctxText, permLevel, projectId: pid, date: d });
       reply = result.reply;
       actions = result.actions;
+      memory = result.memory;  // ✅ 短期对话记忆
       source = 'llm';
     } catch (e) {
       console.warn('[chat] LLM 失败，降级 mock:', e.message);
@@ -239,6 +244,11 @@ app.post('/api/chat', async (req, res) => {
     const blockedActions = [];
 
     for (const action of (actions || [])) {
+      // ✅ mutate 工具已执行过的 action：把 result 透传到 results，不重复写库
+      if (action._source === 'tool' && action._result) {
+        results.push({ action, ...action._result });
+        continue;
+      }
       const sensitive = isSensitiveAction(action.type);
       if (sensitive && permLevel === 'strict') {
         blockedActions.push({ action, reason: '权限设置为禁止危险操作' });
@@ -283,7 +293,7 @@ app.post('/api/chat', async (req, res) => {
       } catch {}
     }
 
-    res.json({ reply, actions, results, pendingActions, blockedActions, hasMore, remainingItems, latencyMs: Date.now() - start, source, sessionId, permLevel });
+    res.json({ reply, actions, results, pendingActions, blockedActions, hasMore, remainingItems, latencyMs: Date.now() - start, source, sessionId, permLevel, memory });
   } catch (e) {
     console.error('[chat] error:', e);
     const mock = _mockChatReply(req.body?.message || '');
