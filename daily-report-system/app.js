@@ -5626,6 +5626,11 @@ function openIssueForm(issueId) {
   document.getElementById('i-title').value = '';
   document.getElementById('i-propose').value = '';
   document.getElementById('i-cooperate').value = '';
+  document.getElementById('i-priority').value = 'medium';
+  document.getElementById('i-deadline').value = '';
+  document.getElementById('i-description').value = '';
+  document.getElementById('i-resolution').value = '';
+  document.getElementById('i-resolution-group').style.display = 'none';
   document.querySelector('#modalIssue .modal-title').textContent = _editingIssueId ? '🤝 编辑协调' : '🤝 新建协调';
   document.querySelector('#modalIssue .modal-footer .btn-primary').textContent = '保存';
   if (_editingIssueId) {
@@ -5634,6 +5639,11 @@ function openIssueForm(issueId) {
       document.getElementById('i-title').value = issue.title || '';
       document.getElementById('i-propose').value = issue.proposeDept || '';
       document.getElementById('i-cooperate').value = issue.cooperateDept || '';
+      document.getElementById('i-priority').value = issue.priority || 'medium';
+      document.getElementById('i-deadline').value = issue.deadline || '';
+      document.getElementById('i-description').value = issue.description || '';
+      document.getElementById('i-resolution').value = issue.resolution || '';
+      if (issue.resolution) document.getElementById('i-resolution-group').style.display = '';
     }
   }
   showModal('modalIssue');
@@ -5643,6 +5653,10 @@ async function saveIssue() {
   const title = document.getElementById('i-title').value.trim();
   const proposeDept = document.getElementById('i-propose').value.trim();
   const cooperateDept = document.getElementById('i-cooperate').value.trim();
+  const priority = document.getElementById('i-priority').value;
+  const deadline = document.getElementById('i-deadline').value;
+  const description = document.getElementById('i-description').value.trim();
+  const resolution = document.getElementById('i-resolution').value.trim();
 
   if (!title || !proposeDept || !cooperateDept) {
     showToast('请填写必填字段', 'error');
@@ -5656,6 +5670,10 @@ async function saveIssue() {
       issue.title = title;
       issue.proposeDept = proposeDept;
       issue.cooperateDept = cooperateDept;
+      issue.priority = priority;
+      issue.deadline = deadline;
+      issue.description = description;
+      issue.resolution = resolution;
       issue.updatedAt = new Date().toISOString();
     }
   } else {
@@ -5666,6 +5684,10 @@ async function saveIssue() {
       title,
       proposeDept,
       cooperateDept,
+      priority: priority || 'medium',
+      deadline: deadline || null,
+      description: description || '',
+      resolution: resolution || '',
       status: 'open',
       createdDate: M.TODAY
     };

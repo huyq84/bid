@@ -100,6 +100,10 @@ CREATE TABLE IF NOT EXISTS dr_daily_plans (
   labor_schedule JSONB DEFAULT '[]',
   area_targets JSONB DEFAULT '[]',
   total_man_days INTEGER DEFAULT 0,
+  process TEXT,
+  owner TEXT,
+  building_no TEXT,
+  floor_no TEXT,
   extra JSONB DEFAULT '{}',
   created_at TEXT,
   updated_at TEXT
@@ -451,6 +455,11 @@ export async function initDatabase() {
   // 给旧表加 extra 列
   try { await pool.query('ALTER TABLE dr_daily_plans ADD COLUMN IF NOT EXISTS extra JSONB DEFAULT \'{}\''); } catch {}; // skip on older PG
   try { await pool.query('ALTER TABLE dr_daily_plans ADD COLUMN IF NOT EXISTS total_man_days INTEGER DEFAULT 0'); } catch {};
+  // 给计划表加 process/owner/buildingNo/floorNo 列
+  try { await pool.query("ALTER TABLE dr_daily_plans ADD COLUMN IF NOT EXISTS process TEXT"); } catch {};
+  try { await pool.query("ALTER TABLE dr_daily_plans ADD COLUMN IF NOT EXISTS owner TEXT"); } catch {};
+  try { await pool.query("ALTER TABLE dr_daily_plans ADD COLUMN IF NOT EXISTS building_no TEXT"); } catch {};
+  try { await pool.query("ALTER TABLE dr_daily_plans ADD COLUMN IF NOT EXISTS floor_no TEXT"); } catch {};
   // 给旧 ECC 表加 photos 列
   try { await pool.query('ALTER TABLE dr_ecc_items ADD COLUMN IF NOT EXISTS photos JSONB DEFAULT \'[]\'::jsonb'); } catch {};
   // 给旧 ECC 汇总表加 photos 列

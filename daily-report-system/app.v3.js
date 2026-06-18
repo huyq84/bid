@@ -66,6 +66,17 @@ async function loadDataFromAPI() {
     if (M.saveEventsToStorage) {
       try { M.saveEventsToStorage(); } catch {}
     }
+    
+    // 确保所有数据都同步到 localStorage
+    try { 
+      localStorage.setItem('daily_events', JSON.stringify(M.EVENTS)); 
+    } catch(e) { console.warn('[localStorage] 写事件失败:', e.message); }
+    try { 
+      localStorage.setItem('daily_plans', JSON.stringify(M.PLANS)); 
+    } catch(e) { console.warn('[localStorage] 写计划失败:', e.message); }
+    try { 
+      localStorage.setItem('daily_issues', JSON.stringify(M.ISSUES || [])); 
+    } catch(e) { console.warn('[localStorage] 写协调失败:', e.message); }
 
     // 深度合并 PLANS（API + 本地，按 id 去重，API 版本优先）
     if (data.PLANS && Object.keys(data.PLANS).length > 0) {
@@ -285,18 +296,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', async () => {
-  // 先恢复 localStorage 中的本地数据（确保未同步到后端的事件不会丢失）
+  // 始终从后端加载最新数据（优先保证一致性）
+  await loadDataFromAPI();
+  
+  // 仅在首次加载且 localStorage 有数据时，合并本地独有事件（防止未同步数据丢失）
   try {
     const stored = localStorage.getItem('daily_events');
     if (stored) {
       const parsed = JSON.parse(stored);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        M.EVENTS.length = 0;
-        M.EVENTS.push(...parsed);
+        const backendIds = new Set(M.EVENTS.map(e => e.id));
+        const localOnly = parsed.filter(e => !backendIds.has(e.id));
+        if (localOnly.length > 0) {
+          M.EVENTS.push(...localOnly);
+          console.log(`[localStorage] 合并了 ${localOnly.length} 条本地独有事件`);
+        }
       }
     }
   } catch(e) { console.warn('[localStorage] 读事件失败:', e.message); }
-  await loadDataFromAPI();  // 先拉取后端真实数据（失败静默回退 MockData）
+  
+  await loadDataFromAPI();  // 重新加载以确保数据一致性
   initCustomAreas();  // 再加载用户自定义区域
   initProject();
   initCalendarWithToday();
@@ -5508,6 +5527,11 @@ function openIssueForm(issueId) {
   document.getElementById('i-title').value = '';
   document.getElementById('i-propose').value = '';
   document.getElementById('i-cooperate').value = '';
+  document.getElementById('i-priority').value = 'medium';
+  document.getElementById('i-deadline').value = '';
+  document.getElementById('i-description').value = '';
+  document.getElementById('i-resolution').value = '';
+  document.getElementById('i-resolution-group').style.display = 'none';
   document.querySelector('#modalIssue .modal-title').textContent = _editingIssueId ? '🤝 编辑协调' : '🤝 新建协调';
   document.querySelector('#modalIssue .modal-footer .btn-primary').textContent = '保存';
   if (_editingIssueId) {
@@ -5516,6 +5540,11 @@ function openIssueForm(issueId) {
       document.getElementById('i-title').value = issue.title || '';
       document.getElementById('i-propose').value = issue.proposeDept || '';
       document.getElementById('i-cooperate').value = issue.cooperateDept || '';
+      document.getElementById('i-priority').value = issue.priority || 'medium';
+      document.getElementById('i-deadline').value = issue.deadline || '';
+      document.getElementById('i-description').value = issue.description || '';
+      document.getElementById('i-resolution').value = issue.resolution || '';
+      if (issue.resolution) document.getElementById('i-resolution-group').style.display = '';
     }
   }
   showModal('modalIssue');
@@ -5525,6 +5554,10 @@ async function saveIssue() {
   const title = document.getElementById('i-title').value.trim();
   const proposeDept = document.getElementById('i-propose').value.trim();
   const cooperateDept = document.getElementById('i-cooperate').value.trim();
+  const priority = document.getElementById('i-priority').value;
+  const deadline = document.getElementById('i-deadline').value;
+  const description = document.getElementById('i-description').value.trim();
+  const resolution = document.getElementById('i-resolution').value.trim();
 
   if (!title || !proposeDept || !cooperateDept) {
     showToast('请填写必填字段', 'error');
@@ -5538,6 +5571,10 @@ async function saveIssue() {
       issue.title = title;
       issue.proposeDept = proposeDept;
       issue.cooperateDept = cooperateDept;
+      issue.priority = priority;
+      issue.deadline = deadline;
+      issue.description = description;
+      issue.resolution = resolution;
       issue.updatedAt = new Date().toISOString();
     }
   } else {
@@ -5548,6 +5585,10 @@ async function saveIssue() {
       title,
       proposeDept,
       cooperateDept,
+      priority: priority || 'medium',
+      deadline: deadline || null,
+      description: description || '',
+      resolution: resolution || '',
       status: 'open',
       createdDate: M.TODAY
     };
@@ -8868,7 +8909,25 @@ async function _callChatLLM(text) {
     if (data.reply) {
       const savedId = await saveMsgToDB(_activeSessionId, 'assistant', data.reply);
       _messageCache[_activeSessionId].push({ id: savedId, role: 'assistant', content: data.reply });
-      appendChatMessage('system', data.reply, false, savedId);
+      
+      // === 流式加载特效 ===
+      const container = document.getElementById('aiChatMessages');
+      if (container) {
+        const div = document.createElement('div');
+        if (savedId) div.setAttribute('data-msg-id', savedId);
+        div.setAttribute('data-msg-content', data.reply);
+        div.className = 'ai-message ai-message-system';
+        div.innerHTML = '<div class="ai-message-avatar"><img src="assets/avatar-construction-girl.png" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></div><div class="ai-message-bubble"></div>' +
+          '<div class="ai-message-actions">' +
+            '<button class="ai-message-action-btn" onclick="copyChatMessage(this)" title="复制">📋</button>' +
+            '<button class="ai-message-action-btn ai-msg-del" onclick="deleteChatMessage(this)" title="删除">✕</button>' +
+          '</div>';
+        container.appendChild(div);
+        
+        const bubble = div.querySelector('.ai-message-bubble');
+        const rendered = renderMarkdownInline(data.reply);
+        _streamTextToBubble(bubble, rendered);
+      }
     }
 
     // 自动执行结果（安全操作）
@@ -8901,10 +8960,15 @@ async function _callChatLLM(text) {
       const needRefresh = data.results.some(r => {
         if (r.ok) return true;
         if (r.action.type === 'deleteEvent' && /未找到/.test(r.error || '')) return true;
+        if (r.action.type === 'batchDelete' && r.ok) return true;
+        if (r.action.type === 'deleteEventsByQuery' && r.ok) return true;
+        if (r.action.type === 'updatePlan' && r.ok) return true;
+        if (r.action.type === 'updateIssue' && r.ok) return true;
+        if (r.action.type === 'closeIssue' && r.ok) return true;
         return false;
       });
       if (needRefresh) {
-        _refreshAfterChat(data.results.filter(r => r.ok || (r.action.type === 'deleteEvent' && /未找到/.test(r.error || ''))).map(r => r.action.type));
+        _refreshAfterChat(data.results.filter(r => r.ok || (r.action.type === 'deleteEvent' && /未找到/.test(r.error || '')) || (r.action.type === 'batchDelete' && r.ok) || (r.action.type === 'deleteEventsByQuery' && r.ok)).map(r => r.action.type));
       }
     } else if (data.actions && data.actions.length > 0) {
       data.actions.forEach(a => executeChatAction(a));
@@ -9175,14 +9239,40 @@ async function triggerInspection() {
 async function _refreshAfterChat(actionTypes) {
   const types = new Set(actionTypes);
   try {
-    if (types.has('createEvent') || types.has('updateEvent') || types.has('deleteEvent')) {
-      if (typeof loadDataFromAPI === 'function') { await loadDataFromAPI(); if (typeof renderFilteredEvents === 'function') renderFilteredEvents(); if (typeof renderStats === 'function') renderStats(); if (typeof updateCalendar === 'function') updateCalendar(); if (typeof renderDailyPlanCard === 'function') renderDailyPlanCard(); }
+    if (types.has('createEvent') || types.has('updateEvent') || types.has('deleteEvent') || types.has('batchDelete') || types.has('deleteEventsByQuery')) {
+      if (typeof loadDataFromAPI === 'function') { 
+        await loadDataFromAPI(); 
+        if (typeof renderFilteredEvents === 'function') renderFilteredEvents(); 
+        if (typeof renderStats === 'function') renderStats(); 
+        if (typeof updateCalendar === 'function') updateCalendar(); 
+        if (typeof renderDailyPlanCard === 'function') renderDailyPlanCard(); 
+        // 确保数据同步到 localStorage
+        try { localStorage.setItem('daily_events', JSON.stringify(M.EVENTS)); } catch(e) {}
+      }
     }
-    if (types.has('createIssue') || types.has('updateIssue') || types.has('closeIssue')) {
-      if (typeof loadDataFromAPI === 'function') { await loadDataFromAPI(); if (typeof renderIssues === 'function') renderIssues(); }
+    if (types.has('createIssue') || types.has('updateIssue') || types.has('closeIssue') || types.has('deleteIssue')) {
+      if (typeof loadDataFromAPI === 'function') { 
+        await loadDataFromAPI(); 
+        if (typeof renderIssues === 'function') renderIssues(); 
+        if (typeof renderDailyPlanCard === 'function') renderDailyPlanCard(); 
+        // 确保数据同步到 localStorage
+        try { localStorage.setItem('daily_issues', JSON.stringify(M.ISSUES || [])); } catch(e) {}
+      }
     }
-    if (types.has('createAttendance')) { if (typeof loadDataFromAPI === 'function') await loadDataFromAPI(); }
-    if (types.has('createDrawing')) { if (typeof loadDataFromAPI === 'function') await loadDataFromAPI(); }
+    if (types.has('createAttendance')) { 
+      if (typeof loadDataFromAPI === 'function') await loadDataFromAPI(); 
+    }
+    if (types.has('createDrawing')) { 
+      if (typeof loadDataFromAPI === 'function') await loadDataFromAPI(); 
+    }
+    if (types.has('updatePlan')) {
+      if (typeof loadDataFromAPI === 'function') { 
+        await loadDataFromAPI(); 
+        if (typeof renderDailyPlanCard === 'function') renderDailyPlanCard(); 
+        // 确保数据同步到 localStorage
+        try { localStorage.setItem('daily_plans', JSON.stringify(M.PLANS)); } catch(e) {}
+      }
+    }
   } catch (e) { console.warn('[chat] 刷新数据失败:', e); }
 }
 
@@ -9222,6 +9312,143 @@ function appendChatMessage(role, content, skipCache, msgId) {
   scrollChatToBottom();
   // 渲染 mermaid
   renderMermaidDiagrams();
+}
+
+// ===== AI 文字流式加载淡入渐变特效 =====
+// 将 HTML 文本按可见字符拆分，每个字符带延迟动画，HTML 标签原样保留
+// 特殊处理：表格 <table>...</table> 内的内容不做逐字动画，直接整体渲染
+function _streamTextToBubble(bubbleEl, htmlText) {
+  if (!bubbleEl || !htmlText) return Promise.resolve();
+  
+  // 如果包含表格，表格部分直接渲染，其余部分走流式
+  const tableRegex = /(<table[\s\S]*?<\/table>)/g;
+  const hasTable = tableRegex.test(htmlText);
+  
+  if (hasTable) {
+    // 有表格：先流式渲染非表格部分，然后一次性插入表格
+    const parts = htmlText.split(tableRegex);
+    // parts[0] = 表前文本, parts[1] = 表1, parts[2] = 表间文本, ...
+    const tableParts = [];
+    const nonTableParts = [];
+    
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i].startsWith('<table')) {
+        tableParts.push({ index: i, html: parts[i] });
+      } else {
+        nonTableParts.push({ index: i, html: parts[i] });
+      }
+    }
+    
+    // 先流式渲染所有非表格部分
+    const nonTableHtml = nonTableParts.map(p => p.html).join('');
+    
+    if (nonTableHtml.trim()) {
+      _streamPlainHtml(bubbleEl, nonTableHtml);
+    }
+    
+    // 表格直接插入（不做逐字动画）
+    const frag = document.createDocumentFragment();
+    tableParts.forEach(tp => {
+      const span = document.createElement('span');
+      span.innerHTML = tp.html;
+      span.style.animation = 'none';
+      span.style.opacity = '1';
+      frag.appendChild(span);
+    });
+    bubbleEl.appendChild(frag);
+    
+    scrollChatToBottom();
+    bubbleEl.classList.add('ai-bubble-done');
+    return Promise.resolve();
+  }
+  
+  // 无表格：走正常流式动画
+  _streamPlainHtml(bubbleEl, htmlText);
+}
+
+// 纯 HTML 流式展开（不含表格），HTML 标签原样保留，文本逐字动画
+function _streamPlainHtml(bubbleEl, htmlText) {
+  if (!bubbleEl || !htmlText) return;
+  
+  // 解析 HTML：拆分为 tag 和 text 两部分
+  const tokens = [];
+  let i = 0;
+  while (i < htmlText.length) {
+    if (htmlText[i] === '<') {
+      // HTML 标签
+      const end = htmlText.indexOf('>', i);
+      if (end !== -1) {
+        tokens.push({ type: 'tag', html: htmlText.substring(i, end + 1) });
+        i = end + 1;
+        continue;
+      }
+    }
+    // 普通文本字符（可能是转义实体如 &lt; &gt; &amp; 等）
+    tokens.push({ type: 'text', char: htmlText[i] });
+    i++;
+  }
+  
+  const totalTokens = tokens.length;
+  const baseDelay = 10; // ms per token
+  const maxDelay = 28;  // cap delay
+  
+  bubbleEl.classList.add('ai-bubble-stream', 'streaming');
+  
+  // 插入光标
+  const cursor = document.createElement('span');
+  cursor.className = 'ai-typing-cursor';
+  bubbleEl.appendChild(cursor);
+  
+  let resolved = 0;
+  
+  tokens.forEach((token, idx) => {
+    const delay = Math.min(baseDelay * idx, maxDelay * Math.floor(idx / 5));
+    
+    setTimeout(() => {
+      if (token.type === 'tag') {
+        // HTML 标签立即插入，不做动画
+        const span = document.createElement('span');
+        span.innerHTML = token.html;
+        span.style.animation = 'none';
+        span.style.opacity = '1';
+        bubbleEl.insertBefore(span, cursor);
+      } else {
+        // 文本字符带淡入动画
+        const span = document.createElement('span');
+        span.className = 'ai-char-span' + (token.char === ' ' ? ' space' : '');
+        span.textContent = token.char;
+        span.style.setProperty('--delay', delay + 'ms');
+        bubbleEl.insertBefore(span, cursor);
+        
+        resolved++;
+        if (resolved >= totalTokens) {
+          // 全部完成
+          setTimeout(() => {
+            if (cursor.parentNode) cursor.remove();
+            bubbleEl.classList.remove('streaming');
+            bubbleEl.classList.add('ai-bubble-done');
+          }, 200);
+        }
+      }
+      
+      // 自动滚动到底部
+      scrollChatToBottom();
+    }, delay);
+  });
+  
+  // 安全超时兜底
+  const safeTimeout = Math.max(totalTokens * maxDelay + 500, 2000);
+  setTimeout(() => {
+    if (cursor.parentNode) cursor.remove();
+    bubbleEl.classList.remove('streaming');
+    bubbleEl.classList.add('ai-bubble-done');
+  }, safeTimeout);
+}
+
+// 直接渲染（无特效），用于非 AI 消息或回退
+function _renderStaticBubble(bubbleEl, text) {
+  if (!bubbleEl) return;
+  bubbleEl.innerHTML = _escapeHtml(text);
 }
 
 function renderMarkdownInline(text) {

@@ -2142,6 +2142,85 @@ aside .card { margin-bottom: 0; }
   color: #f8fafc;
   border: 1px solid rgba(255,255,255,0.08);
 }
+
+/* ===== AI 文字流式加载淡入渐变特效 ===== */
+@keyframes aiTextFadeIn {
+  0% { opacity: 0; transform: translateY(4px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes aiGradientShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes aiCharReveal {
+  0% { opacity: 0; color: transparent; transform: translateY(6px); filter: blur(3px); }
+  60% { opacity: 0.8; color: #94a3b8; filter: blur(0.5px); }
+  100% { opacity: 1; color: inherit; transform: translateY(0); filter: blur(0); }
+}
+
+.ai-bubble-stream {
+  position: relative;
+  overflow: hidden;
+}
+
+.ai-bubble-stream::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(56, 189, 248, 0.08) 40%,
+    rgba(168, 85, 247, 0.08) 60%,
+    transparent 100%);
+  background-size: 200% 100%;
+  animation: aiGradientShift 2s ease-in-out infinite;
+  pointer-events: none;
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.ai-bubble-stream.streaming::after {
+  opacity: 1;
+}
+
+.ai-char-span {
+  display: inline;
+  opacity: 0;
+  animation: aiCharReveal 0.35s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation-delay: var(--delay, 0ms);
+  will-change: opacity, transform, filter;
+}
+
+.ai-char-span.space {
+  width: 0.3em;
+}
+
+.ai-bubble-done {
+  animation: aiTextFadeIn 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* 光标闪烁 */
+@keyframes aiCursorBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.ai-typing-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1.1em;
+  background: linear-gradient(180deg, #38bdf8, #a855f7);
+  border-radius: 1px;
+  vertical-align: text-bottom;
+  margin-left: 1px;
+  animation: aiCursorBlink 0.8s ease-in-out infinite;
+  position: relative;
+  top: 2px;
+}
 .ai-message.ai-proactive {
   border-left: 3px solid #f59e0b;
   background: rgba(245,158,11,0.08);

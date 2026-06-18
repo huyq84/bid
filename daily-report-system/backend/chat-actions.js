@@ -41,7 +41,7 @@ export async function executeAction(action, ctx) {
 }
 
 // 安全操作（自动执行） vs 敏感操作（需授权）
-export const SAFE_ACTIONS = new Set(['createEvent', 'createIssue', 'createAttendance', 'confirmEvent', 'openWeeklyReport']);
+export const SAFE_ACTIONS = new Set(['createEvent', 'createIssue', 'createPlan', 'createAttendance', 'confirmEvent', 'openWeeklyReport']);
 export const SENSITIVE_ACTIONS = new Set(['updateEvent', 'deleteEvent', 'batchDelete', 'updateIssue', 'closeIssue', 'deleteIssue', 'updatePlan', 'deleteEventsByQuery']);
 export function isSensitiveAction(type) {
   return SENSITIVE_ACTIONS.has(type);
@@ -84,6 +84,7 @@ export function getActionSummary(action) {
     case 'openWeeklyReport': return '打开周报';
     case 'confirmEvent': return `确认事件: ${d.eventId}`;
     case 'updatePlan': return `完善计划: ${d.planId} (${d.taskName || d.owner || d.progress || d.areaId || '更新字段'})`;
+    case 'createPlan': return `创建计划: ${d.taskName || '施工计划'}`;
     default: return t;
   }
 }
@@ -143,7 +144,11 @@ const handlers = {
           taskName: data.taskName || '',
           owner: data.owner || '',
           progress: data.progress || '',
-          headcount: data.headcount || 0,
+          headcount: data.headcount ?? (() => {
+            // 如果传了 laborRequirements 但没传 headcount，自动汇总
+            const lr = data.laborRequirements || [];
+            return Array.isArray(lr) ? lr.reduce((s, l) => s + (l.count || 0), 0) : (data.headcount || 0);
+          })(),
           laborRequirements: data.laborRequirements || [],
           description: data.note || data.description || ''
         }),
@@ -479,9 +484,13 @@ const handlers = {
 
     const sets = []; const params = []; let idx = 1;
 
-    // 顶层列：progress / status
+    // 顶层列：progress / status / process / owner / building_no / floor_no
     if (data.progress != null && data.progress !== '') { sets.push(`progress=$${idx++}`); params.push(String(data.progress)); }
     if (data.status) { sets.push(`status=$${idx++}`); params.push(data.status); }
+    if (data.process) { sets.push(`process=$${idx++}`); params.push(data.process); }
+    if (data.owner) { sets.push(`owner=$${idx++}`); params.push(data.owner); }
+    if (data.buildingNo) { sets.push(`building_no=$${idx++}`); params.push(data.buildingNo); }
+    if (data.floorNo) { sets.push(`floor_no=$${idx++}`); params.push(data.floorNo); }
 
     // areaId 写入 area_targets（[{ areaId, name }]）的 areaId 字段
     if (planAreaId) {
@@ -494,11 +503,8 @@ const handlers = {
       sets.push(`area_targets=$${idx++}::jsonb`); params.push(JSON.stringify(areaTargets));
     }
 
-    // 其它字段统一写到 extra JSONB
+    // 其余字段仍写到 extra JSONB（payload 类结构数据）
     const extraChanged = [];
-    if (data.owner) { extra.owner = data.owner; extraChanged.push('owner'); }
-    if (data.buildingNo) { extra.buildingNo = data.buildingNo; extraChanged.push('buildingNo'); }
-    if (data.floorNo) { extra.floorNo = data.floorNo; extraChanged.push('floorNo'); }
     if (data.taskName) { extra.taskName = data.taskName; extraChanged.push('taskName'); }
     if (data.laborRequirements) { extra.laborRequirements = data.laborRequirements; extraChanged.push('laborRequirements'); }
     if (data.areaName) { extra.areaName = data.areaName; extraChanged.push('areaName'); }
@@ -515,7 +521,56 @@ const handlers = {
     params.push(planId);
 
     await query(`UPDATE dr_daily_plans SET ${sets.join(', ')} WHERE id=$${idx}`, params);
-    return { planId, updatedFields: [...extraChanged, ...(data.progress ? ['progress'] : []), ...(data.areaId ? ['areaId'] : []), ...(data.status ? ['status'] : [])], message: `已完善计划 ${planId}` };
+    return { planId, updatedFields: [...extraChanged, ...(data.progress ? ['progress'] : []), ...(data.areaId ? ['areaId'] : []), ...(data.status ? ['status'] : []), ...(data.process ? ['process'] : []), ...(data.owner ? ['owner'] : []), ...(data.buildingNo ? ['buildingNo'] : []), ...(data.floorNo ? ['floorNo'] : [])], message: `已完善计划 ${planId}` };
+  },
+
+  /**
+   * 创建施工计划
+   * data: { id, projectId, taskName, startDate, endDate, date, description, progress,
+   *         status, laborRequirements, laborSchedule, areaId, areaName, areaTargets,
+   *         owner, buildingNo, floorNo, extra }
+   */
+  async createPlan(data, ctx) {
+    const id = data.id || newId('P');
+    const projectId = data.projectId || ctx.projectId || 'baicaoyuan';
+    const taskName = data.taskName || '未命名计划';
+    const startDate = data.startDate || data.date || ctx.date;
+    const endDate = data.endDate || startDate;
+    const progress = data.progress || '0%';
+    const status = data.status || 'active';
+    const laborSchedule = data.laborSchedule || (data.laborRequirements || []);
+    const areaTargets = data.areaTargets || [];
+    const totalManDays = data.totalManDays || 0;
+
+    // 构建 extra JSONB：areaId/areaName/owner/buildingNo/floorNo 等
+    const extra = data.extra || {};
+    if (data.areaId) extra.areaId = data.areaId;
+    if (data.areaName) extra.areaName = data.areaName;
+    if (data.owner) extra.owner = data.owner;
+    if (data.buildingNo) extra.buildingNo = data.buildingNo;
+    if (data.floorNo) extra.floorNo = data.floorNo;
+    if (data.laborRequirements && !data.laborSchedule) extra.laborRequirements = data.laborRequirements;
+
+    const now = new Date().toISOString();
+    await query(
+      `INSERT INTO dr_daily_plans
+        (id, project_id, date, start_date, end_date, description, task_name, progress,
+         status, labor_schedule, area_targets, total_man_days, extra, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13::jsonb,$14,$15)
+       ON CONFLICT (id) DO UPDATE SET
+         project_id=EXCLUDED.project_id, start_date=EXCLUDED.start_date, end_date=EXCLUDED.end_date,
+         description=EXCLUDED.description, task_name=EXCLUDED.task_name, progress=EXCLUDED.progress,
+         status=EXCLUDED.status, labor_schedule=EXCLUDED.labor_schedule,
+         area_targets=EXCLUDED.area_targets, extra=EXCLUDED.extra, updated_at=EXCLUDED.updated_at`,
+      [
+        id, projectId, data.date || null, startDate, endDate,
+        data.description || '', taskName, progress, status,
+        JSON.stringify(laborSchedule), JSON.stringify(areaTargets), totalManDays,
+        JSON.stringify(extra), now, now
+      ]
+    );
+
+    return { id, taskName, startDate, endDate, status, message: `已创建计划: ${taskName}` };
   }
 };
 

@@ -88,6 +88,8 @@ router.get('/api/data/all', async (req, res) => {
         progress: p.progress, status: p.status,
         laborSchedule: p.labor_schedule || [], areaTargets: p.area_targets || [],
         totalManDays: p.total_man_days || 0,
+        process: p.process, owner: p.owner,
+        buildingNo: p.building_no, floorNo: p.floor_no,
         createdAt: p.created_at, updatedAt: p.updated_at,
         ...(p.extra || {}),
       });

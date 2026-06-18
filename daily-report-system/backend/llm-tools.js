@@ -334,6 +334,605 @@ const TOOLS = [
     const result = await executeAction({ type: 'updatePlan', data: { planId, ...data } }, ctx);
     return { dryRun: false, ...result, planId, inputData: data };
   }
+  },
+
+  // ========== 新增写入工具 ==========
+
+  {
+  name: 'createPlan',
+  description: '创建新的施工计划。taskName 和 projectId 必填。可指定 areaId/owner/progress/buildingNo/floorNo/laborRequirements/date。⚠️ 日期必须在合理范围内。',
+  isMutate: true,
+  requiresConfirm: true,
+  params: { dryRun: 'true=只返回将创建的内容', taskName: '任务名（必填）', date: 'YYYY-MM-DD，计划执行日期', startDate: '开始日期', endDate: '结束日期', areaId: '区域ID', areaName: '区域名', owner: '负责人', progress: '进度%', buildingNo: '楼栋', floorNo: '楼层', laborRequirements: '工种×人数', status: 'active|completed|paused' },
+  handler: async (params, ctx) => {
+    const { dryRun, taskName, ...data } = params;
+    if (!taskName) throw new Error('taskName 必填');
+    const planId = 'P' + Date.now();
+    const id = data.id || planId;
+    const projectId = ctx.projectId || 'baicaoyuan';
+    if (dryRun) {
+      return { dryRun: true, wouldCreate: { id, projectId, taskName, ...data }, warning: '这是 dry-run，未实际写入数据库' };
+    }
+    await executeAction({ type: 'createPlan', data: { id, projectId, taskName, ...data } }, ctx);
+    return { dryRun: false, id, taskName, message: `已创建计划: ${taskName}` };
+  }
+  },
+
+  {
+  name: 'deleteIssue',
+  description: '⚠️ 删除协调事项。issueId 必填——必须先调 queryIssues 拿到真实 ID。删除后不可恢复。',
+  isMutate: true,
+  requiresConfirm: true,
+  params: { dryRun: 'true=只列出将被删除的协调', issueId: '协调ID（必填）' },
+  handler: async (params, ctx) => {
+    const { dryRun, issueId } = params;
+    if (!issueId) throw new Error('issueId 必填');
+    if (dryRun) {
+      const cur = await query('SELECT * FROM dr_issues WHERE id=$1', [issueId]);
+      if (cur.rows.length === 0) throw new Error(`协调 ${issueId} 不存在`);
+      return { dryRun: true, issueId, current: cur.rows[0], warning: 'dry-run，未实际删除' };
+    }
+    const result = await executeAction({ type: 'deleteIssue', data: { issueId } }, ctx);
+    return { ...result, issueId };
+  }
+  },
+
+  {
+  name: 'deleteEvent',
+  description: '⚠️ 删除单条事件。eventId 必填——必须先调 queryEvents 拿到真实 ID。删除后不可恢复。',
+  isMutate: true,
+  requiresConfirm: true,
+  params: { dryRun: 'true=只列出将被删除的事件', eventId: '事件ID（必填）' },
+  handler: async (params, ctx) => {
+    const { dryRun, eventId } = params;
+    if (!eventId) throw new Error('eventId 必填');
+    if (dryRun) {
+      const cur = await query('SELECT * FROM dr_events WHERE id=$1', [eventId]);
+      if (cur.rows.length === 0) throw new Error(`事件 ${eventId} 不存在`);
+      return { dryRun: true, eventId, current: cur.rows[0], warning: 'dry-run，未实际删除' };
+    }
+    const result = await executeAction({ type: 'deleteEvent', data: { eventId } }, ctx);
+    return { ...result, eventId };
+  }
+  },
+
+  {
+  name: 'confirmEvent',
+  description: '确认事件（将 status 改为 confirmed）。eventId 必填——必须先调 queryEvents 拿到真实 ID。',
+  isMutate: true,
+  requiresConfirm: false,
+  params: { dryRun: 'true=只返回将确认的事件', eventId: '事件ID（必填）' },
+  handler: async (params, ctx) => {
+    const { dryRun, eventId } = params;
+    if (!eventId) throw new Error('eventId 必填');
+    if (dryRun) {
+      const cur = await query('SELECT * FROM dr_events WHERE id=$1', [eventId]);
+      if (cur.rows.length === 0) throw new Error(`事件 ${eventId} 不存在`);
+      return { dryRun: true, eventId, current: cur.rows[0], warning: 'dry-run，未实际确认' };
+    }
+    const result = await executeAction({ type: 'confirmEvent', data: { eventId } }, ctx);
+    return { ...result, eventId };
+  }
+  },
+
+  {
+  name: 'createECC',
+  description: '创建 ECC（工程变更指令）项。title 必填。可指定 areaId/discoveredDate/status。',
+  isMutate: true,
+  requiresConfirm: true,
+  params: { dryRun: 'true=只返回将创建的内容', title: 'ECC 标题（必填）', areaId: '区域ID', discoveredDate: '发现日期 YYYY-MM-DD', status: 'open|closed|closing' },
+  handler: async (params, ctx) => {
+    const { dryRun, title, ...data } = params;
+    if (!title) throw new Error('title 必填');
+    const id = 'ECC' + Date.now();
+    const projectId = ctx.projectId || 'baicaoyuan';
+    if (dryRun) {
+      return { dryRun: true, wouldCreate: { id, projectId, title, ...data }, warning: '这是 dry-run，未实际写入数据库' };
+    }
+    await query(
+      `INSERT INTO dr_ecc_items (id, project_id, title, area_id, discovered_date, status)
+       VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO UPDATE
+       SET title=EXCLUDED.title, area_id=EXCLUDED.area_id, discovered_date=EXCLUDED.discovered_date, status=EXCLUDED.status`,
+      [id, projectId, title, data.areaId || null, data.discoveredDate || ctx.date, data.status || 'open']
+    );
+    return { id, title, message: `已创建 ECC: ${title}` };
+  }
+  },
+
+  {
+  name: 'closeECC',
+  description: '关闭 ECC 项。eccId 必填——必须先调 queryECC 拿到真实 ID。',
+  isMutate: true,
+  requiresConfirm: true,
+  params: { dryRun: 'true=只返回将关闭的 ECC', eccId: 'ECC ID（必填）', resolution: '关闭说明' },
+  handler: async (params, ctx) => {
+    const { dryRun, eccId, ...data } = params;
+    if (!eccId) throw new Error('eccId 必填');
+    if (dryRun) {
+      const cur = await query('SELECT * FROM dr_ecc_items WHERE id=$1', [eccId]);
+      if (cur.rows.length === 0) throw new Error(`ECC ${eccId} 不存在`);
+      return { dryRun: true, eccId, current: cur.rows[0], warning: 'dry-run，未实际关闭' };
+    }
+    await query(`UPDATE dr_ecc_items SET status='closed', closed_date=$1 WHERE id=$2`, [ctx.date, eccId]);
+    return { eccId, message: `已关闭 ECC ${eccId}` };
+  }
+  },
+
+  {
+  name: 'deleteECC',
+  description: '⚠️ 删除 ECC 项。eccId 必填。删除后不可恢复。',
+  isMutate: true,
+  requiresConfirm: true,
+  params: { dryRun: 'true=只列出将被删除的 ECC', eccId: 'ECC ID（必填）' },
+  handler: async (params, ctx) => {
+    const { dryRun, eccId } = params;
+    if (!eccId) throw new Error('eccId 必填');
+    if (dryRun) {
+      const cur = await query('SELECT * FROM dr_ecc_items WHERE id=$1', [eccId]);
+      if (cur.rows.length === 0) throw new Error(`ECC ${eccId} 不存在`);
+      return { dryRun: true, eccId, current: cur.rows[0], warning: 'dry-run，未实际删除' };
+    }
+    await query('DELETE FROM dr_ecc_items WHERE id=$1', [eccId]);
+    return { eccId, message: `已删除 ECC ${eccId}` };
+  }
+  },
+
+  {
+  name: 'createDrawing',
+  description: '创建图纸深化记录。task 必填。可指定 owner/status/areaId/planId。',
+  isMutate: true,
+  requiresConfirm: true,
+  params: { dryRun: 'true=只返回将创建的内容', task: '深化任务（必填）', owner: '负责人', status: '待开始|进行中|已完成', areaId: '区域ID', planId: '关联计划ID' },
+  handler: async (params, ctx) => {
+    const { dryRun, task, ...data } = params;
+    if (!task) throw new Error('task 必填');
+    const id = 'DD' + Date.now();
+    const projectId = ctx.projectId || 'baicaoyuan';
+    if (dryRun) {
+      return { dryRun: true, wouldCreate: { id, projectId, task, ...data }, warning: '这是 dry-run，未实际写入数据库' };
+    }
+    await query(
+      `INSERT INTO dr_drawing_deepenings (id, project_id, task, owner, status, plan_id, area_id, created_date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO UPDATE
+       SET task=EXCLUDED.task, owner=EXCLUDED.owner, status=EXCLUDED.status, plan_id=EXCLUDED.plan_id, area_id=EXCLUDED.area_id`,
+      [id, projectId, task, data.owner || null, data.status || '进行中', data.planId || null, data.areaId || null, ctx.date]
+    );
+    return { id, task, message: `已创建图纸深化: ${task}` };
+  }
+  },
+
+  {
+  name: 'createAttendance',
+  description: '批量录入管理人员签到。records 必填——对象格式 {managerId: {present: true/false, reason: "请假"}}。',
+  isMutate: true,
+  requiresConfirm: false,
+  params: { dryRun: 'true=只返回将签到的数据', date: 'YYYY-MM-DD，默认今日', records: '{managerId: {present: true/false, reason: ""}}' },
+  handler: async (params, ctx) => {
+    const { dryRun, ...data } = params;
+    const records = data.records;
+    const date = data.date || ctx.date;
+    const projectId = ctx.projectId || 'baicaoyuan';
+    if (!records || Object.keys(records).length === 0) throw new Error('records 必填');
+    if (dryRun) {
+      return { dryRun: true, date, records, warning: '这是 dry-run，未实际签到' };
+    }
+    const count = Object.keys(records).length;
+    for (const [managerId, rec] of Object.entries(records)) {
+      await query(
+        `INSERT INTO dr_daily_attendance (date, project_id, manager_id, present, reason)
+         VALUES ($1,$2,$3,$4,$5) ON CONFLICT (date, project_id, manager_id) DO UPDATE
+         SET present=EXCLUDED.present, reason=EXCLUDED.reason`,
+        [date, projectId, managerId, rec.present || true, rec.reason || '']
+      );
+    }
+    return { date, count, message: `已签到 ${count} 人` };
+  }
+  },
+
+  {
+  name: 'createArea',
+  description: '创建项目区域。projectId 和 id 必填，name 为区域名称。',
+  isMutate: true,
+  requiresConfirm: true,
+  params: { dryRun: 'true=只返回将创建的区域', projectId: '项目ID（必填）', id: '区域ID（必填）', name: '区域名称', floor: '楼层', manager: '负责人' },
+  handler: async (params, ctx) => {
+    const { dryRun, projectId, id, ...data } = params;
+    if (!projectId || !id) throw new Error('projectId 和 id 必填');
+    if (dryRun) {
+      return { dryRun: true, projectId, id, name: data.name, warning: '这是 dry-run，未实际写入数据库' };
+    }
+    await query(
+      `INSERT INTO dr_areas (project_id, id, name, floor, manager) VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (project_id, id) DO UPDATE SET name=$3, floor=$4, manager=$5`,
+      [projectId, id, data.name || '', data.floor || '', data.manager || '']
+    );
+    return { projectId, id, name: data.name, message: `已创建区域: ${data.name}` };
+  }
+  },
+
+  {
+  name: 'deleteArea',
+  description: '⚠️ 删除项目区域。projectId 和 id 必填。删除后区域下的事件将失去关联。',
+  isMutate: true,
+  requiresConfirm: true,
+  params: { dryRun: 'true=只检查区域是否存在', projectId: '项目ID（必填）', id: '区域ID（必填）' },
+  handler: async (params, ctx) => {
+    const { dryRun, projectId, id } = params;
+    if (!projectId || !id) throw new Error('projectId 和 id 必填');
+    if (dryRun) {
+      const cur = await query('SELECT * FROM dr_areas WHERE project_id=$1 AND id=$2', [projectId, id]);
+      if (cur.rows.length === 0) throw new Error(`区域 ${projectId}/${id} 不存在`);
+      return { dryRun: true, projectId, id, current: cur.rows[0], warning: 'dry-run，未实际删除' };
+    }
+    await query('DELETE FROM dr_areas WHERE project_id=$1 AND id=$2', [projectId, id]);
+    return { projectId, id, message: `已删除区域 ${id}` };
+  }
+  },
+
+  {
+  name: 'createStandardTrade',
+  description: '创建标准工种模板。tradeName 必填。可指定 mapFrom（映射来源）和 sortOrder（排序）。',
+  isMutate: true,
+  requiresConfirm: true,
+  params: { dryRun: 'true=只返回将创建的工种', tradeName: '工种名称（必填）', mapFrom: '映射来源', sortOrder: '排序号' },
+  handler: async (params, ctx) => {
+    const { dryRun, tradeName, ...data } = params;
+    if (!tradeName) throw new Error('tradeName 必填');
+    if (dryRun) {
+      return { dryRun: true, tradeName, warning: '这是 dry-run，未实际写入数据库' };
+    }
+    const r = await query(
+      `INSERT INTO dr_standard_trades (project_id, trade_name, map_from, sort_order) VALUES ($1, $2, $3, $4) RETURNING id`,
+      [ctx.projectId || null, tradeName, data.mapFrom || null, data.sortOrder || 0]
+    );
+    return { id: r.rows[0].id, tradeName, message: `已创建标准工种: ${tradeName}` };
+  }
+  },
+
+  {
+  name: 'deleteStandardTrade',
+  description: '⚠️ 删除标准工种模板。tradeId 必填。',
+  isMutate: true,
+  requiresConfirm: true,
+  params: { dryRun: 'true=只检查工种是否存在', tradeId: '工种ID（必填）' },
+  handler: async (params, ctx) => {
+    const { dryRun, tradeId } = params;
+    if (!tradeId) throw new Error('tradeId 必填');
+    if (dryRun) {
+      const cur = await query('SELECT * FROM dr_standard_trades WHERE id=$1', [tradeId]);
+      if (cur.rows.length === 0) throw new Error(`工种 ${tradeId} 不存在`);
+      return { dryRun: true, tradeId, current: cur.rows[0], warning: 'dry-run，未实际删除' };
+    }
+    await query('DELETE FROM dr_standard_trades WHERE id=$1', [tradeId]);
+    return { tradeId, message: `已删除标准工种` };
+  }
+  },
+
+  {
+  name: 'createManagement',
+  description: '创建/更新管理层团队成员。position 和 name 必填。',
+  isMutate: true,
+  requiresConfirm: true,
+  params: { dryRun: 'true=只返回将创建的信息', position: '职位（必填）', name: '姓名（必填）', phone: '电话', id: '自定义ID' },
+  handler: async (params, ctx) => {
+    const { dryRun, position, name, ...data } = params;
+    if (!position || !name) throw new Error('position 和 name 必填');
+    const id = data.id || `M${Date.now()}`;
+    if (dryRun) {
+      return { dryRun: true, id, position, name, warning: '这是 dry-run，未实际写入数据库' };
+    }
+    await query(
+      `INSERT INTO dr_management_team (id, position, name, phone) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (id) DO UPDATE SET position=$2, name=$3, phone=$4`,
+      [id, position, name, data.phone || '']
+    );
+    return { id, position, name, message: `已创建管理层成员: ${name}` };
+  }
+  },
+
+  {
+  name: 'createGanttItem',
+  description: '创建甘特图任务项。area 和 task 必填。可指定 durationDays/schedule/labor。',
+  isMutate: true,
+  requiresConfirm: true,
+  params: { dryRun: 'true=只返回将创建的任务', area: '区域名称（必填）', task: '任务描述（必填）', durationDays: '持续天数', schedule: '日期列表', labor: '劳动力需求' },
+  handler: async (params, ctx) => {
+    const { dryRun, area, task, ...data } = params;
+    if (!area || !task) throw new Error('area 和 task 必填');
+    const id = 'G' + Date.now();
+    if (dryRun) {
+      return { dryRun: true, id, area, task, warning: '这是 dry-run，未实际写入数据库' };
+    }
+    await query(
+      `INSERT INTO dr_weekly_gantt_items (id, area, area_order, seq, task, duration_days, schedule, labor)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)`,
+      [id, area, 0, 1, task, data.durationDays || 1, JSON.stringify(data.schedule || []), data.labor || '']
+    );
+    return { id, area, task, message: `已创建甘特任务: ${task}` };
+  }
+  },
+
+  {
+  name: 'createMilestone',
+  description: '创建里程碑节点。category 和 description 必填。可指定 nodeType/areaLabel/targetMonth。',
+  isMutate: true,
+  requiresConfirm: true,
+  params: { dryRun: 'true=只返回将创建的里程碑', category: '类别（必填）', nodeType: '节点类型', areaLabel: '区域标签', description: '描述（必填）', targetMonth: '目标月份', year: '年份' },
+  handler: async (params, ctx) => {
+    const { dryRun, category, description, ...data } = params;
+    if (!category || !description) throw new Error('category 和 description 必填');
+    const id = data.id || `MS${Date.now()}`;
+    if (dryRun) {
+      return { dryRun: true, id, category, description, warning: '这是 dry-run，未实际写入数据库' };
+    }
+    await query(
+      `INSERT INTO dr_milestone_plans (project_id, id, category, node_type, area_label, description, target_month, year, sub_items)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb) ON CONFLICT (project_id, id) DO UPDATE
+       SET category=$3, node_type=$4, area_label=$5, description=$6, target_month=$7, year=$8`,
+      [ctx.projectId || 'baicaoyuan', id, category, data.nodeType || '', data.areaLabel || '', description, data.targetMonth || '', data.year || 2026, '[]']
+    );
+    return { id, category, description, message: `已创建里程碑: ${description}` };
+  }
+  },
+
+  {
+  name: 'updateWeeklyLabor',
+  description: '批量更新周劳动力数据。rows 必填——数组格式 [{weekStart, tradeId, thisWeekCount, nextWeekCount}]。',
+  isMutate: true,
+  requiresConfirm: true,
+  params: { dryRun: 'true=只返回将更新的内容', rows: '[{weekStart, tradeId, thisWeekCount, nextWeekCount}]' },
+  handler: async (params, ctx) => {
+    const { dryRun, rows } = params;
+    if (!rows || !Array.isArray(rows)) throw new Error('rows 必填');
+    if (dryRun) {
+      return { dryRun: true, rows, warning: '这是 dry-run，未实际写入数据库' };
+    }
+    for (const r of rows) {
+      if (!r.weekStart || !r.tradeId) continue;
+      await query(
+        `INSERT INTO dr_weekly_labor_data (project_id, week_start, trade_id, this_week_count, next_week_count, updated_at)
+         VALUES ($1,$2,$3,$4,$5, now()) ON CONFLICT (project_id, week_start, trade_id) DO UPDATE
+         SET this_week_count=$4, next_week_count=$5, updated_at=now()`,
+        [ctx.projectId || 'baicaoyuan', r.weekStart, parseInt(r.tradeId), parseInt(r.thisWeekCount)||0, parseInt(r.nextWeekCount)||0]
+      );
+    }
+    return { count: rows.length, message: `已更新 ${rows.length} 条劳动力数据` };
+  }
+  },
+
+  {
+  name: 'createConstructionZone',
+  description: '创建施工段排期。building 和 process 必填。可指定 location/floors。',
+  isMutate: true,
+  requiresConfirm: true,
+  params: { dryRun: 'true=只返回将创建的施工段', building: '楼栋（必填）', process: '工序（必填）', location: '位置', floors: '楼层列表' },
+  handler: async (params, ctx) => {
+    const { dryRun, building, process, ...data } = params;
+    if (!building || !process) throw new Error('building 和 process 必填');
+    const id = 'CZ' + Date.now();
+    if (dryRun) {
+      return { dryRun: true, id, building, process, warning: '这是 dry-run，未实际写入数据库' };
+    }
+    await query(
+      `INSERT INTO dr_construction_zone_schedules (id, building, location, process, floors) VALUES ($1,$2,$3,$4,$5::jsonb)`,
+      [id, building, data.location || '', process, JSON.stringify(data.floors || [])]
+    );
+    return { id, building, process, message: `已创建施工段: ${building} - ${process}` };
+  }
+  },
+
+  // ========== 新增查询工具 ==========
+
+  {
+  name: 'queryECC',
+  description: '查询 ECC（工程变更指令）项。可按时 status/type/areaId 筛选',
+  params: { status: 'open|closed|closing', type: 'ECC 类型', areaId: '区域ID', limit: '最多返回条数' },
+  handler: async (params, ctx) => {
+    const conds = ['project_id=$1'];
+    const vals = [ctx.projectId || 'baicaoyuan'];
+    let i = 2;
+    if (params.status) { conds.push(`status=$${i++}`); vals.push(params.status); }
+    if (params.areaId) { conds.push(`area_id=$${i++}`); vals.push(params.areaId); }
+    const limit = params.limit || 50;
+    const r = await query(`SELECT * FROM dr_ecc_items WHERE ${conds.join(' AND ')} ORDER BY discovered_date DESC LIMIT ${limit}`, vals);
+    return r.rows.map(e => ({
+      id: e.id, title: e.title, areaId: e.area_id, discoveredDate: e.discovered_date, status: e.status, closedDate: e.closed_date
+    }));
+  }
+  },
+
+  {
+  name: 'queryGantt',
+  description: '查询甘特图任务项。可按时 area/task 筛选',
+  params: { area: '区域名称', limit: '最多返回条数' },
+  handler: async (params, ctx) => {
+    const conds = ['1=1'];
+    const vals = [];
+    let i = 1;
+    if (params.area) { conds.push(`area ILIKE $${i++}`); vals.push(`%${params.area}%`); }
+    const limit = params.limit || 100;
+    const r = await query(`SELECT * FROM dr_weekly_gantt_items WHERE ${conds.join(' AND ')} ORDER BY area_order, seq LIMIT ${limit}`, vals);
+    return r.rows.map(g => ({
+      id: g.id, area: g.area, task: g.task, durationDays: g.duration_days, schedule: g.schedule || [], labor: g.labor
+    }));
+  }
+  },
+
+  {
+  name: 'queryMilestone',
+  description: '查询里程碑节点。可按时 category/nodeType 筛选',
+  params: { category: '类别', nodeType: '节点类型', limit: '最多返回条数' },
+  handler: async (params, ctx) => {
+    const conds = ['project_id=$1'];
+    const vals = [ctx.projectId || 'baicaoyuan'];
+    let i = 2;
+    if (params.category) { conds.push(`category=$${i++}`); vals.push(params.category); }
+    if (params.nodeType) { conds.push(`node_type=$${i++}`); vals.push(params.nodeType); }
+    const limit = params.limit || 50;
+    const r = await query(`SELECT * FROM dr_milestone_plans WHERE ${conds.join(' AND ')} ORDER BY id LIMIT ${limit}`, vals);
+    return r.rows.map(m => ({
+      id: m.id, category: m.category, nodeType: m.node_type, areaLabel: m.area_label, description: m.description, targetMonth: m.target_month, year: m.year
+    }));
+  }
+  },
+
+  {
+  name: 'queryManagement',
+  description: '查询管理层团队成员',
+  params: {},
+  handler: async (params, ctx) => {
+    const r = await query('SELECT * FROM dr_management_team ORDER BY position');
+    return r.rows.map(m => ({
+      id: m.id, position: m.position, name: m.name, phone: m.phone
+    }));
+  }
+  },
+
+  {
+  name: 'queryStandardTrade',
+  description: '查询标准工种模板',
+  params: { projectId: '项目ID（可选）' },
+  handler: async (params, ctx) => {
+    const r = await query('SELECT * FROM dr_standard_trades ORDER BY project_id NULLS FIRST, sort_order');
+    return r.rows.map(s => ({
+      id: s.id, projectId: s.project_id, tradeName: s.trade_name, mapFrom: s.map_from, sortOrder: s.sort_order
+    }));
+  }
+  },
+
+  {
+  name: 'queryWeeklyLabor',
+  description: '查询周劳动力数据。weekStart 必填',
+  params: { weekStart: 'YYYY-MM-DD，必填' },
+  handler: async (params, ctx) => {
+    if (!params.weekStart) throw new Error('weekStart 必填');
+    const r = await query(
+      `SELECT * FROM dr_weekly_labor_data WHERE project_id=$1 AND week_start=$2 ORDER BY trade_id`,
+      [ctx.projectId || 'baicaoyuan', params.weekStart]
+    );
+    return r.rows.map(row => ({
+      id: row.id, weekStart: row.week_start, tradeId: row.trade_id, thisWeekCount: row.this_week_count, nextWeekCount: row.next_week_count
+    }));
+  }
+  },
+
+  {
+  name: 'queryDrawing',
+  description: '查询图纸深化记录。可按时 status/areaId 筛选',
+  params: { status: '待开始|进行中|已完成', areaId: '区域ID', limit: '最多返回条数' },
+  handler: async (params, ctx) => {
+    const conds = ['project_id=$1'];
+    const vals = [ctx.projectId || 'baicaoyuan'];
+    let i = 2;
+    if (params.status) { conds.push(`status=$${i++}`); vals.push(params.status); }
+    if (params.areaId) { conds.push(`area_id=$${i++}`); vals.push(params.areaId); }
+    const limit = params.limit || 50;
+    const r = await query(`SELECT * FROM dr_drawing_deepenings WHERE ${conds.join(' AND ')} ORDER BY created_date DESC LIMIT ${limit}`, vals);
+    return r.rows.map(d => ({
+      id: d.id, task: d.task, owner: d.owner, status: d.status, areaId: d.area_id, planId: d.plan_id, createdDate: d.created_date
+    }));
+  }
+  },
+
+  {
+  name: 'queryAttendance',
+  description: '查询签到历史。date 必填',
+  params: { date: 'YYYY-MM-DD，必填' },
+  handler: async (params, ctx) => {
+    if (!params.date) throw new Error('date 必填');
+    const r = await query(
+      `SELECT * FROM dr_daily_attendance WHERE project_id=$1 AND date=$2 ORDER BY manager_id`,
+      [ctx.projectId || 'baicaoyuan', params.date]
+    );
+    return r.rows.map(a => ({
+      date: a.date, managerId: a.manager_id, present: a.present, reason: a.reason
+    }));
+  }
+  },
+
+  {
+  name: 'queryPhoto',
+  description: '查询照片记录。可按时 projectId/type 筛选',
+  params: { projectId: '项目ID', type: 'page03|page06', limit: '最多返回条数' },
+  handler: async (params, ctx) => {
+    const conds = ['1=1'];
+    const vals = [];
+    let i = 1;
+    if (params.projectId) { conds.push(`project_id=$${i++}`); vals.push(params.projectId); }
+    const limit = params.limit || 50;
+    // 合并 page03 和 page06 的照片
+    const r = await query(`SELECT * FROM dr_page06_photos WHERE ${conds.join(' AND ')} ORDER BY created_at DESC LIMIT ${limit}`, vals);
+    return r.rows.map(p => ({
+      id: p.id, projectId: p.project_id, src: p.src, caption: p.caption || '', tradeId: p.trade_id
+    }));
+  }
+  },
+
+  {
+  name: 'queryConstructionZone',
+  description: '查询施工段排期',
+  params: { building: '楼栋关键词', limit: '最多返回条数' },
+  handler: async (params, ctx) => {
+    const conds = ['1=1'];
+    const vals = [];
+    let i = 1;
+    if (params.building) { conds.push(`building ILIKE $${i++}`); vals.push(`%${params.building}%`); }
+    const limit = params.limit || 50;
+    const r = await query(`SELECT * FROM dr_construction_zone_schedules WHERE ${conds.join(' AND ')} LIMIT ${limit}`, vals);
+    return r.rows.map(z => ({
+      id: z.id, building: z.building, location: z.location, process: z.process, floors: z.floors || []
+    }));
+  }
+  },
+
+  {
+  name: 'queryECCSummary',
+  description: '查询 ECC 汇总统计（按项目）',
+  params: { projectId: '项目ID（可选）' },
+  handler: async (params, ctx) => {
+    const pid = params.projectId || ctx.projectId || 'baicaoyuan';
+    const r = await query('SELECT * FROM dr_ecc_summaries WHERE project_id=$1', [pid]);
+    return r.rows.map(s => ({
+      projectId: s.project_id, total: s.total, closed: s.closed, closing: s.closing, open: s.open, rate: s.rate
+    }));
+  }
+  },
+
+  {
+  name: 'queryAreas',
+  description: '查询项目区域列表。可按时 projectId 筛选',
+  params: { projectId: '项目ID（可选，默认 baicaoyuan）' },
+  handler: async (params, ctx) => {
+    const pid = params.projectId || ctx.projectId || 'baicaoyuan';
+    const r = await query('SELECT * FROM dr_areas WHERE project_id=$1 ORDER BY id', [pid]);
+    return r.rows.map(a => ({
+      id: a.id, name: a.name, floor: a.floor, manager: a.manager
+    }));
+  }
+  },
+
+  {
+  name: 'queryWorkers',
+  description: '查询工人列表',
+  params: {},
+  handler: async (params, ctx) => {
+    const r = await query('SELECT * FROM dr_workers ORDER BY id');
+    return r.rows.map(w => ({
+      id: w.id, name: w.name, role: w.role, team: w.team, phone: w.phone
+    }));
+  }
+  },
+
+  {
+  name: 'queryProjects',
+  description: '查询所有项目',
+  params: {},
+  handler: async (params, ctx) => {
+    const r = await query('SELECT * FROM dr_projects ORDER BY id');
+    return r.rows.map(p => ({
+      id: p.id, name: p.name, client: p.client, location: p.location, color: p.color, enabledFields: p.enabled_fields || []
+    }));
+  }
   }
   ];
 
