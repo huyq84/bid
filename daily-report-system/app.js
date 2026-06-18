@@ -8,7 +8,8 @@ let M = window.MockData;
 // 从后端 API 加载真实数据，失败时静默回退到 MockData
 async function loadDataFromAPI() {
   try {
-    const res = await fetch('http://localhost:3010/api/data/all');
+    // 加 cacheBust 时间戳避免浏览器 / 代理缓存（确保 LLM 操作后立即看到最新状态）
+    const res = await fetch('http://localhost:3010/api/data/all?_=' + Date.now(), { cache: 'no-store' });
     if (!res.ok) return;
     const data = await res.json();
     if (!data || !data.PROJECTS) return;
@@ -8913,9 +8914,12 @@ async function _callChatLLM(text, isContinuation = false) {
       data.results.forEach(r => {
         appendChatMessage('system', (r.ok ? '✅ ' : '❌ ') + (r.message || r.error || '执行'));
       });
-      if (data.results.some(r => r.ok)) {
+      const okResults = data.results.filter(r => r.ok);
+      if (okResults.length > 0) {
         anyExecuted = true;
-        _refreshAfterChat(data.results.filter(r => r.ok).map(r => r.action.type));
+        // 乐观更新本地缓存（确保 UI 立即反映后端最新状态）
+        okResults.forEach(r => _applyLocalUpdate(r.action || {}));
+        _refreshAfterChat(okResults.map(r => r.action.type));
       }
     } else if (data.actions && data.actions.length > 0) {
       data.actions.forEach(a => executeChatAction(a));
@@ -9018,34 +9022,11 @@ async function authorizeAction(btn) {
         '<div style="color:#4ade80;font-weight:600;font-size:13px;">✅ 已授权执行</div>' +
         '<div style="font-size:13px;color:#e2e8f0;margin-top:4px;">' + _escapeHtml(msg) + '</div>';
     }
-    // 刷新数据
-    // 直接从本地 M.EVENTS/M.ISSUES 同步，避免 loadDataFromAPI 的保护逻辑或时序问题
-    const act = data.action || {};
-    if (act.type === 'deleteEvent' && act.data?.eventId) {
-      M.EVENTS = (M.EVENTS || []).filter(e => e.id !== act.data.eventId);
-      if (typeof renderFilteredEvents === 'function') renderFilteredEvents();
-      if (typeof renderStats === 'function') renderStats();
-      if (typeof updateCalendar === 'function') updateCalendar();
-      if (typeof renderDailyPlanCard === 'function') renderDailyPlanCard();
-    } else if ((act.type === 'deleteIssue' || act.type === 'closeIssue') && act.data?.issueId) {
-      M.ISSUES = (M.ISSUES || []).filter(i => i.id !== act.data.issueId);
-      if (typeof renderIssues === 'function') renderIssues();
-    } else if (act.type === 'updateEvent' && act.data?.eventId) {
-      // 直接更新本地事件缓存 + 后台刷新
-      const ev = (M.EVENTS || []).find(e => e.id === act.data.eventId);
-      if (ev) {
-        if (act.data.taskName) ev.payload.taskName = act.data.taskName;
-        if (act.data.owner) ev.payload.owner = act.data.owner;
-        if (act.data.progress) ev.payload.progress = act.data.progress;
-        if (act.data.headcount) ev.payload.headcount = act.data.headcount;
-        if (act.data.note) ev.payload.description = act.data.note;
-        if (act.data.type) ev.type = act.data.type;
-        if (act.data.status) ev.status = act.data.status;
-      }
-      await _refreshAfterChat([act.type]);
-    } else {
-      await _refreshAfterChat([act.type || 'updateEvent']);
-    }
+    // 乐观更新本地缓存（避免 loadDataFromAPI 在某些时序下覆盖不到，或返回前端的快照是旧的）
+    _applyLocalUpdate(data.action || {});
+    // 刷新数据：统一通过 _refreshAfterChat 拉取最新并刷新所有相关 UI
+    // （包括主视图时间线 / 当前周报页 / 周报预览面板）
+    await _refreshAfterChat([(data.action || {}).type || 'updateEvent']);
   } catch (e) {
     const card = btn.closest('.ai-message');
     if (card) {
@@ -9054,6 +9035,55 @@ async function authorizeAction(btn) {
     }
     btn.disabled = false; btn.textContent = '✅ 重试';
   }
+}
+
+// 把授权执行的结果立即同步到本地 M.EVENTS / M.ISSUES（避免 UI 显示陈旧）
+function _applyLocalUpdate(act) {
+  if (!act || !act.type) return;
+  const d = act.data || {};
+  try {
+    if (act.type === 'deleteEvent' && d.eventId) {
+      M.EVENTS = (M.EVENTS || []).filter(e => e.id !== d.eventId);
+    } else if (act.type === 'updateEvent' && d.eventId) {
+      const ev = (M.EVENTS || []).find(e => e.id === d.eventId);
+      if (ev) {
+        if (d.taskName) ev.payload.taskName = d.taskName;
+        if (d.owner) ev.payload.owner = d.owner;
+        if (d.progress) ev.payload.progress = d.progress;
+        if (d.headcount) ev.payload.headcount = d.headcount;
+        if (d.note) ev.payload.description = d.note;
+        if (d.type) ev.type = d.type;
+        if (d.status) ev.status = d.status;
+      }
+    } else if (act.type === 'confirmEvent' && d.eventId) {
+      const ev = (M.EVENTS || []).find(e => e.id === d.eventId);
+      if (ev) ev.status = 'confirmed';
+    } else if (act.type === 'deleteIssue' && d.issueId) {
+      M.ISSUES = (M.ISSUES || []).filter(i => i.id !== d.issueId);
+    } else if (act.type === 'closeIssue' && d.issueId) {
+      const i = (M.ISSUES || []).find(x => x.id === d.issueId);
+      if (i) i.status = 'closed';
+    } else if (act.type === 'updateIssue' && d.issueId) {
+      const i = (M.ISSUES || []).find(x => x.id === d.issueId);
+      if (i) {
+        if (d.title) i.title = d.title;
+        if (d.status) i.status = d.status;
+        if (d.priority) i.priority = d.priority;
+        if (d.owner) i.owner = d.owner;
+      }
+    } else if (act.type === 'updatePlan' && d.planId) {
+      const pid = typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan';
+      const p = (M.PLANS[pid] || []).find(x => x.id === d.planId);
+      if (p) {
+        if (d.progress != null && d.progress !== '') p.progress = String(d.progress);
+        if (d.status) p.status = d.status;
+        if (d.taskName) p.taskName = d.taskName;
+        if (d.owner) p.owner = d.owner;
+        if (d.buildingNo) p.buildingNo = d.buildingNo;
+        if (d.floorNo) p.floorNo = d.floorNo;
+      }
+    }
+  } catch (e) { console.warn('[applyLocalUpdate]', e); }
 }
 
 // 取消
@@ -9250,21 +9280,62 @@ async function triggerInspection() {
 async function _refreshAfterChat(actionTypes) {
   const types = new Set(actionTypes);
   try {
+    // 先统一拉取一次最新数据（避免重复请求）
+    const needsReload = types.has('createEvent') || types.has('updateEvent') || types.has('deleteEvent')
+      || types.has('createIssue') || types.has('updateIssue') || types.has('closeIssue')
+      || types.has('createAttendance') || types.has('createDrawing')
+      || types.has('updatePlan');
+    if (needsReload && typeof loadDataFromAPI === 'function') {
+      await loadDataFromAPI();
+    }
+
+    // 主视图相关：事件流 / 统计 / 日历 / 日计划卡片
     if (types.has('createEvent') || types.has('updateEvent') || types.has('deleteEvent')) {
-      if (typeof loadDataFromAPI === 'function') { await loadDataFromAPI(); if (typeof renderFilteredEvents === 'function') renderFilteredEvents(); if (typeof renderStats === 'function') renderStats(); if (typeof updateCalendar === 'function') updateCalendar(); if (typeof renderDailyPlanCard === 'function') renderDailyPlanCard(); }
+      if (typeof renderFilteredEvents === 'function') renderFilteredEvents();
+      if (typeof renderStats === 'function') renderStats();
+      if (typeof updateCalendar === 'function') updateCalendar();
+      if (typeof renderDailyPlanCard === 'function') renderDailyPlanCard();
     }
-    if (types.has('createIssue') || types.has('updateIssue') || types.has('closeIssue')) {
-      if (typeof loadDataFromAPI === 'function') { await loadDataFromAPI(); if (typeof renderIssues === 'function') renderIssues(); }
+    if (types.has('createIssue') || types.has('updateIssue') || types.has('closeIssue') || types.has('deleteIssue')) {
+      if (typeof renderIssues === 'function') renderIssues();
     }
-    if (types.has('createAttendance')) { if (typeof loadDataFromAPI === 'function') await loadDataFromAPI(); }
-    if (types.has('createDrawing')) { if (typeof loadDataFromAPI === 'function') await loadDataFromAPI(); }
-    if (types.has('updatePlan')) {
-      if (typeof loadDataFromAPI === 'function') { await loadDataFromAPI(); if (typeof renderDailyPlanCard === 'function') renderDailyPlanCard(); if (typeof renderFilteredEvents === 'function') renderFilteredEvents(); }
-      // 当前活动页若是 Gantt/施工段页，重新渲染
-      const curPage = document.querySelector('#reportPageNav button.active[data-page]')?.dataset.page;
-      if ((curPage === '10' || curPage === '11') && typeof switchMappingTab === 'function') switchMappingTab(curPage);
+
+    // 当前打开的周报页（Gantt / 施工段 / 协调 / ECC 销项等）实时刷新
+    const curPage = document.querySelector('#reportPageNav button.active[data-page]')?.dataset.page;
+    if (curPage && typeof switchMappingTab === 'function') {
+      // 总是重新渲染当前页（确保 plan/event/issue 任何变更都反映出来）
+      switchMappingTab(curPage);
+    }
+
+    // 周报预览面板若打开，刷新其内容
+    const weeklyPreview = document.getElementById('weeklyReportPreview');
+    if (weeklyPreview && weeklyPreview.style.display !== 'none' && typeof renderWeeklyReportPreview === 'function') {
+      try { renderWeeklyReportPreview(); } catch {}
+    }
+
+    // 详情/编辑模态框若打开，刷新其内容
+    if (typeof _refreshOpenModal === 'function') {
+      try { _refreshOpenModal(); } catch {}
     }
   } catch (e) { console.warn('[chat] 刷新数据失败:', e); }
+}
+
+function _refreshOpenModal() {
+  // 找到当前打开的 modal（mask 显示中），如果有就重新填充/关闭重开
+  const masks = document.querySelectorAll('.modal-mask');
+  for (const m of masks) {
+    if (m.style.display === 'none' || m.style.display === '') continue;
+    const id = m.id || '';
+    // 事件详情 / 编辑模态
+    if (id === 'modalEventDetail' || id === 'modalEventEdit' || id === 'modalDailyPlan') {
+      const content = m.querySelector('.modal-body');
+      if (content && content.dataset.refreshHandler) {
+        try { window[content.dataset.refreshHandler](); } catch {}
+      }
+      // 这些模态显示的是单个事件/计划的快照，强制重渲染前应让用户重新打开
+      // 简化：不做自动重渲染（避免覆盖用户未保存的编辑），仅清掉再让用户手动打开
+    }
+  }
 }
 
 // ------ Markdown 渲染 + 消息显示 ------
