@@ -1345,12 +1345,12 @@
 
   <!-- ============== 模态框：系统设置 ============== -->
   <div class="modal-mask" id="modalSettings">
-    <div class="modal" style="max-width:520px;">
-      <div class="modal-header">
-        <div class="modal-title">⚙️ 系统设置</div>
-        <button class="modal-close" onclick="closeModal('modalSettings')">✕</button>
+    <div class="modal" style="max-width:520px;background:#0f172a;color:#f1f5f9;border:1px solid rgba(255,255,255,0.08);">
+      <div class="modal-header" style="border-bottom:1px solid rgba(255,255,255,0.08);">
+        <div class="modal-title" style="color:#f1f5f9;">⚙️ 系统设置</div>
+        <button class="modal-close" onclick="closeModal('modalSettings')" style="background:rgba(255,255,255,0.1);color:#f1f5f9;border:none;">✕</button>
       </div>
-      <div class="modal-body" style="max-height:60vh;overflow-y:auto;">
+      <div class="modal-body" style="max-height:60vh;overflow-y:auto;background:#0f172a;">
         <!-- LLM 权限 -->
         <div class="settings-section">
           <div class="settings-label">🤖 LLM 操作权限</div>
@@ -1383,14 +1383,23 @@
 
         <div class="settings-divider"></div>
 
+        <!-- LLM 迭代次数 -->
+        <div class="settings-section">
+          <div class="settings-label">🔄 LLM 最大迭代次数</div>
+          <div class="settings-desc">LLM 执行任务失败后可重试的次数（默认 3，过大可能导致无限循环）</div>
+          <input type="number" id="llmMaxIters" min="1" max="20" value="3" class="form-input" style="width:100px;">
+        </div>
+
+        <div class="settings-divider"></div>
+
         <!-- 巡检频率 -->
         <div class="settings-section">
           <div class="settings-label">🔔 巡检提醒频率</div>
           <div class="settings-desc">设置自动巡检的触发时间点和检查间隔</div>
           <div class="settings-inspection-row">
             <span>触发时间：</span>
-            <div style="display:flex;flex-wrap:wrap;gap:6px;" id="inspectionTimesList"></div>
-            <button class="settings-add-time" onclick="addInspectionTime()">+ 添加</button>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;" id="inspectionTimesList"></div>
+            <input type="time" id="inspectionTimeInput" class="settings-time-picker" onchange="addInspectionTimeFromPicker()" value="">
           </div>
           <div class="settings-inspection-row">
             <span>检查间隔：</span>
@@ -1403,23 +1412,115 @@
           </div>
         </div>
       </div>
-      <div class="modal-footer">
+      <div class="modal-footer" style="border-top:1px solid rgba(255,255,255,0.08);">
         <button class="btn btn-ghost" onclick="closeModal('modalSettings')">取消</button>
+        <button class="btn btn-secondary" onclick="closeModal('modalSettings');openLLMSettings()">🤖 LLM 模型</button>
         <button class="btn btn-primary" onclick="saveSettings()">💾 保存设置</button>
       </div>
     </div>
   </div>
 
   <!-- ============== 模态框：LLM 设置 ============== -->
-  <div class="modal-mask" id="modalLLM">
-    <div class="modal">
-      <div class="modal-header">
-        <div class="modal-title">🤖 LLM 设置</div>
-        <button class="modal-close" onclick="closeModal('modalLLM')">✕</button>
+  <div class="modal-mask" id="modalLLM" style="z-index:100000;">
+    <div class="modal" style="max-width:900px;width:95%;background:#0f172a;color:#f1f5f9;">
+      <div class="modal-header" style="background:#0f172a;border-bottom:1px solid rgba(255,255,255,0.1);">
+        <div class="modal-title" style="color:#f1f5f9;">🤖 LLM 设置</div>
+        <button class="modal-close" onclick="closeModal('modalLLM')" style="background:rgba(255,255,255,0.1);color:#f1f5f9;">✕</button>
       </div>
-      <div class="modal-body">
-        <div id="llmConfigBody">
+      <div class="modal-body" style="max-height:70vh;overflow-y:auto;background:#0f172a;">
+        <!-- Tab 导航 -->
+        <div style="display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid rgba(255,255,255,0.1);padding-bottom:8px;">
+          <button class="btn btn-sm btn-secondary" id="tabBasic" onclick="switchLLMTab('basic')" style="background:rgba(255,255,255,0.1);color:#f1f5f9;border:none;">📋 基础设置</button>
+          <button class="btn btn-sm btn-primary" id="tabCustom" onclick="switchLLMTab('custom')" style="background:#3b82f6;color:#fff;border:none;">🔧 自定义模型</button>
+          <button class="btn btn-sm btn-secondary" id="tabProviders" onclick="switchLLMTab('providers')" style="background:rgba(255,255,255,0.1);color:#f1f5f9;border:none;">🌐 提供商</button>
+        </div>
+
+        <!-- 基础设置 Tab -->
+        <div id="llmConfigBody" style="color:#cbd5e1;">
           <div style="text-align:center; padding:20px; color:#94a3b8;">加载中...</div>
+        </div>
+
+        <!-- 自定义模型 Tab -->
+        <div id="customModelsBody" style="display:none;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <h3 style="margin:0;color:#f1f5f9;font-size:14px;">📦 已添加的自定义模型</h3>
+            <button class="btn btn-primary btn-sm" onclick="showAddCustomModelForm()">➕ 添加模型</button>
+          </div>
+
+          <!-- 当前使用模型提示 -->
+          <div id="activeModelIndicator" style="background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.3);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#cbd5e1;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <div>
+              <span style="color:#86efac;">✅ 当前使用：</span>
+              <strong id="activeModelName" style="color:#86efac;">MiniMax-M3（默认）</strong>
+            </div>
+            <button id="resetToDefaultBtn" class="btn btn-sm" onclick="deactivateCustomModel()" style="background:rgba(255,255,255,0.1);color:#f1f5f9;border:none;font-size:11px;display:none;">🔙 恢复基础模型</button>
+          </div>
+
+          <!-- 添加模型表单 -->
+          <div id="addCustomModelForm" style="display:none;background:rgba(30,41,59,0.8);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:12px;margin-bottom:12px;">
+            <div style="font-size:13px;color:#fbbf24;font-weight:600;margin-bottom:8px;">添加新模型</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <div>
+                <label style="font-size:11px;color:#94a3b8;">模型名称</label>
+                <input type="text" id="cmName" placeholder="例如：GPT-4o" style="width:100%;padding:6px 8px;background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.2);border-radius:4px;color:#f1f5f9;font-size:12px;">
+              </div>
+              <div>
+                <label style="font-size:11px;color:#94a3b8;">API 提供商</label>
+                <select id="cmProvider" onchange="loadProviderModels()" style="width:100%;padding:6px 8px;background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.2);border-radius:4px;color:#f1f5f9;font-size:12px;">
+                  <option value="">请选择</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="together">Together AI</option>
+                  <option value="siliconflow">SiliconFlow</option>
+                  <option value="volcengine">火山引擎</option>
+                  <option value="other">其他</option>
+                </select>
+              </div>
+              <div style="grid-column:1/-1;">
+                <label style="font-size:11px;color:#94a3b8;">Base URL</label>
+                <input type="text" id="cmBaseUrl" placeholder="https://api.openai.com/v1" style="width:100%;padding:6px 8px;background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.2);border-radius:4px;color:#f1f5f9;font-size:12px;">
+              </div>
+              <div style="grid-column:1/-1;">
+                <label style="font-size:11px;color:#94a3b8;">API Key</label>
+                <input type="password" id="cmApiKey" placeholder="sk-..." style="width:100%;padding:6px 8px;background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.2);border-radius:4px;color:#f1f5f9;font-size:12px;">
+              </div>
+              <div>
+                <label style="font-size:11px;color:#94a3b8;">模型 ID <span style="color:#94a3b8;font-weight:400;font-size:10px;">（可手动输入或自动获取）</span></label>
+                <div style="display:flex;gap:6px;">
+                  <input type="text" id="cmModelId" placeholder="gpt-4o-mini" style="flex:1;padding:6px 8px;background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.2);border-radius:4px;color:#f1f5f9;font-size:12px;">
+                  <button id="cmDiscoverBtn" class="btn btn-sm btn-ghost" onclick="discoverModels()" style="white-space:nowrap;font-size:11px;background:rgba(255,255,255,0.1);color:#f1f5f9;">🔍 获取列表</button>
+                </div>
+                <select id="cmModelSelect" style="display:none;width:100%;margin-top:6px;padding:6px 8px;background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.2);border-radius:4px;color:#f1f5f9;font-size:12px;" onchange="document.getElementById('cmModelId').value=this.value">
+                  <option value="">请选择模型...</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size:11px;color:#94a3b8;">Max Tokens</label>
+                <input type="number" id="cmMaxTokens" value="4096" style="width:100%;padding:6px 8px;background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.2);border-radius:4px;color:#f1f5f9;font-size:12px;">
+              </div>
+              <div>
+                <label style="font-size:11px;color:#94a3b8;">Temperature</label>
+                <input type="number" id="cmTemperature" value="0.5" step="0.1" min="0" max="2" style="width:100%;padding:6px 8px;background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.2);border-radius:4px;color:#f1f5f9;font-size:12px;">
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;">
+              <button class="btn btn-ghost btn-sm" onclick="hideAddCustomModelForm()" style="background:rgba(255,255,255,0.1);color:#f1f5f9;">取消</button>
+              <button class="btn btn-primary btn-sm" onclick="addCustomModel()" style="background:#3b82f6;color:#fff;">添加模型</button>
+            </div>
+          </div>
+
+          <!-- 模型列表 -->
+          <div id="customModelsList">
+            <div style="text-align:center;padding:20px;color:#94a3b8;">加载中...</div>
+          </div>
+        </div>
+        
+        <!-- 提供商 Tab -->
+        <div id="providersBody" style="display:none;">
+          <h3 style="margin:0 0 12px 0;color:#f1f5f9;font-size:14px;">🌐 支持的 LLM 提供商</h3>
+          <div id="providersList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;">
+            <div style="text-align:center;padding:20px;color:#94a3b8;">加载中...</div>
+          </div>
         </div>
       </div>
       <div class="modal-footer">
@@ -1478,6 +1579,13 @@
         <div class="ai-chat-session-menu-item" onclick="deleteCurrentSession()">🗑️ 删除会话</div>
         <div class="ai-chat-session-menu-item" onclick="clearChatMessages()" style="border-top:1px solid rgba(255,255,255,0.08);margin-top:2px;padding-top:6px;">🧹 清空对话</div>
       </div>
+      <div id="aiChatTaskPanel" class="ai-chat-task-panel" style="display:none;background:rgba(15,23,42,0.6);border-bottom:1px solid rgba(255,255,255,0.08);padding:8px 12px;font-size:12px;max-height:160px;overflow-y:auto;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <div id="aiChatTaskTitle" style="color:#fbbf24;font-weight:600;">📋 任务进度 <span id="aiChatTaskProgress">0/0</span> <span style="color:#94a3b8;font-weight:400;font-size:11px;margin-left:6px;">AI 自动处理中…</span></div>
+          <div id="aiChatTaskClose" onclick="hideTaskPanel()" style="cursor:pointer;color:#94a3b8;padding:0 4px;">✕</div>
+        </div>
+        <div id="aiChatTaskList" style="display:flex;flex-direction:column;gap:4px;"></div>
+      </div>
       <div class="ai-chat-messages" id="aiChatMessages"></div>
       <div class="ai-chat-actions" id="aiChatActions">
         <span class="ai-chip" onclick="quickChatAction('帮我记录一个协调事宜')">📋 记录协调</span>
@@ -1525,8 +1633,8 @@
   </div>
 
   <!-- 引入脚本 -->
-  <script src="mock-data.js"></script>
-  <script src="app.v3.js"></script>
+  <script src="mock-data.js?v=4"></script>
+  <script src="app.v3.js?v=4"></script>
   <script>
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closePhotoLightbox(); });
   </script>

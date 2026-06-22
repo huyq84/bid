@@ -14,9 +14,20 @@ const pool = new pg.Pool({
   password: process.env.DB_PASSWORD || '123456',
 });
 
+// 确保所有新连接使用 UTF-8 编码
+pool.on('connect', (client) => {
+  client.query("SET client_encoding TO 'UTF8'").catch(() => {});
+});
+
 export async function query(text, params) {
-  return pool.query(text, params);
+  const result = await pool.query(text, params);
+  return result;
 }
+
+// 确保所有新连接使用 UTF-8 编码
+pool.on('connect', (client) => {
+  client.query("SET client_encoding TO 'UTF8'").catch(() => {});
+});
 
 export async function getClient() {
   return pool.connect();
@@ -97,6 +108,7 @@ CREATE TABLE IF NOT EXISTS dr_daily_plans (
   task_name TEXT,
   progress TEXT DEFAULT '0%',
   status TEXT DEFAULT 'active',
+  type TEXT,
   labor_schedule JSONB DEFAULT '[]',
   area_targets JSONB DEFAULT '[]',
   total_man_days INTEGER DEFAULT 0,
@@ -104,6 +116,11 @@ CREATE TABLE IF NOT EXISTS dr_daily_plans (
   owner TEXT,
   building_no TEXT,
   floor_no TEXT,
+  materials JSONB DEFAULT '[]',
+  machinery JSONB DEFAULT '[]',
+  safety_notes TEXT,
+  zone_images JSONB DEFAULT '[]',
+  area_id TEXT,
   extra JSONB DEFAULT '{}',
   created_at TEXT,
   updated_at TEXT
@@ -286,6 +303,23 @@ CREATE TABLE IF NOT EXISTS dr_settings (
   value JSONB NOT NULL DEFAULT '{}',
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- 会话管理
+CREATE TABLE IF NOT EXISTS dr_sessions (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL DEFAULT 'baicaoyuan',
+  name TEXT NOT NULL DEFAULT '新对话',
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS dr_session_messages (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES dr_sessions(id) ON DELETE CASCADE,
+  role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
 `;
 
 // Seed data from mock-data.js
@@ -430,7 +464,7 @@ async function ensureDatabaseExists() {
     password: process.env.DB_PASSWORD || '123456',
   });
   try {
-    await adminPool.query(`CREATE DATABASE "${targetDb}"`);
+    await adminPool.query(`CREATE DATABASE "${targetDb}" ENCODING 'UTF8' LC_COLLATE 'zh_CN.UTF-8' LC_CTYPE 'zh_CN.UTF-8' TEMPLATE template0`);
     console.log(`[DB] 目标数据库 "${targetDb}" 创建成功`);
   } catch (createErr) {
     // 42P04 = duplicate_database（其他进程/请求刚创建了）
@@ -460,6 +494,12 @@ export async function initDatabase() {
   try { await pool.query("ALTER TABLE dr_daily_plans ADD COLUMN IF NOT EXISTS owner TEXT"); } catch {};
   try { await pool.query("ALTER TABLE dr_daily_plans ADD COLUMN IF NOT EXISTS building_no TEXT"); } catch {};
   try { await pool.query("ALTER TABLE dr_daily_plans ADD COLUMN IF NOT EXISTS floor_no TEXT"); } catch {};
+  try { await pool.query("ALTER TABLE dr_daily_plans ADD COLUMN IF NOT EXISTS type TEXT"); } catch {};
+  try { await pool.query("ALTER TABLE dr_daily_plans ADD COLUMN IF NOT EXISTS materials JSONB DEFAULT '[]'"); } catch {};
+  try { await pool.query("ALTER TABLE dr_daily_plans ADD COLUMN IF NOT EXISTS machinery JSONB DEFAULT '[]'"); } catch {};
+  try { await pool.query("ALTER TABLE dr_daily_plans ADD COLUMN IF NOT EXISTS safety_notes TEXT"); } catch {};
+  try { await pool.query("ALTER TABLE dr_daily_plans ADD COLUMN IF NOT EXISTS zone_images JSONB DEFAULT '[]'"); } catch {};
+  try { await pool.query("ALTER TABLE dr_daily_plans ADD COLUMN IF NOT EXISTS area_id TEXT"); } catch {};
   // 给旧 ECC 表加 photos 列
   try { await pool.query('ALTER TABLE dr_ecc_items ADD COLUMN IF NOT EXISTS photos JSONB DEFAULT \'[]\'::jsonb'); } catch {};
   // 给旧 ECC 汇总表加 photos 列

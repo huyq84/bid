@@ -45,7 +45,7 @@ node test-integration.js
 node test-e2e.js
 ```
 
-所有测试都用 `jsdom` + `runScripts: 'dangerously'`，手动注入 `mock-data.js` + `app.js`（因为 jsdom 默认不加载 `<script src>`，见 `tests/test-integration.js:14-19`）。
+所有测试都用 `jsdom` + `runScripts: 'dangerously'`，手动注入 `mock-data.js` + `app.v3.js`（因为 jsdom 默认不加载 `<script src>`，见 `tests/test-integration.js:14-19`）。
 
 **没有正式的 lint / 格式化 / 类型检查**——保持和现有代码风格一致即可（4 空格缩进、CommonJS 在 tests / ESM 在 backend、模板字符串中插入 HTML）。
 
@@ -54,7 +54,7 @@ node test-e2e.js
 ```
 ┌────────────────────────┐  fetch  ┌─────────────────────────┐
 │  index.html (静态)     │ ──────▶ │  backend/server.js      │
-│  + app.js              │         │  (Express, 端口 3010)   │
+│  + app.v3.js           │         │  (Express, 端口 3010)   │
 │  + mock-data.js        │         │                         │
 │  + styles.css          │         │  ├─ llm-client.js       │ ──▶ MiniMax /v1/messages
 └────────────────────────┘         │  └─ mock-fallback.js    │ （LLM 失败时回退）
@@ -64,7 +64,7 @@ node test-e2e.js
 ### 前端职责
 - 4 种录入方式：语音、拍照、手动、事项台账
 - 今日事件流 + 日历视图 + 项目信息 + 事项台账
-- 后端状态指示（30 秒轮询 `/api/health`，见 `app.js:1371`）
+- 后端状态指示（30 秒轮询 `/api/health`）
 - 真实 LLM 失败时**静默降级**到 `mock-data.js` 的规则化解析
 
 ### 后端职责（`backend/server.js`）
@@ -97,20 +97,20 @@ node test-e2e.js
 - `EVENTS` / `HISTORY_EVENTS` — 当天/历史事件，`type` ∈ `progress | material | safety | coordination | attendance`
 - `ISSUES` — 跨日跟踪的事项，`type` ∈ `quality | safety | coordination | ecc | change | visa`，`status` ∈ `open | in_progress | closed`
 
-`app.js` 通过 `let M = window.MockData;`（`app.js:5`）访问。
+`app.v3.js` 通过 `let M = window.MockData;` 访问。
 
 ## 修改时容易踩的坑
 
 1. **前后端规则必须双份维护**。`mock-data.js` 的 `mockParseVoice` 跟 `backend/mock-fallback.js` 的 `mockParseVoice` 是平行的，改一边要同步另一边——这是降级策略，不是 DRY 违反。
 2. **后端读的是项目根 `.env`，不是 `backend/.env`**。新增环境变量要么放根 `.env`，要么改 `backend/server.js:22` 的 `ENV_PATH`。
 3. **LLM 输出 JSON 不可信**。`_parseJsonSafe` 已经做了三道处理（去 markdown / 提取 `{...}` / 字段兜底），但调用方仍要在拿到 `areaId` 后用 `areas.find(a => a.id === obj.areaId)` 校验。
-4. **App.js 是单文件 1500+ 行**，从 `initCalendarWithToday` 开始按职责段划分，LLM 集成追加在文件末尾（`app.js:1361` 注释 "追加 - 不影响原有逻辑"）。新功能如需改核心渲染，优先在对应段内改；跨段改动风险高。
-5. **测试用 `setTimeout` 等异步**（`test-integration.js:29, 60, 80`），如果改了 `app.js` 的初始化时序，需要相应调 timeout。
+4. **`app.v3.js` 是单文件大前端**，从 `initCalendarWithToday` 开始按职责段划分。新功能如需改核心渲染，优先在对应段内改；跨段改动风险高。
+5. **测试用 `setTimeout` 等异步**（`test-integration.js:29, 60, 80`），如果改了 `app.v3.js` 的初始化时序，需要相应调 timeout。
 6. **样式在 `styles.css`，主蓝 `#00adef`**——新增组件时先 grep 现有 `.card` / `.btn` / `.form-input` 复用，不要内联大量样式。
 
 ## 集成点
 
-- 与 **百草园/绿城/万科** 周报系统的对接**尚未实现**（`design.md` 是规划文档，`app.js:473` 的"导出到周报系统"目前是 mock 按钮）。`design.md` 描述的 `weekly-report-adapter.js` 还没写。
+- 与 **百草园/绿城/万科** 周报系统的对接**尚未实现**（`design.md` 是规划文档，"导出到周报系统"目前是 mock 按钮）。`design.md` 描述的 `weekly-report-adapter.js` 还没写。
 - 真实 LLM 唯一接入点是 `MINIMAX_API_KEY`（根 `.env`），协议是 Anthropic 兼容（`x-api-key` header + `anthropic-version: 2023-06-01`）。
 - 没有身份认证、没有数据库、没有 Redis——`.env` 里的 `DB_*` / `REDIS_*` / `JWT_*` 是 `design.md` 规划的 Phase 2 配置，当前代码不读。
 
@@ -119,7 +119,7 @@ node test-e2e.js
 | 文件 | 作用 |
 |------|------|
 | `index.html` | 主页骨架 + 9 个模态框（语音/拍照/手动/事项/周报/项目切换/事件详情/事件编辑/日计划/LLM 设置） |
-| `app.js` | 全部前端逻辑（1500+ 行），状态 + 渲染 + 录入 + 后端调用 |
+| `app.v3.js` | 全部前端逻辑，状态 + 渲染 + 录入 + 后端调用 |
 | `mock-data.js` | 3 个项目的 PROJECTS/AREAS/WORKERS/EVENTS/ISSUES 静态数据 + 规则化 mockParse* |
 | `styles.css` | 主蓝 `#00adef` 品牌色，所有 `.card` `.btn` `.modal` `.timeline` 等基础类 |
 | `backend/server.js` | Express 入口，5 个 LLM 代理端点 |

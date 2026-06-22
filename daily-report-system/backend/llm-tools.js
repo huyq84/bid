@@ -2,7 +2,7 @@
 import { query } from './db.js';
 import { executeAction } from './chat-actions.js';
 
-const TOOLS = [
+export const TOOLS = [
   {
     name: 'queryEvents',
     description: '查询今日完成（日报事件）。可按日期、类型、区域、状态、任务名模糊筛选',
@@ -20,9 +20,10 @@ const TOOLS = [
       const r = await query(`SELECT * FROM dr_events WHERE ${conds.join(' AND ')} ORDER BY time LIMIT ${limit}`, vals);
       return r.rows.map(e => ({
         id: e.id, time: e.time, type: e.type, areaId: e.area_id,
+        planId: e.plan_id || '',
         taskName: e.payload?.taskName || '', owner: e.owner || e.payload?.owner || '',
         progress: e.payload?.progress || '', headcount: e.payload?.headcount || 0,
-        laborRequirements: e.payload?.laborRequirements || [],
+        laborRequirements: Array.isArray(e.payload?.laborRequirements) ? e.payload.laborRequirements : [],
         completionType: e.completion_type || '', buildingNo: e.building_no || '',
         floorNo: e.floor_no || '', status: e.status, source: e.source
       }));
@@ -44,12 +45,12 @@ const TOOLS = [
         return {
           id: p.id, taskName: p.task_name, progress: p.progress, status: p.status,
           startDate: p.start_date, endDate: p.end_date,
-          areaId: extra.areaId || '', areaName: extra.areaName || '',
-          owner: extra.owner || '', buildingNo: extra.buildingNo || '',
-          floorNo: extra.floorNo || '', totalManDays: p.total_man_days || 0,
+          areaId: p.area_id || extra.areaId || '', areaName: extra.areaName || '',
+          owner: p.owner || extra.owner || '', buildingNo: p.building_no || extra.buildingNo || '',
+          floorNo: p.floor_no || extra.floorNo || '', totalManDays: p.total_man_days || 0,
           laborSchedule: Array.isArray(p.labor_schedule) ? p.labor_schedule : [],
           areaTargets: Array.isArray(p.area_targets) ? p.area_targets : [],
-          type: extra.type || ''
+          type: p.type || extra.type || ''
         };
       });
     }
@@ -143,10 +144,10 @@ const TOOLS = [
 
   {
   name: 'createEvent',
-  description: '创建一条施工日报事件。type + taskName 必填。areaId/planId/owner/progress/headcount 等可选。⚠️ 必须先调 queryPlans 确认 planId 真实存在。',
+  description: '创建一条施工日报事件。type + taskName 必填。areaId/planId/owner/progress/headcount 等可选。⚠️ 必须先调 queryPlans 确认 planId 真实存在。type 取值：progress/material/safety/coordination/attendance/drawing（不要用 issue，那属于协调事项）。',
   isMutate: true,
   requiresConfirm: false,  // safe action
-  params: { dryRun: 'true=只返回将创建的数据', type: 'progress|material|safety|coordination|attendance|issue|drawing', taskName: '任务名', areaId: '区域ID', planId: '关联计划ID', owner: '负责人', progress: '进度%', headcount: '总人数', laborRequirements: '工种×人数', completionType: 'planned|unplanned', buildingNo: '楼栋', floorNo: '楼层', note: '备注' },
+  params: { dryRun: 'true=只返回将创建的数据', type: '事件类型：progress/material/safety/coordination/attendance/drawing', taskName: '任务名', areaId: '区域ID', areaName: '区域名（备用）', planId: '关联计划ID', owner: '负责人', progress: '进度%', headcount: '总人数', laborRequirements: '工种×人数', completionType: 'planned|unplanned', buildingNo: '楼栋', floorNo: '楼层', note: '备注/description', time: 'HH:MM 不传则用当前时间', source: 'voice|photo|manual|chat|auto，不传默认 chat' },
   handler: async (params, ctx) => {
     const { dryRun, ...data } = params;
     if (dryRun) {
@@ -163,10 +164,10 @@ const TOOLS = [
 
   {
   name: 'updateEvent',
-  description: '根据 eventId 修改一条事件。eventId 必填——必须先调 queryEvents 拿到真实 ID（不要编造）。可改 taskName/owner/progress/headcount/type/status/areaId/completionType/buildingNo/floorNo。',
+  description: '根据 eventId 修改一条事件。eventId 必填——必须先调 queryEvents 拿到真实 ID（不要编造）。可改 taskName/owner/progress/headcount/type/status/areaId/planId/completionType/buildingNo/floorNo/note/time/source。',
   isMutate: true,
-  requiresConfirm: true,  // sensitive
-  params: { dryRun: 'true=只返回将修改的内容', eventId: '事件ID（必填）', taskName: '任务名', owner: '负责人', progress: '进度%', headcount: '总人数', laborRequirements: '工种×人数', type: '事件类型', status: 'draft|confirmed', areaId: '区域ID', completionType: 'planned|unplanned', buildingNo: '楼栋', floorNo: '楼层' },
+  requiresConfirm: false,  // safe — 同 createEvent
+  params: { dryRun: 'true=只返回将修改的内容', eventId: '事件ID（必填）', taskName: '任务名', owner: '负责人', progress: '进度%', headcount: '总人数', laborRequirements: '工种×人数', type: '事件类型', status: 'draft|confirmed', areaId: '区域ID', planId: '关联计划ID（先调 queryPlans 查真实 ID）', completionType: 'planned|unplanned', buildingNo: '楼栋', floorNo: '楼层', note: '备注/description', time: 'HH:MM', source: 'voice|photo|manual|chat|auto' },
   handler: async (params, ctx) => {
     const { dryRun, eventId, ...data } = params;
     if (!eventId) throw new Error('eventId 必填');
@@ -253,11 +254,28 @@ const TOOLS = [
   },
 
   {
+  name: 'createIssue',
+  description: '创建一条协调事项。title 必填。type（quality/safety/coordination/ecc/change/visa）等可选。⚠️ 不要用 type=issue（事件类型字段）。',
+  isMutate: true,
+  requiresConfirm: false,  // safe：与 SAFE_ACTIONS 一致
+  params: { dryRun: 'true=只返回将创建的内容', title: '协调标题（必填）', type: '协调类型：quality/safety/coordination/ecc/change/visa', areaId: '区域ID', priority: 'low|medium|high', owner: '负责人', description: '描述', deadline: 'YYYY-MM-DD 截止日期', proposeDept: '发起方', cooperateDept: '配合方' },
+  handler: async (params, ctx) => {
+    const { dryRun, ...data } = params;
+    if (!data.title) throw new Error('title 必填');
+    if (dryRun) {
+      return { dryRun: true, wouldCreate: { projectId: ctx.projectId, ...data }, warning: '这是 dry-run，未实际写入数据库' };
+    }
+    const result = await executeAction({ type: 'createIssue', data }, ctx);
+    return { dryRun: false, ...result, inputData: data };
+  }
+  },
+
+  {
   name: 'updateIssue',
-  description: '修改协调事项。issueId 必填——必须先调 queryIssues 拿到真实 ID。可改 title/status/priority/owner/description。',
+  description: '修改协调事项。issueId 必填——必须先调 queryIssues 拿到真实 ID。可改 title/status/priority/owner/description/type/areaId/proposeDept/cooperateDept/deadline。',
   isMutate: true,
   requiresConfirm: true,  // sensitive
-  params: { dryRun: 'true=只返回将修改的内容', issueId: '协调ID（必填）', title: '标题', status: 'open|in_progress|closed', priority: 'low|medium|high', owner: '负责人', description: '描述' },
+  params: { dryRun: 'true=只返回将修改的内容', issueId: '协调ID（必填）', title: '标题', status: 'open|in_progress|closed', priority: 'low|medium|high', owner: '负责人', description: '描述', type: '协调类型：quality/safety/coordination/ecc/change/visa', areaId: '区域ID', deadline: 'YYYY-MM-DD 截止日期', proposeDept: '发起方', cooperateDept: '配合方', resolution: '解决方案' },
   handler: async (params, ctx) => {
     const { dryRun, issueId, ...data } = params;
     if (!issueId) throw new Error('issueId 必填');
@@ -310,10 +328,10 @@ const TOOLS = [
 
   {
   name: 'updatePlan',
-  description: '完善计划字段。planId 必填——必须先调 queryPlans 拿到真实 ID。可改 areaId/owner/progress/buildingNo/floorNo/laborRequirements/taskName/status。',
+  description: '完善计划字段。planId 必填——必须先调 queryPlans 拿到真实 ID。可改 areaId/type/owner/progress/buildingNo/floorNo/laborRequirements/taskName/status/description/process/totalManDays/materials/machinery/safetyNotes。',
   isMutate: true,
   requiresConfirm: true,  // sensitive
-  params: { dryRun: 'true=只返回将完善的内容', planId: '计划ID（必填）', areaId: '区域ID', areaName: '区域名', owner: '负责人', progress: '进度%', buildingNo: '楼栋', floorNo: '楼层', laborRequirements: '工种×人数', taskName: '任务名', status: 'active|completed|paused' },
+  params: { dryRun: 'true=只返回将完善的内容', planId: '计划ID（必填）', areaId: '区域ID', areaName: '区域名', type: '事件类型:progress|material|safety|coordination|attendance|drawing', owner: '负责人', progress: '进度%', buildingNo: '楼栋', floorNo: '楼层', laborRequirements: '工种×人数', taskName: '任务名', status: 'active|completed|paused', description: '描述', process: '工序', totalManDays: '总工日', materials: '材料清单（字符串数组）', machinery: '机械设备（字符串数组）', safetyNotes: '安全注意事项' },
   handler: async (params, ctx) => {
     const { dryRun, planId, ...data } = params;
     if (!planId) throw new Error('planId 必填');
@@ -340,10 +358,10 @@ const TOOLS = [
 
   {
   name: 'createPlan',
-  description: '创建新的施工计划。taskName 和 projectId 必填。可指定 areaId/owner/progress/buildingNo/floorNo/laborRequirements/date。⚠️ 日期必须在合理范围内。',
+  description: '创建新的施工计划。taskName 必填。可指定 date/startDate/endDate/areaId/type/owner/progress/buildingNo/floorNo/laborRequirements/description/process/totalManDays/materials/machinery/safetyNotes。⚠️ 日期必须在合理范围内。',
   isMutate: true,
-  requiresConfirm: true,
-  params: { dryRun: 'true=只返回将创建的内容', taskName: '任务名（必填）', date: 'YYYY-MM-DD，计划执行日期', startDate: '开始日期', endDate: '结束日期', areaId: '区域ID', areaName: '区域名', owner: '负责人', progress: '进度%', buildingNo: '楼栋', floorNo: '楼层', laborRequirements: '工种×人数', status: 'active|completed|paused' },
+  requiresConfirm: false,  // ✅ safe：与 systemMsg 一致；chat-actions.js 的 SENSITIVE_ACTIONS 也不含 createPlan
+  params: { dryRun: 'true=只返回将创建的内容', taskName: '任务名（必填）', date: 'YYYY-MM-DD，计划执行日期', startDate: '开始日期', endDate: '结束日期', areaId: '区域ID', areaName: '区域名', type: '事件类型:progress|material|safety|coordination|attendance|drawing', owner: '负责人', progress: '进度%', buildingNo: '楼栋', floorNo: '楼层', laborRequirements: '工种×人数', status: 'active|completed|paused', description: '描述', process: '工序', totalManDays: '总工日', materials: '材料清单（字符串数组）', machinery: '机械设备（字符串数组）', safetyNotes: '安全注意事项' },
   handler: async (params, ctx) => {
     const { dryRun, taskName, ...data } = params;
     if (!taskName) throw new Error('taskName 必填');
@@ -353,8 +371,125 @@ const TOOLS = [
     if (dryRun) {
       return { dryRun: true, wouldCreate: { id, projectId, taskName, ...data }, warning: '这是 dry-run，未实际写入数据库' };
     }
-    await executeAction({ type: 'createPlan', data: { id, projectId, taskName, ...data } }, ctx);
-    return { dryRun: false, id, taskName, message: `已创建计划: ${taskName}` };
+    const result = await executeAction({ type: 'createPlan', data: { id, projectId, taskName, ...data } }, ctx);
+    return { dryRun: false, ...result, id, taskName, inputData: { id, projectId, taskName, ...data } };
+  }
+  },
+
+  {
+  name: 'deletePlan',
+  description: '⚠️ 物理删除单条计划。planId 必填——必须先调 queryPlans 拿到真实 ID。删除后不可恢复（DB 真的删，不只是前端隐藏）。',
+  isMutate: true,
+  requiresConfirm: true,  // sensitive：物理删除
+  params: { dryRun: 'true=只返回将被删除的计划', planId: '计划ID（必填）' },
+  handler: async (params, ctx) => {
+    const { dryRun, planId } = params;
+    if (!planId) throw new Error('planId 必填');
+    const cur = await query('SELECT id, task_name, start_date, end_date, status FROM dr_daily_plans WHERE id=$1', [planId]);
+    if (cur.rows.length === 0) throw new Error(`计划 ${planId} 不存在。请先调 queryPlans 查真实 ID。`);
+    if (dryRun) {
+      return { dryRun: true, planId, current: cur.rows[0], warning: 'dry-run，未实际删除' };
+    }
+    if (ctx?.permLevel === 'confirm') {
+      return {
+        dryRun: false,
+        needsConfirm: true,
+        pendingAction: { type: 'deletePlan', data: { planId } },
+        summary: `删除计划: ${cur.rows[0].task_name} (${planId})`,
+        message: '请用户点击 ✅ 授权卡片确认执行'
+      };
+    }
+    await query('DELETE FROM dr_daily_plans WHERE id=$1', [planId]);
+    return { dryRun: false, ok: true, data: { planId, deletedTaskName: cur.rows[0].task_name }, planId, message: `已删除计划: ${cur.rows[0].task_name}` };
+  }
+  },
+
+  {
+  name: 'deletePlansByQuery',
+  description: '⚠️ 危险操作！按条件批量删除计划。必填：date（限定到某一天）+ 至少一个其他条件（status/areaId/owner/taskNameContains/ids）。先 dryRun=true 看会被删哪些，确认后 dryRun=false + forceDelete=true 真删。',
+  isMutate: true,
+  requiresConfirm: true,  // sensitive
+  params: {
+    dryRun: 'true=只列出将被删除的计划',
+    forceDelete: 'true=真删（需要 dryRun=false）',
+    date: 'YYYY-MM-DD 必填（限定范围，可与 startDate/endDate 之一配合）',
+    startDate: 'YYYY-MM-DD 起始日（含），可与 date 互斥',
+    endDate: 'YYYY-MM-DD 结束日（含），可与 date 互斥',
+    status: 'active|completed|paused|cancelled',
+    areaId: '区域ID',
+    owner: '负责人（模糊匹配）',
+    taskNameContains: '任务名关键词（模糊匹配）',
+    ids: '显式 planId 列表（数组）',
+    confirmConditions: '中文描述"要删什么"，给用户看'
+  },
+  handler: async (params, ctx) => {
+    const { dryRun, forceDelete, ids, taskNameContains, date, startDate, endDate, ...rest } = params;
+
+    // 1) 至少一个筛选条件
+    if (!ids && !date && !startDate && !endDate && !taskNameContains && !rest.areaId && !rest.status && !rest.owner) {
+      throw new Error('deletePlansByQuery 至少需要一个筛选条件（ids/date/startDate/endDate/areaId/status/owner/taskNameContains）');
+    }
+
+    // 2) 拼 SQL
+    const conds = ['1=1'];
+    const vals = [];
+    let i = 1;
+    if (ids && Array.isArray(ids) && ids.length > 0) {
+      conds.push(`id = ANY($${i++}::text[])`);
+      vals.push(ids);
+    }
+    if (date) { conds.push(`(start_date <= $${i} AND end_date >= $${i})`); vals.push(date); i++; }
+    if (startDate) { conds.push(`end_date >= $${i++}`); vals.push(startDate); }
+    if (endDate) { conds.push(`start_date <= $${i++}`); vals.push(endDate); }
+    if (rest.areaId) {
+      const i1 = i++;
+      const i2 = i++;
+      conds.push(`(extra->>'areaId' = $${i1} OR area_targets @> $${i2}::jsonb)`);
+      vals.push(rest.areaId);
+      vals.push(JSON.stringify([{areaId: rest.areaId}]));
+    }
+    // ✅ owner 在 createPlan 路径只写 extra->>'owner'（顶层 owner 列为 null），所以同时查
+    if (rest.status) { conds.push(`status = $${i++}`); vals.push(rest.status); }
+    if (rest.owner) {
+      const i1 = i++;
+      const i2 = i++;
+      conds.push(`(owner = $${i1} OR extra->>'owner' = $${i2})`);
+      vals.push(rest.owner);
+      vals.push(rest.owner);
+    }
+    if (taskNameContains) { conds.push(`task_name ILIKE $${i++}`); vals.push(`%${taskNameContains}%`); }
+
+    const sql = `SELECT id, task_name, start_date, end_date, status FROM dr_daily_plans WHERE ${conds.join(' AND ')} ORDER BY start_date LIMIT 200`;
+    const cur = await query(sql, vals);
+    const wouldDelete = cur.rows;
+
+    if (dryRun) {
+      return {
+        dryRun: true,
+        matchCount: wouldDelete.length,
+        plans: wouldDelete,
+        warning: `将删除 ${wouldDelete.length} 条计划。要真删请传 dryRun=false + forceDelete=true`
+      };
+    }
+
+    if (!forceDelete) {
+      throw new Error('批量删除需要 forceDelete=true。安全起见，必须二次确认。');
+    }
+
+    if (ctx?.permLevel === 'confirm') {
+      return {
+        dryRun: false,
+        needsConfirm: true,
+        pendingAction: { type: 'deletePlansByQuery', data: { ids: wouldDelete.map(p => p.id), confirmConditions: rest.confirmConditions } },
+        summary: `批量删除 ${wouldDelete.length} 条计划`,
+        message: '请用户点击 ✅ 授权卡片确认执行'
+      };
+    }
+
+    // 3) 真删
+    const idsToDelete = wouldDelete.map(p => p.id);
+    await query('DELETE FROM dr_daily_plans WHERE id = ANY($1::text[])', [idsToDelete]);
+    return { dryRun: false, ok: true, data: { deletedIds: idsToDelete, count: idsToDelete.length }, deletedCount: idsToDelete.length, message: `已删除 ${idsToDelete.length} 条计划` };
   }
   },
 
@@ -417,10 +552,10 @@ const TOOLS = [
 
   {
   name: 'createECC',
-  description: '创建 ECC（工程变更指令）项。title 必填。可指定 areaId/discoveredDate/status。',
+  description: '创建 ECC（工程变更指令）项。title 必填。可指定 areaId/discoveredDate/status/closedDate/photos。',
   isMutate: true,
   requiresConfirm: true,
-  params: { dryRun: 'true=只返回将创建的内容', title: 'ECC 标题（必填）', areaId: '区域ID', discoveredDate: '发现日期 YYYY-MM-DD', status: 'open|closed|closing' },
+  params: { dryRun: 'true=只返回将创建的内容', title: 'ECC 标题（必填）', areaId: '区域ID', discoveredDate: '发现日期 YYYY-MM-DD', status: 'open|closed|closing', closedDate: '关闭日期 YYYY-MM-DD', photos: '照片数组' },
   handler: async (params, ctx) => {
     const { dryRun, title, ...data } = params;
     if (!title) throw new Error('title 必填');
@@ -429,11 +564,14 @@ const TOOLS = [
     if (dryRun) {
       return { dryRun: true, wouldCreate: { id, projectId, title, ...data }, warning: '这是 dry-run，未实际写入数据库' };
     }
+    const isClosed = data.status === 'closed';
     await query(
-      `INSERT INTO dr_ecc_items (id, project_id, title, area_id, discovered_date, status)
-       VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO UPDATE
-       SET title=EXCLUDED.title, area_id=EXCLUDED.area_id, discovered_date=EXCLUDED.discovered_date, status=EXCLUDED.status`,
-      [id, projectId, title, data.areaId || null, data.discoveredDate || ctx.date, data.status || 'open']
+      `INSERT INTO dr_ecc_items (id, project_id, title, area_id, discovered_date, status, closed_date, photos)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb) ON CONFLICT (id) DO UPDATE
+       SET title=EXCLUDED.title, area_id=EXCLUDED.area_id, discovered_date=EXCLUDED.discovered_date,
+           status=EXCLUDED.status, closed_date=EXCLUDED.closed_date, photos=EXCLUDED.photos`,
+      [id, projectId, title, data.areaId || null, data.discoveredDate || ctx.date, data.status || 'open',
+       isClosed ? (data.closedDate || ctx.date) : null, JSON.stringify(data.photos || [])]
     );
     return { id, title, message: `已创建 ECC: ${title}` };
   }
@@ -479,10 +617,10 @@ const TOOLS = [
 
   {
   name: 'createDrawing',
-  description: '创建图纸深化记录。task 必填。可指定 owner/status/areaId/planId。',
+  description: '创建图纸深化记录。task 必填。可指定 owner/status/areaId/planId/progress/eventId。',
   isMutate: true,
   requiresConfirm: true,
-  params: { dryRun: 'true=只返回将创建的内容', task: '深化任务（必填）', owner: '负责人', status: '待开始|进行中|已完成', areaId: '区域ID', planId: '关联计划ID' },
+  params: { dryRun: 'true=只返回将创建的内容', task: '深化任务（必填）', owner: '负责人', status: '待开始|进行中|已完成', areaId: '区域ID', planId: '关联计划ID', progress: '进度%', eventId: '关联事件ID' },
   handler: async (params, ctx) => {
     const { dryRun, task, ...data } = params;
     if (!task) throw new Error('task 必填');
@@ -492,10 +630,13 @@ const TOOLS = [
       return { dryRun: true, wouldCreate: { id, projectId, task, ...data }, warning: '这是 dry-run，未实际写入数据库' };
     }
     await query(
-      `INSERT INTO dr_drawing_deepenings (id, project_id, task, owner, status, plan_id, area_id, created_date)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO UPDATE
-       SET task=EXCLUDED.task, owner=EXCLUDED.owner, status=EXCLUDED.status, plan_id=EXCLUDED.plan_id, area_id=EXCLUDED.area_id`,
-      [id, projectId, task, data.owner || null, data.status || '进行中', data.planId || null, data.areaId || null, ctx.date]
+      `INSERT INTO dr_drawing_deepenings (id, project_id, task, owner, status, plan_id, area_id, created_date, progress, event_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (id) DO UPDATE
+       SET task=EXCLUDED.task, owner=EXCLUDED.owner, status=EXCLUDED.status,
+           plan_id=EXCLUDED.plan_id, area_id=EXCLUDED.area_id,
+           progress=EXCLUDED.progress, event_id=EXCLUDED.event_id`,
+      [id, projectId, task, data.owner || null, data.status || '进行中', data.planId || null,
+       data.areaId || null, ctx.date, data.progress || null, data.eventId || null]
     );
     return { id, task, message: `已创建图纸深化: ${task}` };
   }
@@ -632,10 +773,10 @@ const TOOLS = [
 
   {
   name: 'createGanttItem',
-  description: '创建甘特图任务项。area 和 task 必填。可指定 durationDays/schedule/labor。',
+  description: '创建甘特图任务项。area 和 task 必填。可指定 durationDays/schedule/labor/material/areaOrder/seq。',
   isMutate: true,
   requiresConfirm: true,
-  params: { dryRun: 'true=只返回将创建的任务', area: '区域名称（必填）', task: '任务描述（必填）', durationDays: '持续天数', schedule: '日期列表', labor: '劳动力需求' },
+  params: { dryRun: 'true=只返回将创建的任务', area: '区域名称（必填）', task: '任务描述（必填）', durationDays: '持续天数', schedule: '日期列表', labor: '劳动力需求', material: '材料需求', areaOrder: '区域排序（数字）', seq: '任务序号（数字）' },
   handler: async (params, ctx) => {
     const { dryRun, area, task, ...data } = params;
     if (!area || !task) throw new Error('area 和 task 必填');
@@ -644,9 +785,10 @@ const TOOLS = [
       return { dryRun: true, id, area, task, warning: '这是 dry-run，未实际写入数据库' };
     }
     await query(
-      `INSERT INTO dr_weekly_gantt_items (id, area, area_order, seq, task, duration_days, schedule, labor)
-       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)`,
-      [id, area, 0, 1, task, data.durationDays || 1, JSON.stringify(data.schedule || []), data.labor || '']
+      `INSERT INTO dr_weekly_gantt_items (id, area, area_order, seq, task, duration_days, schedule, labor, material)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)`,
+      [id, area, data.areaOrder || 0, data.seq || 1, task, data.durationDays || 1,
+       JSON.stringify(data.schedule || []), data.labor || '', data.material || '']
     );
     return { id, area, task, message: `已创建甘特任务: ${task}` };
   }
@@ -736,7 +878,7 @@ const TOOLS = [
     const limit = params.limit || 50;
     const r = await query(`SELECT * FROM dr_ecc_items WHERE ${conds.join(' AND ')} ORDER BY discovered_date DESC LIMIT ${limit}`, vals);
     return r.rows.map(e => ({
-      id: e.id, title: e.title, areaId: e.area_id, discoveredDate: e.discovered_date, status: e.status, closedDate: e.closed_date
+      id: e.id, title: e.title, areaId: e.area_id, discoveredDate: e.discovered_date, status: e.status, closedDate: e.closed_date, photos: e.photos || []
     }));
   }
   },
@@ -753,7 +895,7 @@ const TOOLS = [
     const limit = params.limit || 100;
     const r = await query(`SELECT * FROM dr_weekly_gantt_items WHERE ${conds.join(' AND ')} ORDER BY area_order, seq LIMIT ${limit}`, vals);
     return r.rows.map(g => ({
-      id: g.id, area: g.area, task: g.task, durationDays: g.duration_days, schedule: g.schedule || [], labor: g.labor
+      id: g.id, area: g.area, task: g.task, durationDays: g.duration_days, schedule: g.schedule || [], labor: g.labor, material: g.material, areaOrder: g.area_order, seq: g.seq
     }));
   }
   },
@@ -829,7 +971,7 @@ const TOOLS = [
     const limit = params.limit || 50;
     const r = await query(`SELECT * FROM dr_drawing_deepenings WHERE ${conds.join(' AND ')} ORDER BY created_date DESC LIMIT ${limit}`, vals);
     return r.rows.map(d => ({
-      id: d.id, task: d.task, owner: d.owner, status: d.status, areaId: d.area_id, planId: d.plan_id, createdDate: d.created_date
+      id: d.id, task: d.task, owner: d.owner, status: d.status, areaId: d.area_id, planId: d.plan_id, progress: d.progress, createdDate: d.created_date
     }));
   }
   },
@@ -933,8 +1075,36 @@ const TOOLS = [
       id: p.id, name: p.name, client: p.client, location: p.location, color: p.color, enabledFields: p.enabled_fields || []
     }));
   }
+  },
+
+  {
+  name: 'triggerInspection',
+  description: '触发系统巡检，检查今日/本周数据中的问题（未填报计划、进度异常、协调超期等）并生成提醒',
+  params: { projectId: '项目ID，默认baicaoyuan', date: '日期，默认今日', scope: 'all=全量检查 | plans=仅检查计划 | issues=仅检查事项 | attendance=仅检查考勤' },
+  handler: async (params, ctx) => {
+    const { projectId, date, scope } = params;
+    const pid = projectId || ctx.projectId || 'baicaoyuan';
+    const d = date || new Date().toISOString().slice(0, 10);
+    
+    // 动态导入inspection-engine
+    const { dailyInspection } = await import('./inspection-engine.js');
+    const reminders = await dailyInspection(pid, d);
+    
+    return {
+      date: d,
+      projectId: pid,
+      reminderCount: reminders.length,
+      reminders: reminders.map(r => ({
+        type: r.type,
+        priority: r.priority,
+        title: r.title,
+        message: r.message
+      })),
+      message: `巡检完成，发现 ${reminders.length} 条提醒`
+    };
   }
-  ];
+  }
+];
 
 export async function executeTool(name, params, ctx) {
   const tool = TOOLS.find(t => t.name === name);

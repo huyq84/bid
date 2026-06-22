@@ -1,0 +1,13 @@
+[
+  {
+    "id": "1781869773356",
+    "name": "agnes-2.0-flash",
+    "baseUrl": "https://apihub.agnes-ai.com/v1",
+    "apiKey": "sk-cphwwTGbd35V05IdgYUgzNLap6RNcZsEFzGbbLtpVNAztAgN",
+    "modelId": "agnes-2.0-flash",
+    "maxTokens": 40960,
+    "temperature": 0.5,
+    "createdAt": "2026-06-19T11:49:33.356Z",
+    "provider": "openai"
+  }
+]

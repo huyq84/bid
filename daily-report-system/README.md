@@ -22,7 +22,7 @@
   - `index.html`     主页面（顶部 + 左侧事件流 + 右侧项目信息/事项台账）
   - `styles.css`     样式（沿用 #00adef 主蓝品牌色）
   - `mock-data.js`   Mock 数据 + 规则化解析函数（mockParseVoice/Photo/Weekly）
-  - `app.js`         主逻辑（渲染/录入/聚合/模态框/Toast）
+  - `app.v3.js`      主逻辑（渲染/录入/聚合/模态框/Toast）
   - `design.md`      原始设计文档（未改）
   - `requirements.md`原始需求文档（未改）
   - `tests/`         集成测试（jsdom，不参与产品运行）

@@ -67,7 +67,8 @@ const SOURCE_META = {
   voice:  { label: '语音', icon: '🎤' },
   photo:  { label: '拍照', icon: '📷' },
   manual: { label: '手动', icon: '✏️' },
-  auto:   { label: '自动', icon: '⚙️' }
+  auto:   { label: '自动', icon: '⚙️' },
+  chat:   { label: 'AI 对话', icon: '🤖' }
 };
 
 // ============================================================

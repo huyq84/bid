@@ -30,14 +30,14 @@ export async function validateEventData(data, ctx) {
     }
   }
 
-  // 2. planId 校验 — 必须是今日有效计划
+  // 2. planId 校验 — 必须是今日有效计划（date 精确匹配 或 start_date~end_date 区间包含）
   if (validated.planId) {
     const planCheck = await query(
-      `SELECT COUNT(*)::int FROM dr_plans WHERE id=$1 AND project_id=$2 AND date=$3`,
+      `SELECT COUNT(*)::int FROM dr_daily_plans WHERE id=$1 AND project_id=$2 AND (date=$3 OR (start_date <= $3 AND end_date >= $3))`,
       [validated.planId, projectId, date]
     );
     if (planCheck.rows[0].count === 0) {
-      warnings.push(`planId "${validated.planId}" 不存在，已移除`);
+      warnings.push(`planId "${validated.planId}" 不匹配今日计划，已移除`);
       validated.planId = null;
     }
   }
@@ -64,15 +64,15 @@ export async function validatePlanData(data, ctx) {
   const projectId = ctx.projectId || 'baicaoyuan';
   const date = ctx.date;
 
-  // 1. planId 校验
+  // 1. planId 校验（date 精确匹配 或 start_date~end_date 区间包含）
   if (validated.planId) {
     const planCheck = await query(
-      `SELECT COUNT(*)::int FROM dr_plans WHERE id=$1 AND project_id=$2 AND date=$3`,
+      `SELECT COUNT(*)::int FROM dr_daily_plans WHERE id=$1 AND project_id=$2 AND (date=$3 OR (start_date <= $3 AND end_date >= $3))`,
       [validated.planId, projectId, date]
     );
     if (planCheck.rows[0].count === 0) {
-      warnings.push(`planId "${validated.planId}" 不存在`);
-      return { ok: false, error: `计划 ${validated.planId} 不存在`, validated, warnings };
+      warnings.push(`planId "${validated.planId}" 不匹配今日计划`);
+      return { ok: false, error: `计划 ${validated.planId} 不匹配今日`, validated, warnings };
     }
   }
 

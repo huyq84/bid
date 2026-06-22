@@ -1,0 +1,16 @@
+{
+  "name": "daily-report-system",
+  "version": "1.0.0",
+  "description": "为\"日报到周报 LLM 聚合系统\"做**最小可运行 demo**，用 mock 数据把核心流程跑通。",
+  "main": "app.v3.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  }
+}

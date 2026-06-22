@@ -1,0 +1,27 @@
+[启动] 加载 .env: D:\hyq\cjs\zb\daily-report-system\.env
+[启动] LLM 配置:
+  - baseUrl: https://api.minimaxi.com/anthropic/v1
+  - model: MiniMax-M3
+  - apiKey: sk-cp-0p...W2Xc
+  - groupId: 1994684
+  - maxTokens: 81920
+  - temperature: 0.5
+  [数据库] 表已就绪
+
+========================================
+  日报后端已启动
+  本机访问: http://localhost:3010
+  局域网访问地址：
+    http://198.19.18.68:3010
+    http://10.0.0.225:3010
+  健康检查: http://localhost:3010/api/health
+  WebSocket: ws://localhost:3010/ws/chat
+========================================
+
+[WS] 客户端连接 (当前 1 个)
+[WS] 客户端连接 (当前 2 个)
+[12:38:53] GET /api/models/custom
+[12:38:54] GET /api/health
+[巡检] 发现 12 条提醒（3 个项目）
+[12:38:59] GET /api/health
+[12:39:04] GET /api/health

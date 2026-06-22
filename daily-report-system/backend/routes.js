@@ -86,12 +86,17 @@ router.get('/api/data/all', async (req, res) => {
         startDate: p.start_date, endDate: p.end_date,
         description: p.description, taskName: p.task_name,
         progress: p.progress, status: p.status,
-        laborSchedule: p.labor_schedule || [], areaTargets: p.area_targets || [],
-        totalManDays: p.total_man_days || 0,
-        process: p.process, owner: p.owner,
+        type: p.type, process: p.process, owner: p.owner,
         buildingNo: p.building_no, floorNo: p.floor_no,
+        materials: p.materials || [], machinery: p.machinery || [],
+        safetyNotes: p.safety_notes || '', zoneImages: p.zone_images || [],
+        areaId: p.area_id || '',
+        laborSchedule: typeof p.labor_schedule === 'string' ? (() => { try { return JSON.parse(p.labor_schedule); } catch { return []; } })() : (p.labor_schedule || []),
+        areaTargets: p.area_targets || [],
+        totalManDays: p.total_man_days || 0,
         createdAt: p.created_at, updatedAt: p.updated_at,
-        ...(p.extra || {}),
+        // spread extra AFTER explicit fields so legacy laborRequirements in extra doesn't override
+        ...Object.fromEntries(Object.entries(p.extra || {}).filter(([k]) => !['laborRequirements','laborSchedule'].includes(k))),
       });
     }
 
@@ -121,6 +126,7 @@ router.get('/api/data/all', async (req, res) => {
         ...(e.building_no ? { buildingNo: e.building_no } : {}),
         ...(e.floor_no ? { floorNo: e.floor_no } : {}),
         ...(e.owner ? { owner: e.owner } : {}),
+        ...(e.task_name ? { taskName: e.task_name } : {}),
       };
       if (e.date === todayStr) todayEvents.push(ev);
       else historyEvents.push(ev);
@@ -210,12 +216,12 @@ router.get('/api/events', async (req, res) => {
 
 router.post('/api/events', async (req, res) => {
   try {
-    const { id, projectId, date, time, type, areaId, planId, payload, submitter, source, confidence, status, voiceText, photos, note, completionType, buildingNo, floorNo, owner } = req.body;
+    const { id, projectId, date, time, type, areaId, planId, payload, submitter, source, confidence, status, voiceText, photos, note, completionType, buildingNo, floorNo, owner, taskName } = req.body;
     await query(
-      `INSERT INTO dr_events (id, project_id, date, time, type, area_id, plan_id, payload, submitter, source, confidence, status, voice_text, photos, note, completion_type, building_no, floor_no, owner)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14::jsonb,$15,$16,$17,$18,$19) ON CONFLICT (id) DO UPDATE
-       SET project_id=$2, date=$3, time=$4, type=$5, area_id=$6, plan_id=$7, payload=$8::jsonb, submitter=$9, source=$10, confidence=$11, status=$12, voice_text=$13, photos=$14::jsonb, note=$15, completion_type=$16, building_no=$17, floor_no=$18, owner=$19`,
-      [id || `E${Date.now()}`, projectId, date, time, type, areaId, planId || null, JSON.stringify(payload || {}), submitter || '张明', source || 'manual', confidence || 1.0, status || 'draft', voiceText || null, JSON.stringify(photos || []), note || '', completionType || null, buildingNo || null, floorNo || null, owner || null]
+      `INSERT INTO dr_events (id, project_id, date, time, type, area_id, plan_id, payload, submitter, source, confidence, status, voice_text, photos, note, completion_type, building_no, floor_no, owner, task_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14::jsonb,$15,$16,$17,$18,$19,$20) ON CONFLICT (id) DO UPDATE
+       SET project_id=$2, date=$3, time=$4, type=$5, area_id=$6, plan_id=$7, payload=$8::jsonb, submitter=$9, source=$10, confidence=$11, status=$12, voice_text=$13, photos=$14::jsonb, note=$15, completion_type=$16, building_no=$17, floor_no=$18, owner=$19, task_name=$20`,
+      [id || `E${Date.now()}`, projectId, date, time, type, areaId, planId || null, JSON.stringify(payload || {}), submitter || '李华', source || 'manual', confidence || 1.0, status || 'draft', voiceText || null, JSON.stringify(photos || []), note || '', completionType || null, buildingNo || null, floorNo || null, owner || null, taskName || '']
     );
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -261,12 +267,12 @@ router.delete('/api/areas/:projectId/:id', async (req, res) => {
 // ==================== PLANS CRUD ====================
 router.post('/api/plans', async (req, res) => {
   try {
-    const { id, projectId, date, startDate, endDate, description, taskName, progress, status, laborSchedule, areaTargets, totalManDays, extra, createdAt, updatedAt } = req.body;
+    const { id, projectId, date, startDate, endDate, description, taskName, progress, status, type, process, owner, buildingNo, floorNo, materials, machinery, safetyNotes, zoneImages, areaId, laborSchedule, areaTargets, totalManDays, extra, createdAt, updatedAt } = req.body;
     await query(
-      `INSERT INTO dr_daily_plans (id, project_id, date, start_date, end_date, description, task_name, progress, status, labor_schedule, area_targets, total_man_days, extra, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13::jsonb,$14,$15) ON CONFLICT (id) DO UPDATE
-       SET project_id=$2, date=$3, start_date=$4, end_date=$5, description=$6, task_name=$7, progress=$8, status=$9, labor_schedule=$10::jsonb, area_targets=$11::jsonb, total_man_days=$12, extra=$13::jsonb, updated_at=$15`,
-      [id, projectId, date || null, startDate, endDate, description, taskName, progress || '0%', status || 'active', JSON.stringify(laborSchedule || []), JSON.stringify(areaTargets || []), totalManDays || 0, JSON.stringify(extra || {}), createdAt || new Date().toISOString(), updatedAt || new Date().toISOString()]
+      `INSERT INTO dr_daily_plans (id, project_id, date, start_date, end_date, description, task_name, progress, status, type, process, owner, building_no, floor_no, materials, machinery, safety_notes, zone_images, area_id, labor_schedule, area_targets, total_man_days, extra, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17,$18::jsonb,$19,$20::jsonb,$21::jsonb,$22,$23::jsonb,$24,$25) ON CONFLICT (id) DO UPDATE
+       SET project_id=$2, date=$3, start_date=$4, end_date=$5, description=$6, task_name=$7, progress=$8, status=$9, type=$10, process=$11, owner=$12, building_no=$13, floor_no=$14, materials=$15::jsonb, machinery=$16::jsonb, safety_notes=$17, zone_images=$18::jsonb, area_id=$19, labor_schedule=$20::jsonb, area_targets=$21::jsonb, total_man_days=$22, extra=$23::jsonb, updated_at=$25`,
+      [id, projectId, date || null, startDate, endDate, description, taskName, progress || '0%', status || 'active', type || null, process || null, owner || null, buildingNo || null, floorNo || null, JSON.stringify(materials || []), JSON.stringify(machinery || []), safetyNotes || null, JSON.stringify(zoneImages || []), areaId || null, JSON.stringify(laborSchedule || []), JSON.stringify(areaTargets || []), totalManDays || 0, JSON.stringify(extra || {}), createdAt || new Date().toISOString(), updatedAt || new Date().toISOString()]
     );
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -712,6 +718,7 @@ router.post('/api/settings', async (req, res) => {
 function getDefaultSettings() {
   return {
     llm_permission: { level: 'confirm' },
+    llm_max_iters: 15,
     inspection_times: { times: ['08:30', '13:00', '17:30'], interval: 60 }
   };
 }

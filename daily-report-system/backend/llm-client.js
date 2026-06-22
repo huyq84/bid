@@ -7,7 +7,7 @@
 //   - 响应：{content: [{type: 'text', text: '...'}], ...}
 // ============================================================
 
-import { executeTool } from './llm-tools.js';
+import { executeTool, TOOLS as REGISTERED_TOOLS } from './llm-tools.js';
 import { createMemory, getMemorySummary, recordQuery, recordAction } from './chat-memory.js';
 
 export class MinMaxClient {
@@ -19,6 +19,8 @@ export class MinMaxClient {
     this.temperature = config.temperature ?? 0.5;
     this.groupId = config.groupId;
     this.timeoutMs = 30000; // 30 秒超时
+    // provider 类型：anthropic（MiniMax 等）或 openai（大多数第三方兼容平台）
+    this.provider = (config.provider || 'anthropic').toLowerCase();
   }
 
   // 核心：调用 chat
@@ -66,6 +68,15 @@ export class MinMaxClient {
 
   // 单次请求
   async _chatOnce({ system, messages, maxTokens, temperature }) {
+    // Anthropic 专用端点
+    if (this.provider === 'anthropic') {
+      return this._chatOnceAnthropic({ system, messages, maxTokens, temperature });
+    }
+    // OpenAI 兼容端点
+    return this._chatOnceOpenAI({ system, messages, maxTokens, temperature });
+  }
+
+  async _chatOnceAnthropic({ system, messages, maxTokens, temperature }) {
     const url = this.baseUrl.endsWith('/v1')
       ? `${this.baseUrl}/messages`
       : `${this.baseUrl}/v1/messages`;
@@ -119,7 +130,6 @@ export class MinMaxClient {
       throw new Error(`LLM 响应不是 JSON: ${text.slice(0, 200)}`);
     }
 
-    // 提取文本
     const content = data.content || [];
     const reply = content
       .filter(b => b.type === 'text')
@@ -128,11 +138,64 @@ export class MinMaxClient {
       .trim();
 
     if (!reply) {
-      // 调试用：把整个响应吐出来
       console.warn('[LLM] 响应:', JSON.stringify(data).slice(0, 500));
-      return null;  // 返回 null 让 chat() 决定是否重试
+      return null;
     }
     return reply;
+  }
+
+  async _chatOnceOpenAI({ system, messages, maxTokens, temperature }) {
+    const url = this.baseUrl.endsWith('/v1')
+      ? `${this.baseUrl}/chat/completions`
+      : `${this.baseUrl}/v1/chat/completions`;
+
+    const body = {
+      model: this.model,
+      max_tokens: maxTokens || this.maxTokens,
+      temperature: temperature ?? this.temperature,
+      messages: messages
+    };
+
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + this.apiKey
+    };
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    let response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: controller.signal
+      });
+    } catch (e) {
+      clearTimeout(timeoutId);
+      if (e.name === 'AbortError') {
+        throw new Error(`LLM 请求超时（${this.timeoutMs / 1000}秒）`);
+      }
+      throw new Error(`LLM 网络错误: ${e.message}`);
+    }
+    clearTimeout(timeoutId);
+
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`LLM 返回 ${response.status}: ${text.slice(0, 300)}`);
+    }
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      throw new Error(`LLM 响应不是 JSON: ${text.slice(0, 200)}`);
+    }
+
+    const choice = data?.choices?.[0]?.message;
+    if (!choice) return null;
+    return choice.content || '';
   }
 
   _sleep(ms) {
@@ -458,8 +521,20 @@ ${text}`;
     }
   }
 
+  // ==================== 解析 LLM 声明的剩余任务 ====================
+  _extractRemainingItems(text) {
+    if (!text) return null;
+    const match = text.match(/<!--\s*REMAINING:\s*(\{[\s\S]*?\})\s*-->/);
+    if (!match) return null;
+    try {
+      return JSON.parse(match[1].trim());
+    } catch {
+      return null;
+    }
+  }
+
   // ==================== ReAct 循环对话 ====================
-  async chatWithContext({ message, history = [], contextText = '', permLevel = 'confirm', projectId, date }) {
+  async chatWithContext({ message, history = [], contextText = '', permLevel = 'confirm', maxIters, projectId, date }) {
     const pi = projectId || 'baicaoyuan';
     const dt = date || new Date().toISOString().slice(0, 10);
 
@@ -469,74 +544,87 @@ ${text}`;
       ? '当前权限=禁止危险操作：敏感操作（update/delete/close 等）会被拒绝。只生成安全操作。'
       : '当前权限=需授权：敏感操作需要用户点击 ✅ 授权卡片才执行。请列出待授权操作告知用户。';
 
-    let systemMsg = `你是施工日报系统的 AI 助手。**最重要：你必须用 tool_use 调用工具，不要只在文字里描述"已完成"。** 文字描述不等于实际执行——只有调工具才有效。
+    let systemMsg = `你是施工日报系统的 AI 助手，**替代人工录入、查询、修改、删除**所有计划/事件/协调/ECC/签到/图纸深化等业务数据。
 
-## 核心原则
-- 不确定用户意图时，**先用工具查数据**，不要假设用户要录入
-- "今天完成的工作"、"做了啥"、"有哪些"等是查询，不是录入
-- 用户提到具体任务+进度/人数时才是录入（如"木工完成大堂龙骨 80%"）
-- 先思考再行动：**宁可多查一步，不要贸然操作**
+【剩余任务声明规则】当所有工具调用完成（没有更多 tool_use）时，必须判断是否还有未完成任务。在回复末尾追加一段声明，系统不会显示给用户：
+- 还有任务未完成：\`<!-- REMAINING: {"hasMore":true,"remainingItems":["任务A","任务B"]} -->\`
+- 全部完成：\`<!-- REMAINING: {"hasMore":false} -->\`
+这个声明根据你的判断来写，不依赖任何外部数据。如果你不知道自己是否还有任务，那就输出 hasMore=false。
 
-## ✅ 工具调用协议（**必须严格遵守**）
-**你拥有 native tool_use 能力**——直接调用系统提供的工具，不要输出文本 JSON 块来"模拟"工具调用。
+# 🔴 硬规则（违反任意一条 = 任务失败）
 
-**工作流程：**
-1. 需要数据时，**直接调用对应的工具**（如 queryEvents / queryPlans / queryIssues / getStats / comparePlansVsActuals）
-2. 拿到工具返回结果后，**基于真实数据**回复用户
-3. 需要写入数据时：
-   - **安全操作**（创建事件 createEvent、创建协调 createIssue）：直接调用对应的 mutate 工具
-   - **敏感操作**（修改 updateEvent/updateIssue/updatePlan、关闭 closeIssue、删除 deleteEventsByQuery）：
-     - 如果**用户已明确指令**（如"把 E123 改成 90%"、"删掉今天木工的所有事件"、"关掉 I007"）：**直接调 mutate 工具的 dryRun=false 执行**（前提：permLevel=allow；如果 permLevel=confirm 会被系统拦截走待授权卡片，不用担心）
-     - 如果**用户描述模糊**（如"看看那条事件能不能改"）：先 dryRun=true 预览，让用户确认
-4. 不要在文本里输出 \`\`\`json {"tool":"..."} \`\`\` 这种"老格式"——这会被系统忽略
+1. **必须用 tool_use 调用工具**。在文字里说"已创建/已删除/已更新"≠ 真的执行了。只有 \`tool_use\` 块才是真的。
+2. **禁止"用 markdown 表格假装在调工具"**。你说"已创建 P123"但实际没调 createPlan → 用户看不到 → 任务失败。
+3. **禁止编造 ID**。"已创建/已删除"必须在回复里引用 tool_result 返回的**真实 ID**（如 P1781831xxxxxx、E1781xxxxxxx、I007 等）。编造 ID（如 P1、P2、test）→ 任务失败。
+4. **禁止"问问题而不动手"**。用户说"建一条计划"，即使你缺字段（负责人、工种），也**直接调 createPlan 工具**，可选字段留空让系统接受。**不要在文字里反问**——工友之间不互相推诿。
+4a. **关联计划时，字段会自动补全**。createEvent 传了 planId 后，后端会自动从该计划补全 taskName/areaId/owner/buildingNo/floorNo/progress/laborRequirements——你不必再手动查 queryPlans。只需告诉用户"完成""100%"等状态改变即可。如果你明确知道不同值（如换负责人），才显式传入覆盖。
+4c. **持续执行直到完成，不要中途停**。用户说"完成所有计划/补齐所有事件"这类任务时：调完 comparePlansVsActuals / getStats / queryPlans 后看到 pending（未完成计划）> 0，**必须接着调 createEvent 把它们逐个完成**。每完成一个再调一次 comparePlansVsActuals 看是否还有 pending，直到 pending.length === 0 才算完成。**不要只调一次诊断工具就停**——这会被视为"未完成任务"，系统会强制你继续。
+4b. **需要自查/复查时，直接调 query 工具**。不要说"我先查一下"、"需要确认"等文字——直接调 queryPlans/queryEvents 等工具拿到真实数据，基于结果继续操作。
+5. **缺必填字段时**才反问：必填字段 = taskName（建 plan）/ type+taskName（建 event）/ title（建 issue）。其它字段缺失都直接留空。
+6. **删除/批量删除必须先 dryRun=true**。先告诉用户"将删除 N 条"，再调 dryRun=false + forceDelete=true。
+7. **禁止承认"做不到"**。你拥有 createPlan / updatePlan / deletePlan / deletePlansByQuery / createEvent / createIssue / updateIssue / deleteIssue / closeIssue / deleteEvent / deleteEventsByQuery / createECC / closeECC / deleteECC / createDrawing / createAttendance / createArea / deleteArea / createStandardTrade / deleteStandardTrade / createManagement / createGanttItem / createMilestone / updateWeeklyLabor / createConstructionZone 等 30+ 工具。**绝大多数任务你都能做。**
 
-**⚠️ 关于 confirm 模式**：当 permLevel=confirm 时，敏感操作必须**直接调用 mutate 工具的 dryRun=false**——系统会自动把 action 推为"待授权卡片"（pendingActions），前端会显示 ✅ 按钮让用户点击。**不要在 confirm 模式下"等用户在文字里确认"——必须调工具！** 文字确认不等于系统授权。
+# 🛠 工作流程
 
-## 可用工具（通过 native tool_use 调用）
-- **查询类（5 个）**：
-  - queryEvents: 查询日报事件（按日期/类型/区域/状态/任务名）
-  - queryPlans: 查询施工计划
-  - queryIssues: 查询协调事项
-  - getStats: 统计摘要
-  - comparePlansVsActuals: 计划 vs 实际对比
+1. **理解用户意图**（1 句话总结）→ **调对应工具** → **基于工具结果回复**
+2. 不知道怎么做？**先调 query 工具**（queryEvents / queryPlans / queryIssues / queryECC / queryGantt / queryMilestone / queryAreas / queryWorkers / queryProjects）查清楚再做
+3. 写入数据：safe 工具（createEvent / createPlan / createIssue / createECC / createDrawing / createAttendance）直接调；sensitive 工具（updateXxx / deleteXxx / closeXxx）先 dryRun=true 预览，确认后 dryRun=false
+4. 涉及多个操作（如"建计划 + 录今日完成"）→ **一轮调多个 tool_use**，不要拆成多轮
 
-- **写入类（6 个，全部支持 dryRun）**：
-  - createEvent: 创建日报事件（safe，**直接调用**）
-  - createIssue: 创建协调事项（safe，**直接调用**）
-  - updateEvent: 修改事件（sensitive，先 dryRun 后真做）
-  - updateIssue: 修改协调（sensitive，先 dryRun 后真做）
-  - closeIssue: 关闭协调（sensitive，先 dryRun 后真做）
-  - updatePlan: 完善计划（sensitive，先 dryRun 后真做）
-  - deleteEventsByQuery: 按条件批量删除（sensitive，先 dryRun 后真做）
+# 📋 工具清单（按类别）${_toolsListText()}
 
-工具用法示例：
-- 用户问"今天完成的工作都完善吗" → 调 comparePlansVsActuals 查对比数据
-- 用户问"今天做了啥" → 调 queryEvents 查今日事件
-- 用户问"今日计划有什么" → 调 queryPlans 查今日计划
-- 用户说"木工完成80%" → 直接调 createEvent（safe，不需要 dryRun）
-- 用户说"把 E123 改成 90%" → 先调 queryEvents 验证 ID 真实存在，再调 updateEvent(dryRun=true)，告诉用户，确认后调 updateEvent(dryRun=false)
-- 用户说"删掉今天的草稿" → 先调 deleteEventsByQuery(dryRun=true) 列出匹配项，确认后调 deleteEventsByQuery(dryRun=false, forceDelete=true)
+# 🔁 典型场景示例
 
-## 权限
+- 用户问"今天完成的工作都完善吗" → 调 comparePlansVsActuals
+- 用户问"今天做了啥" → 调 queryEvents(date=今天)
+- 用户问"今日计划有什么" → 调 queryPlans(date=今天)
+- 用户说"木工完成大堂龙骨 80%" → 直接调 createEvent(type='progress', taskName='大堂龙骨', progress='80%', laborRequirements=[{trade:'木工',count:N}])
+- 用户说"建一条屋面防水计划" → 直接调 createPlan(taskName='屋面防水', ...)，缺字段留空不反问
+- 用户说"把 P1781831xxxxxx 改成 90%" → 先调 queryPlans 确认 ID，再调 updatePlan(planId, progress='90%', dryRun=false)
+- 用户说"删掉今天的草稿事件" → 调 deleteEventsByQuery(date=今天, status='draft', dryRun=true) → 调 deleteEventsByQuery(dryRun=false, forceDelete=true)
+- 用户说"删掉刚才那条计划" → 调 deletePlan(planId='刚创的 ID', dryRun=true) → 调 deletePlan(dryRun=false)
+- 用户说"删掉 2026-06-19 所有王伟负责的计划" → 调 deletePlansByQuery(date='2026-06-19', owner='王伟', dryRun=true) → 调 deletePlansByQuery(dryRun=false, forceDelete=true)
+- 用户说"录一条油漆工 3 人 + 小工 2 人的完成事件" → 直接调 createEvent(laborRequirements=[{trade:'油漆工',count:3},{trade:'小工',count:2}])
+- 用户说"关掉协调 I007" → 调 updateIssue(issueId='I007', status='closed', dryRun=true) → dryRun=false
+
+# 🔐 权限
+
 ${permHint}
 
-## 项目数据
+# 📊 项目数据
+
 ${contextText}
 
-## 字段约定
-始终用驼峰：taskName, areaId, laborRequirements, completionType, buildingNo, floorNo, headcount, proposeDept, cooperateDept, planId, eventId, issueId
+# 📝 字段约定
 
-## 决策规则
-- **缺必填字段时反问用户**（如没说明 taskName，反问"请问要记录什么任务？"）
-- **可选字段缺失直接留空**，不反问
-- **ID 字段**（eventId/issueId/planId）**严禁编造**——必须先调 query 工具拿到真实 ID
-- **区域 ID**（areaId）必须从项目数据的"项目区域"列表中选；找不到就置空 areaId 并填 areaName
-- 不要输出任何图片引用，用纯文本或 Markdown 表格
-- **回复内容里不要有思考过程**，思考过程不输出给用户。回复要说人话，像工友之间交流一样自然。
+始终用驼峰：taskName, areaId, laborRequirements, completionType, buildingNo, floorNo, headcount, proposeDept, cooperateDept, planId, eventId, issueId, confirmConditions
+
+ID 字段（eventId/issueId/planId/eccId/managerId）**严禁编造**——必须先调 query 工具拿到真实 ID
+区域 ID（areaId）必须从"项目数据 → 项目区域"列表中选；找不到就置空 areaId 并填 areaName
+不要输出任何图片引用，用纯文本或 Markdown 表格
+**回复内容里不要有思考过程**，思考过程不输出给用户。回复要说人话，像工友之间交流一样自然。
+
+# 🈶 中文输出规范（重要）
+
+**JSON actions 中的字段值**：保持**英文枚举 / 代码风格**（如 type='progress'、status='draft'、source='chat'、priority='high'），方便程序解析。
+
+**对用户说话的文本内容（reply）必须用中文**：
+- 类型名称：progress→进度, material→材料, safety→安全, coordination→协调, attendance→考勤, drawing→图纸深化
+- 状态名称：draft→草稿/待确认, confirmed→已确认, active→进行中, completed→已完成, paused→已暂停, cancelled→已取消, open→待处理, in_progress→处理中, closed→已闭环
+- 来源：voice→语音, photo→拍照, manual→手动, chat→AI 对话, auto→自动
+- 完成类型：planned→计划内, unplanned→计划外
+- 区域 / 工人名字：直接用 reference.areas / reference.workers / 项目数据 中已给出的中文名称
+- ID 字段（planId/eventId/issueId 等）：可在中文表述中保留（用户能直接定位）；不要在中文文本里堆英文 enum
+
+**反例**：不要写"已创建 type=progress 事件 E007，status=draft，source=chat"
+**正例**：写"已创建【大堂龙骨】进度事件（事件编号 E007，草稿状态，AI 对话录入）"
 `;
 
     const messages = this._buildMessages(history, message);
-    const nativeTools = this._getNativeTools();  // ✅ 原生 tool_use schema
+    // 根据 provider 选择正确的工具 schema 格式
+    const nativeTools = this.provider === 'anthropic'
+      ? this._getNativeTools()
+      : this._getOpenAITools();
 
     // ✅ 短期对话记忆
     const memory = createMemory();
@@ -548,22 +636,40 @@ ${contextText}
     }).catch(() => {});
 
     // ReAct 循环
-    const maxIters = 6;
+    const reactMaxIters = (maxIters || 10);
     const mutateActions = [];  // ✅ 收集 mutate 工具产生的 actions（confirm 模式下的待授权 + allow 模式下的已执行）
-    for (let i = 0; i < maxIters; i++) {
+    let lastAssistantText = '';  // ✅ 保存最后一次伴随 tool_use 的文本，循环耗尽时作为回复
+
+    for (let i = 0; i < reactMaxIters; i++) {
+
       // 注入 memory summary（每轮可能更新）
       const memSummary = getMemorySummary(memory);
       if (memSummary) systemMsg += '\n\n' + memSummary;
 
       const body = await this._call(systemMsg, messages, { tools: nativeTools, temperature: 0.2 });
-      const content = body?.content || [];
+      const content = Array.isArray(body?.content) ? body.content : [];
       if (content.length === 0) return { reply: '抱歉，暂时无法处理，请重试。', actions: [], toolsCalled: 0, memory };
 
       // 1) ✅ 优先用原生 tool_use 协议
       const toolUseBlocks = content.filter(b => b.type === 'tool_use');
       if (toolUseBlocks.length > 0) {
-        // 把 assistant 的完整 content 数组（包含 text 和 tool_use）追加到消息
-        messages.push({ role: 'assistant', content });
+        // ✅ 保存本次伴随 tool_use 的文本，循环耗尽时作为最终回复
+        lastAssistantText = content.find(b => b.type === 'text')?.text || '';
+        // 把 assistant 的回复追加到消息（按 provider 切换格式）
+        if (this.provider === 'openai') {
+          const textBlock = content.find(b => b.type === 'text');
+          const msg = { role: 'assistant', content: textBlock?.text || '' };
+          const toolBlocks = content.filter(b => b.type === 'tool_use');
+          if (toolBlocks.length > 0) {
+            msg.tool_calls = toolBlocks.map(tb => ({
+              id: tb.id, type: 'function',
+              function: { name: tb.name, arguments: JSON.stringify(tb.input) }
+            }));
+          }
+          messages.push(msg);
+        } else {
+          messages.push({ role: 'assistant', content });
+        }
 
         // 依次执行每个 tool_use，把结果作为 tool_result 回灌
         const toolResults = [];
@@ -577,7 +683,7 @@ ${contextText}
             // ✅ 如果 mutate 工具返回了 pendingAction（如 confirm 模式），收集起来
             if (result?.pendingAction) {
               mutateActions.push({ ...result.pendingAction, _source: 'tool' });
-            } else if (result?.ok && result?.data?.id && toolUse.name.match(/^(create|update|close)/)) {
+            } else if (result?.ok && toolUse.name.match(/^(create|update|close|delete|batch)/)) {
               // ✅ mutate 工具成功执行（allow 模式），把它的 action 也收集起来（让前端能记录）
               mutateActions.push({ type: toolUse.name, data: toolUse.input, _source: 'tool', _result: result });
             }
@@ -603,11 +709,18 @@ ${contextText}
             });
           }
         }
-        messages.push({ role: 'user', content: toolResults });
+        // tool_results 按 provider 格式追加
+        if (this.provider === 'openai') {
+          for (const tr of toolResults) {
+            messages.push({ role: 'tool', tool_call_id: tr.tool_use_id, content: tr.content });
+          }
+        } else {
+          messages.push({ role: 'user', content: toolResults });
+        }
         continue;  // 进入下一轮，让 LLM 继续思考
       }
 
-      // 2) 没有 tool_use，取 text 作为最终回复
+      // 2) 没有 tool_use，检查是否需要继续
       const text = content.find(b => b.type === 'text')?.text || '';
       if (!text) {
         return { reply: '抱歉，暂时无法处理，请重试。', actions: mutateActions, toolsCalled: 0, memory };
@@ -618,17 +731,86 @@ ${contextText}
       const legacyActions = this._extractActions(text);
       // ✅ 合并：mutate 工具产生的 actions + LLM 输出 JSON 块里的 actions
       const allActions = [...mutateActions, ...legacyActions];
-      const reply = allActions.length > 0 ? text.replace(/```json[\s\S]*?```/, '').trim() : text;
-      return { reply, actions: allActions, toolsCalled: 0, memory };
+      const replyClean = text.replace(/```json[\s\S]*?```/, '').replace(/<!--\s*REMAINING:\s*\{[\s\S]*?\}\s*-->/g, '').trim();
+      const remaining = this._extractRemainingItems(text);
+      const hasMore = remaining?.hasMore === true;
+      const remainingItems = remaining?.remainingItems || [];
+
+      // ✅ 关键修复：如果 LLM 没有输出 tool_use 但有剩余任务（hasMore=true 或 text 中有未完成语义），
+      // 不要把纯文本当最终回复，而是把 text 作为 user 消息回灌，强制 LLM 继续执行工具
+      const unfinishedKeywords = /继续|处理|完成|剩下|剩余|复查|确认|检查|先查|等一下|稍等|还需要|还没|不做|不能|无法|做不到|查一次|查一下|看看|核实|验证|再查|重新查|解释|失败|不存在|错误|报错|情况|对比|共\d|项|条|未完成|缺失|待处理|差异|差距|不对|少了|还有|只需|需要做/;
+
+      // 判断是否有 tool_use 被执行过（检查 messages 中是否有 tool_result）
+      const hasExecutedTools = messages.some(m =>
+        Array.isArray(m.content) && m.content.some(c => c.type === 'tool_result')
+      );
+
+      // ✅ 新增：检测 comparePlansVsActuals 等诊断工具的输出，发现有未完成/缺失项就强制续轮
+      let hasDiagnosticUnfinished = false;
+      for (let mi = messages.length - 1; mi >= 0; mi--) {
+        const m = messages[mi];
+        if (!Array.isArray(m.content)) continue;
+        for (const c of m.content) {
+          if (c.type !== 'tool_result') continue;
+          const toolName = (() => {
+            for (let pi = mi - 1; pi >= 0; pi--) {
+              const pm = messages[pi];
+              if (!Array.isArray(pm.content)) continue;
+              const tu = pm.content.find(b => b.type === 'tool_use' && b.id === c.tool_use_id);
+              if (tu) return tu.name;
+            }
+            return null;
+          })();
+          if (toolName === 'comparePlansVsActuals' || toolName === 'getStats' || toolName === 'queryPlans') {
+            try {
+              const parsed = typeof c.content === 'string' ? JSON.parse(c.content) : c.content;
+              const pendingN = Array.isArray(parsed?.pending) ? parsed.pending.length : 0;
+              const missingN = Array.isArray(parsed?.missing) ? parsed.missing.length : 0;
+              const eventCount = parsed?.eventCount || parsed?.eventSummary?.total || 0;
+              if (pendingN > 0 || missingN > 0) {
+                hasDiagnosticUnfinished = true;
+              }
+            } catch {}
+          }
+          // 任何 tool_result 只检查最近的一个
+          if (hasDiagnosticUnfinished) break;
+        }
+        if (hasDiagnosticUnfinished) break;
+      }
+
+      const shouldContinue = (hasMore || remainingItems.length > 0 || unfinishedKeywords.test(text) || hasDiagnosticUnfinished) && hasExecutedTools;
+
+      if (shouldContinue) {
+        // 把 LLM 的纯文本作为 user 消息回灌，让它继续执行工具
+        messages.push({ role: 'user', content: `请继续执行工具调用完成剩余任务。不要只用文字描述，必须实际调用工具。${hasDiagnosticUnfinished ? '检测到还有未完成的计划/事件，请立即调用 createEvent / createPlan 等工具处理。' : ''}` });
+        continue;  // 进入下一轮 ReAct 循环
+      }
+
+      // 真正完成：返回最终回复
+      const reply = allActions.length > 0 ? replyClean : text.replace(/<!--\s*REMAINING:\s*\{[\s\S]*?\}\s*-->/g, '').trim();
+      return { reply, actions: allActions, toolsCalled: 0, memory, hasMore, remainingItems };
     }
 
     // ✅ 保存长期偏好（异步，不阻塞返回）
     this.saveLongTermMemory(projectId, memory);
-    
-    // ✅ 评估闭环 — 自动检测幻觉并记录
-    this.recordEvaluation(sessionId, lastMessage, reply, mutateActions.length, toolsCalled);
 
-    return { reply, actions: allActions, toolsCalled, memory };
+    // 循环耗尽（maxIters），用最后一次伴随 tool_use 的文本作为回复
+    // 如果没记录到文本，轻量询问 LLM
+    let wrapUpText = lastAssistantText;
+    if (!wrapUpText) {
+      try {
+        const wrapBody = await this._call(systemMsg, messages, { temperature: 0.2 });
+        const wrapContent = Array.isArray(wrapBody?.content) ? wrapBody.content : [];
+        wrapUpText = wrapContent.find(b => b.type === 'text')?.text || '';
+      } catch {}
+    }
+    const remaining = this._extractRemainingItems(wrapUpText);
+    const hasMore = remaining?.hasMore === true;
+    const remainingItems = remaining?.remainingItems || [];
+    const finalReply = (wrapUpText || (hasMore
+      ? `还有 ${remainingItems.length} 项待处理。`
+      : '已处理完成。')).replace(/<!--\s*REMAINING:\s*\{[\s\S]*?\}\s*-->/g, '').trim();
+    return { reply: finalReply, actions: mutateActions, toolsCalled: 0, memory, hasMore, remainingItems };
   }
 
   async saveLongTermMemory(projectId, memory) {
@@ -659,209 +841,14 @@ async recordEvaluation(sessionId, lastMessage, reply, actionsTaken, toolsCalled)
 }
 
   // ✅ 把所有工具转成 Anthropic 原生 tool_use schema
-  // 5 个查询 + 6 个写入
+  // 自动从 llm-tools.js 的 TOOLS 生成——加工具只需在 llm-tools.js 加一次，schema 自动同步
   _getNativeTools() {
-    return [
-      // ============ 查询工具 ============
-      {
-        name: 'queryEvents',
-        description: '查询施工日报事件。可按日期、类型、区域、状态、任务名模糊筛选。返回事件列表（含 id/time/type/taskName/progress/owner/areaId/planId）。',
-        input_schema: {
-          type: 'object',
-          properties: {
-            date: { type: 'string', description: 'YYYY-MM-DD 格式日期，不传默认今日' },
-            type: { type: 'string', enum: ['progress', 'material', 'safety', 'coordination', 'attendance', 'issue', 'drawing'] },
-            areaId: { type: 'string', description: '区域 ID（从项目数据中的 areas 列表选取）' },
-            taskNameContains: { type: 'string', description: '任务名关键词，模糊匹配' },
-            status: { type: 'string', enum: ['draft', 'confirmed'] },
-            limit: { type: 'number', description: '最多返回条数，默认 50' }
-          }
-        }
-      },
-      {
-        name: 'queryPlans',
-        description: '查询施工计划（dr_daily_plans）。返回今日处于起止区间内的计划列表。',
-        input_schema: {
-          type: 'object',
-          properties: {
-            date: { type: 'string', description: 'YYYY-MM-DD 格式日期，不传默认今日' },
-            status: { type: 'string', enum: ['active', 'completed', 'paused'] },
-            areaId: { type: 'string' }
-          }
-        }
-      },
-      {
-        name: 'queryIssues',
-        description: '查询协调事项（dr_issues）。默认只返回未关闭的。',
-        input_schema: {
-          type: 'object',
-          properties: {
-            status: { type: 'string', enum: ['open', 'in_progress', 'closed'] },
-            type: { type: 'string' },
-            areaId: { type: 'string' }
-          }
-        }
-      },
-      {
-        name: 'getStats',
-        description: '获取指定日期的统计摘要（计划数、事件数、完成率等）。',
-        input_schema: {
-          type: 'object',
-          properties: {
-            date: { type: 'string', description: 'YYYY-MM-DD 格式日期' }
-          }
-        }
-      },
-      {
-        name: 'comparePlansVsActuals',
-        description: '对比指定日期的计划 vs 实际完成情况，返回已完成/未完成/计划外完成三类。',
-        input_schema: {
-          type: 'object',
-          properties: {
-            date: { type: 'string', description: 'YYYY-MM-DD 格式日期' }
-          }
-        }
-      },
+    return REGISTERED_TOOLS.map(tool => _toAnthropicSchema(tool));
+  }
 
-      // ============ 写入工具（mutate）============
-      {
-        name: 'createEvent',
-        description: '创建一条施工日报事件。type + taskName 必填。⚠️ 警告：安全操作，会直接写入数据库。areaId/planId/owner/progress/headcount 等可选。',
-        input_schema: {
-          type: 'object',
-          required: ['type', 'taskName'],
-          properties: {
-            dryRun: { type: 'boolean', description: 'true=只返回将创建的数据，不真写库' },
-            type: { type: 'string', enum: ['progress', 'material', 'safety', 'coordination', 'attendance', 'issue', 'drawing'] },
-            taskName: { type: 'string', description: '任务名（必填）' },
-            areaId: { type: 'string' },
-            planId: { type: 'string', description: '⚠️ 必须从 queryPlans 返回的 ID 中选，不要编造' },
-            owner: { type: 'string' },
-            progress: { type: 'string' },
-            headcount: { type: 'number' },
-            laborRequirements: { type: 'array', items: { type: 'object' } },
-            completionType: { type: 'string', enum: ['planned', 'unplanned'] },
-            buildingNo: { type: 'string' },
-            floorNo: { type: 'string' },
-            note: { type: 'string' }
-          }
-        }
-      },
-      {
-        name: 'createIssue',
-        description: '创建一条协调事项。title 必填。⚠️ 警告：安全操作，会直接写入数据库。',
-        input_schema: {
-          type: 'object',
-          required: ['title'],
-          properties: {
-            dryRun: { type: 'boolean' },
-            title: { type: 'string', description: '标题（必填）' },
-            type: { type: 'string' },
-            areaId: { type: 'string' },
-            priority: { type: 'string', enum: ['low', 'medium', 'high'] },
-            proposeDept: { type: 'string' },
-            cooperateDept: { type: 'string' },
-            owner: { type: 'string' },
-            description: { type: 'string' }
-          }
-        }
-      },
-      {
-        name: 'updateEvent',
-        description: '修改一条日报事件。eventId 必填（必须从 queryEvents 拿真实 ID）。⚠️ 敏感操作：permLevel=allow 直接执行；permLevel=confirm 返回待授权；permLevel=strict 拒绝。',
-        input_schema: {
-          type: 'object',
-          required: ['eventId'],
-          properties: {
-            dryRun: { type: 'boolean' },
-            eventId: { type: 'string', description: '事件 ID（必填，必须真实存在）' },
-            taskName: { type: 'string' },
-            owner: { type: 'string' },
-            progress: { type: 'string' },
-            headcount: { type: 'number' },
-            laborRequirements: { type: 'array' },
-            type: { type: 'string' },
-            status: { type: 'string', enum: ['draft', 'confirmed'] },
-            areaId: { type: 'string' },
-            completionType: { type: 'string', enum: ['planned', 'unplanned'] },
-            buildingNo: { type: 'string' },
-            floorNo: { type: 'string' }
-          }
-        }
-      },
-      {
-        name: 'updateIssue',
-        description: '修改协调事项。issueId 必填（必须从 queryIssues 拿真实 ID）。⚠️ 敏感操作。',
-        input_schema: {
-          type: 'object',
-          required: ['issueId'],
-          properties: {
-            dryRun: { type: 'boolean' },
-            issueId: { type: 'string', description: '协调 ID（必填）' },
-            title: { type: 'string' },
-            status: { type: 'string', enum: ['open', 'in_progress', 'closed'] },
-            priority: { type: 'string', enum: ['low', 'medium', 'high'] },
-            owner: { type: 'string' },
-            description: { type: 'string' }
-          }
-        }
-      },
-      {
-        name: 'closeIssue',
-        description: '关闭协调事项。issueId 必填。⚠️ 敏感操作。',
-        input_schema: {
-          type: 'object',
-          required: ['issueId'],
-          properties: {
-            dryRun: { type: 'boolean' },
-            issueId: { type: 'string', description: '协调 ID（必填）' }
-          }
-        }
-      },
-      {
-        name: 'updatePlan',
-        description: '完善计划字段。planId 必填（必须从 queryPlans 拿真实 ID）。⚠️ 敏感操作。',
-        input_schema: {
-          type: 'object',
-          required: ['planId'],
-          properties: {
-            dryRun: { type: 'boolean' },
-            planId: { type: 'string', description: '计划 ID（必填）' },
-            areaId: { type: 'string' },
-            areaName: { type: 'string' },
-            owner: { type: 'string' },
-            progress: { type: 'string' },
-            buildingNo: { type: 'string' },
-            floorNo: { type: 'string' },
-            laborRequirements: { type: 'array' },
-            taskName: { type: 'string' },
-            status: { type: 'string', enum: ['active', 'completed', 'paused'] }
-          }
-        }
-      },
-      {
-        name: 'deleteEventsByQuery',
-        description: '⚠️ 危险操作！按条件批量删除事件。date 必填，必须至少给一个其他条件。先 dryRun=true 看会删哪些，确认后 dryRun=false + forceDelete=true 真删。',
-        input_schema: {
-          type: 'object',
-          required: ['date'],
-          properties: {
-            dryRun: { type: 'boolean', description: 'true=只列出会删什么' },
-            forceDelete: { type: 'boolean', description: 'true=真删（需要 dryRun=false）' },
-            date: { type: 'string', description: 'YYYY-MM-DD 必填' },
-            timeFrom: { type: 'string', description: 'HH:MM' },
-            timeTo: { type: 'string', description: 'HH:MM' },
-            status: { type: 'string', enum: ['draft', 'confirmed'] },
-            type: { type: 'string' },
-            planId: { type: 'string' },
-            areaId: { type: 'string' },
-            taskNameContains: { type: 'string' },
-            ids: { type: 'array', items: { type: 'string' }, description: '显式 eventId 列表' },
-            confirmConditions: { type: 'string', description: '中文描述"要删什么"，给用户看' }
-          }
-        }
-      }
-    ];
+  // ✅ 把所有工具转成 OpenAI function_call schema
+  _getOpenAITools() {
+    return REGISTERED_TOOLS.map(tool => _toOpenAISchema(tool));
   }
 
   // ✅ 错误分类：给 LLM 恢复建议
@@ -975,24 +962,36 @@ async recordEvaluation(sessionId, lastMessage, reply, actionsTaken, toolsCalled)
         const timer = setTimeout(() => controller.abort(), this.timeoutMs);
         const body = {
           model: this.model,
-          system,
           messages,
           max_tokens: this.maxTokens,
           temperature: temperature ?? this.temperature
         };
-        if (this.groupId) body.metadata = { group_id: this.groupId };
-        // ✅ 原生 Anthropic tool_use 协议
+        // Anthropic 格式：带 system 字段 + anthropic-version header
+        if (this.provider === 'anthropic') {
+          body.system = system;
+        }
+        // OpenAI 格式：system 注入 messages 开头（用副本避免 Mutation）
+        if (this.provider === 'openai') {
+          const msgs = [{ role: 'system', content: system }, ...messages];
+          body.messages = msgs;
+        }
+        // ✅ 工具 schema（调用方已按 provider 选好了格式）
         if (tools && tools.length > 0) {
           body.tools = tools;
         }
-        const apiUrl = this.baseUrl.endsWith('/v1') ? `${this.baseUrl}/messages` : `${this.baseUrl}/v1/messages`;
+        const apiUrl = this.provider === 'anthropic'
+          ? (this.baseUrl.endsWith('/v1') ? `${this.baseUrl}/messages` : `${this.baseUrl}/v1/messages`)
+          : (this.baseUrl.endsWith('/v1') ? `${this.baseUrl}/chat/completions` : `${this.baseUrl}/v1/chat/completions`);
+        const headers = { 'Content-Type': 'application/json' };
+        if (this.provider === 'anthropic') {
+          headers['x-api-key'] = this.apiKey;
+          headers['anthropic-version'] = '2023-06-01';
+        } else {
+          headers['Authorization'] = 'Bearer ' + this.apiKey;
+        }
         const res = await fetch(apiUrl, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': this.apiKey,
-            'anthropic-version': '2023-06-01'
-          },
+          headers,
           body: JSON.stringify(body)
         });
         clearTimeout(timer);
@@ -1003,10 +1002,26 @@ async recordEvaluation(sessionId, lastMessage, reply, actionsTaken, toolsCalled)
           continue;
         }
         const data = await res.json();
-        // ✅ 接受 text 块 或 tool_use 块（不再要求必须有 text）
-        const content = data?.content || [];
-        if (content.length > 0) return data;
+        // ✅ Anthropic: {content: [{type:'text'|'tool_use', text, id, name, input}], ...}
+        // ✅ OpenAI: {choices: [{message: {role:'assistant', content, tool_calls: [{id, type, function:{name, arguments}}]}}]}
+        if (this.provider === 'anthropic') {
+          const content = Array.isArray(data?.content) ? data.content : [];
+          if (content.length > 0) return data;
+          lastErr = new Error('空响应');
+          continue;
+        }
+        // OpenAI 格式
+        const choice = data?.choices?.[0]?.message;
+        if (choice) {
+          const parts = this._openaiToAnthropic(choice);
+          // 即使 content/工具为空也兜底：强行用 choice.content 当 text
+          if (parts.content.length === 0 && typeof choice.content === 'string' && choice.content.trim()) {
+            parts.content.push({ type: 'text', text: choice.content });
+          }
+          return { content: parts.content };
+        }
         lastErr = new Error('空响应');
+        console.warn('[LLM] OpenAI 响应无 choices:', JSON.stringify(data).slice(0, 300));
         continue;
       } catch (e) {
         lastErr = e;
@@ -1015,4 +1030,212 @@ async recordEvaluation(sessionId, lastMessage, reply, actionsTaken, toolsCalled)
     }
     throw lastErr || new Error('LLM 调用失败');
   }
+
+  // 把 OpenAI tool_call 转成 Anthropic 格式，统一下游处理逻辑
+  _openaiToAnthropic(choice) {
+    const parts = [];
+    if (choice.content) {
+      parts.push({ type: 'text', text: choice.content });
+    }
+    if (choice.tool_calls) {
+      for (const tc of choice.tool_calls) {
+        const fn = tc.function;
+        let input = {};
+        try { input = JSON.parse(fn.arguments); } catch {}
+        parts.push({
+          type: 'tool_use',
+          id: tc.id || ('call_' + Math.random().toString(36).slice(2, 10)),
+          name: fn.name,
+          input
+        });
+      }
+    }
+    return { content: parts };
+  }
+}
+
+// ============================================================
+// 把 llm-tools.js 的工具定义转成 Anthropic 原生 tool_use schema
+// ============================================================
+//
+// 设计要点：
+// 1. llm-tools.js 里每个 tool 的 params 是 { name: '描述文本' }
+// 2. 描述里包含"必填" → 进 required 数组
+// 3. 描述里包含管道符 | 分隔的枚举值 → 转成 enum
+// 4. 描述里包含"列表"/"数组" → type: array
+// 5. 根据 isMutate / requiresConfirm 在 description 前加危险标记
+//
+// 这样未来在 llm-tools.js 加工具，Anthropic schema 自动同步，
+// 不需要手写两遍。
+function _toAnthropicSchema(tool) {
+  const properties = {};
+  const required = [];
+
+  // 标记：mutate / sensitive
+  const tags = [];
+  if (tool.isMutate) {
+    if (tool.requiresConfirm) tags.push('⚠️ 敏感操作');
+    else tags.push('✅ 安全操作');
+  } else {
+    tags.push('查询');
+  }
+
+  for (const [name, rawDesc] of Object.entries(tool.params || {})) {
+    const desc = String(rawDesc);
+    const prop = { description: desc };
+
+    // 1) enum 检测：description 里有 | 分隔的 enum 值（且不是 markdown 表格里的 |）
+    const enumMatch = desc.match(/\b([a-zA-Z\u4e00-\u9fa5]+(?:\|[a-zA-Z\u4e00-\u9fa5]+){1,})\b/);
+    if (enumMatch) {
+      const candidates = enumMatch[1].split('|');
+      // 只在看起来像枚举（2-6 个，< 12 字符）时采纳
+      if (candidates.length >= 2 && candidates.length <= 6 && candidates.every(s => s.length <= 10)) {
+        prop.enum = candidates;
+        prop.type = 'string';
+      } else {
+        prop.type = 'string';
+      }
+    }
+    // 2) array 检测
+    else if (/列表|数组|\[\{/.test(desc)) {
+      prop.type = 'array';
+      // 数组里有对象 schema 时尽量给一个
+      if (/\{.*trade.*count|\{.*weekStart.*tradeId/.test(desc)) {
+        prop.items = { type: 'object' };
+      } else if (/\[.*?\]/.test(desc)) {
+        // 看起来像 string[] 形式
+        prop.items = { type: 'string' };
+      } else {
+        prop.items = { type: 'string' };
+      }
+    }
+    // 3) 数字检测（最少/最多/编号/天数/排序号等关键词）
+    else if (/限制|最多|人数|天数|数量|编号|排序|工日|人数|次数|进度%/.test(desc) && !/^.{0,3}$/.test(desc)) {
+      // 注意：progress 描述含"进度%"但 progress 是数字还是 string 不确定，先保持 string
+      // 因为实际 handler 里 progress: data.progress 没强转
+      if (/^\d+%?$/.test(desc.trim()) || desc.includes('数量') || desc.includes('天数') || desc.includes('工日') || desc.includes('编号') || desc.includes('排序')) {
+        prop.type = 'number';
+      } else {
+        prop.type = 'string';
+      }
+    }
+    // 4) boolean（dryRun）
+    else if (name === 'dryRun' || name === 'forceDelete' || name === 'present') {
+      prop.type = 'boolean';
+    }
+    // 5) 默认 string
+    else {
+      prop.type = 'string';
+    }
+
+    properties[name] = prop;
+    if (desc.includes('必填')) required.push(name);
+  }
+
+  return {
+    name: tool.name,
+    description: `[${tags.join(' | ')}] ${tool.description}`,
+    input_schema: {
+      type: 'object',
+      properties,
+      ...(required.length > 0 ? { required } : {})
+    }
+  };
+}
+
+// 把 llm-tools.js 的工具定义转成 OpenAI function_call schema
+function _toOpenAISchema(tool) {
+  const properties = {};
+  const required = [];
+
+  const tags = [];
+  if (tool.isMutate) {
+    if (tool.requiresConfirm) tags.push('⚠️ 敏感操作');
+    else tags.push('✅ 安全操作');
+  } else {
+    tags.push('查询');
+  }
+
+  for (const [name, rawDesc] of Object.entries(tool.params || {})) {
+    const desc = String(rawDesc);
+    const prop = { description: desc };
+
+    const enumMatch = desc.match(/\b([a-zA-Z\u4e00-\u9fa5]+(?:\|[a-zA-Z\u4e00-\u9fa5]+){1,})\b/);
+    if (enumMatch) {
+      const candidates = enumMatch[1].split('|');
+      if (candidates.length >= 2 && candidates.length <= 6 && candidates.every(s => s.length <= 10)) {
+        prop.enum = candidates;
+        prop.type = 'string';
+      } else {
+        prop.type = 'string';
+      }
+    } else if (/列表|数组|\[\{/.test(desc)) {
+      prop.type = 'array';
+      if (/\{.*trade.*count|\{.*weekStart.*tradeId/.test(desc)) {
+        prop.items = { type: 'object' };
+      } else {
+        prop.items = { type: 'string' };
+      }
+    } else if (/限制|最多|人数|天数|数量|编号|排序|工日|次数|进度%/.test(desc) && !/^.{0,3}$/.test(desc)) {
+      if (/^\d+%?$/.test(desc.trim()) || desc.includes('数量') || desc.includes('天数') || desc.includes('工日') || desc.includes('编号') || desc.includes('排序')) {
+        prop.type = 'number';
+      } else {
+        prop.type = 'string';
+      }
+    } else if (name === 'dryRun' || name === 'forceDelete' || name === 'present') {
+      prop.type = 'boolean';
+    } else {
+      prop.type = 'string';
+    }
+
+    properties[name] = prop;
+    if (desc.includes('必填')) required.push(name);
+  }
+
+  return {
+    type: 'function',
+    function: {
+      name: tool.name,
+      description: `[${tags.join(' | ')}] ${tool.description}`,
+      parameters: {
+        type: 'object',
+        properties,
+        ...(required.length > 0 ? { required } : {})
+      }
+    }
+  };
+}
+// 把 TOOLS 转成 systemMsg 里的"可用工具"清单文本
+// ============================================================
+//
+// 按 isMutate/requiresConfirm 自动分组，确保 LLM 看到的工具清单
+// 跟 native tool_use schema 是同一份真相。
+//
+// 分组：
+//   1) 查询类（只读，无需授权）
+//   2) 安全写入（requiresConfirm=false，permLevel=allow/confirm 都直接调）
+//   3) 敏感写入（requiresConfirm=true，permLevel=confirm 走授权卡片；strict 禁止）
+function _toolsListText() {
+  const queries = REGISTERED_TOOLS.filter(t => !t.isMutate);
+  const safeMutates = REGISTERED_TOOLS.filter(t => t.isMutate && !t.requiresConfirm);
+  const sensitiveMutates = REGISTERED_TOOLS.filter(t => t.isMutate && t.requiresConfirm);
+
+  const lines = [];
+
+  lines.push(`\n- **查询类（${queries.length} 个）**：`);
+  for (const t of queries) {
+    lines.push(`  - ${t.name}: ${t.description.split(/[。.]/)[0]}`);
+  }
+
+  lines.push(`\n- **安全写入（${safeMutates.length} 个，全部支持 dryRun；permLevel=allow/confirm 都直接调，strict 仍走授权）**：`);
+  for (const t of safeMutates) {
+    lines.push(`  - ${t.name}: ${t.description.split(/[。.]/)[0]}（**直接调用**）`);
+  }
+
+  lines.push(`\n- **敏感写入（${sensitiveMutates.length} 个，全部支持 dryRun；permLevel=confirm 走 ✅ 授权卡片，strict 禁止）**：`);
+  for (const t of sensitiveMutates) {
+    lines.push(`  - ${t.name}: ${t.description.split(/[。.]/)[0]}（sensitive，先 dryRun 后真做）`);
+  }
+
+  return lines.join('\n');
 }

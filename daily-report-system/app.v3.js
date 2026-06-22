@@ -296,34 +296,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', async () => {
-  // 始终从后端加载最新数据（优先保证一致性）
-  await loadDataFromAPI();
-  
-  // 仅在首次加载且 localStorage 有数据时，合并本地独有事件（防止未同步数据丢失）
   try {
-    const stored = localStorage.getItem('daily_events');
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const backendIds = new Set(M.EVENTS.map(e => e.id));
-        const localOnly = parsed.filter(e => !backendIds.has(e.id));
-        if (localOnly.length > 0) {
-          M.EVENTS.push(...localOnly);
-          console.log(`[localStorage] 合并了 ${localOnly.length} 条本地独有事件`);
+    await loadDataFromAPI();
+    
+    // 合并 localStorage 本地独有事件
+    try {
+      const stored = localStorage.getItem('daily_events');
+      if (stored && stored.length < 500000) { // 避免解析超大 localStorage
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const backendIds = new Set(M.EVENTS.map(e => e.id));
+          const localOnly = parsed.filter(e => !backendIds.has(e.id));
+          if (localOnly.length > 0) {
+            M.EVENTS.push(...localOnly);
+          }
         }
       }
-    }
-  } catch(e) { console.warn('[localStorage] 读事件失败:', e.message); }
-  
-  await loadDataFromAPI();  // 重新加载以确保数据一致性
-  initCustomAreas();  // 再加载用户自定义区域
-  initProject();
-  initCalendarWithToday();
-  renderProjectInfo();
-  renderIssues();
-  renderStats();
-  populateAreaSelects();
-  renderDailyPlanCard();
+    } catch(e) { /* ignore */ }
+    
+    initCustomAreas();
+    initProject();
+    initCalendarWithToday();
+    renderProjectInfo();
+    renderIssues();
+    renderStats();
+    populateAreaSelects();
+    renderDailyPlanCard();
+  } catch(e) {
+    console.error('[Init] 初始化失败:', e);
+    document.getElementById('backendLabel').textContent = '加载失败';
+    document.getElementById('backendDot').style.background = '#ef4444';
+  }
 });
 
 function initCalendarWithToday() {
@@ -1076,6 +1079,7 @@ function openEventEdit() {
   planSelect.innerHTML = '<option value="">无（计划外工作）</option>' +
     dayPlans.map(pp => `<option value="${pp.id}">📋 ${pp.taskName || pp.process}${pp.buildingNo ? ' · ' + pp.buildingNo : ''}${pp.floorNo ? ' · ' + pp.floorNo : ''}</option>`).join('');
   planSelect.value = event.planId || '';
+  planSelect.onchange = () => onEditPlanChange(planSelect.value);
   document.getElementById('edit-completion-type').value = event.completionType || (event.planId ? 'planned' : 'unplanned');
 
   // 区域下拉（包含预置区域 + 自定义区域）
@@ -1494,9 +1498,162 @@ function saveEventEdit() {
   closeModal('modalEventEdit');
   renderDailyPlanCard();
   renderFilteredEvents();
-  updateCalendar();
   renderStats();
-  showToast('事件已更新', 'success');
+  if (typeof updateCalendar === 'function') updateCalendar();
+  showToast('事件已保存', 'success');
+}
+
+// 编辑界面：选择关联计划后自动填充
+let _editPrevPlanId = '';
+
+function onEditPlanChange(planId) {
+  const event = M.EVENTS.find(e => e.id === selectedEventId);
+  if (!event) return;
+
+  // 检查已有数据
+  const hasData = (document.getElementById('edit-task')?.value || '') ||
+    (document.getElementById('edit-progress')?.value || '') ||
+    (document.getElementById('edit-owner')?.value || '') ||
+    (document.getElementById('edit-building-no')?.value || '') ||
+    (document.getElementById('edit-floor-no')?.value || '') ||
+    (document.getElementById('edit-area')?.value || '');
+
+  // 已有数据且切换了计划，提示确认
+  if (hasData && planId !== _editPrevPlanId && _editPrevPlanId !== undefined) {
+    const msg = planId ? '切换计划将覆盖已填写数据，是否继续？' : '取消关联计划将清空已填写数据，是否继续？';
+    showConfirm(msg, '切换关联计划', '🔄').then(proceed => {
+      if (proceed) {
+        doEditPlanChange(planId);
+      } else {
+        // 恢复旧值
+        const sel = document.getElementById('edit-plan');
+        if (sel) sel.value = _editPrevPlanId;
+      }
+    });
+    return;
+  }
+  doEditPlanChange(planId);
+}
+
+function doEditPlanChange(planId) {
+  _editPrevPlanId = planId;
+  // 完成类型
+  document.getElementById('edit-completion-type').value = planId ? 'planned' : 'unplanned';
+
+  if (!planId) return;
+
+  const projectPlans = M.PLANS[currentProjectId] || [];
+  const plan = projectPlans.find(p => p.id === planId);
+  if (!plan) return;
+
+  // 工具函数：有值就同步
+  const setVal = (id, val) => {
+    if (val === undefined || val === null) return;
+    const el = document.getElementById(id);
+    if (el) el.value = val;
+  };
+  const setText = (id, val) => {
+    if (val === undefined || val === null) return;
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+  };
+
+  // 1. 同步事件类型（如果当前类型与计划不匹配，自动切换并重渲染表单）
+  const planType = plan.type || plan.eventType;
+  if (planType && document.getElementById('edit-type').value !== planType) {
+    document.getElementById('edit-type').value = planType;
+    const event = M.EVENTS.find(e => e.id === selectedEventId);
+    if (event) {
+      event.type = planType;
+      renderEditForm(planType, event.payload || {});
+      // 重新应用 type 过滤显示
+      const modal = document.getElementById('modalEventEdit');
+      modal.querySelectorAll('[data-dp-show]').forEach(el => {
+        const allowed = el.getAttribute('data-dp-show').split(',').map(s => s.trim());
+        el.style.display = allowed.includes(planType) ? '' : 'none';
+      });
+    }
+  }
+
+  // 2. 同步公共字段（日期、时间、地点、备注）
+  setVal('edit-date', plan.startDate || plan.date);
+  setVal('edit-building-no', plan.buildingNo);
+  setVal('edit-floor-no', plan.floorNo);
+  setVal('edit-area', plan.areaId || plan.area);
+  setVal('edit-note', plan.description || plan.safetyNotes);
+
+  // 3. 按类型同步专属字段
+  const currentType = document.getElementById('edit-type').value;
+  const taskName = plan.taskName || plan.process;
+  const planPayload = plan.payload || {};
+
+  if (currentType === 'progress') {
+    // 进度事件：任务、进度、负责人、工种明细
+    setVal('edit-task', taskName);
+    setVal('edit-progress', plan.progress);
+    setVal('edit-owner', plan.owner);
+    setVal('edit-description', plan.description);
+    // 同步工种行
+    const laborList = plan.laborRequirements || plan.laborSchedule || [];
+    const tradeListEl = document.getElementById('edit-trades-list');
+    if (tradeListEl) {
+      tradeListEl.innerHTML = '';
+      laborList.forEach((l, i) => {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:grid;grid-template-columns:2fr 1fr auto;gap:8px;align-items:end;margin-bottom:6px;';
+        row.innerHTML = `
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" style="font-size:11px;">工种 ${i+1}</label>
+            <input class="form-input" type="text" id="edit-trade-${i}" value="${(l.trade||'').replace(/"/g,'&quot;')}" placeholder="如：木工">
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label" style="font-size:11px;">人数</label>
+            <input class="form-input" type="number" id="edit-trade-count-${i}" value="${l.count||''}" min="0" placeholder="0">
+          </div>
+          <button type="button" class="btn btn-xs btn-ghost" onclick="this.parentElement.remove();" style="margin-bottom:2px;">✕</button>
+        `;
+        tradeListEl.appendChild(row);
+      });
+    }
+  } else if (currentType === 'material') {
+    // 材料事件
+    setVal('edit-material', planPayload.materialName || taskName);
+    setVal('edit-spec', planPayload.spec);
+    setVal('edit-quantity', planPayload.quantity);
+    setVal('edit-unit', planPayload.unit);
+    setVal('edit-action', planPayload.action || '进场');
+    setVal('edit-description', plan.description);
+  } else if (currentType === 'safety') {
+    // 安全事件
+    setVal('edit-checktype', planPayload.checkType || '日常安全巡检');
+    setVal('edit-result', planPayload.result || '正常');
+    setVal('edit-issues', Array.isArray(planPayload.issues) ? planPayload.issues.join('；') : '');
+    setVal('edit-description', plan.description);
+  } else if (currentType === 'coordination') {
+    // 协调事件
+    setVal('edit-topic', planPayload.topic || taskName);
+    setVal('edit-parties', Array.isArray(planPayload.parties) ? planPayload.parties.join('；') : '');
+    setVal('edit-summary', planPayload.summary);
+    setVal('edit-description', plan.description);
+  } else if (currentType === 'issue') {
+    // 问题事件
+    setVal('edit-task', taskName);
+    setVal('edit-owner', plan.owner);
+    setVal('edit-description', plan.description);
+  } else if (currentType === 'attendance') {
+    // 考勤事件
+    setVal('edit-att-count', planPayload.headcount || plan.totalManDays);
+    setVal('edit-att-status', planPayload.status || '正常');
+    setVal('edit-description', plan.description);
+  } else if (currentType === 'drawing') {
+    // 图纸深化事件
+    setVal('edit-task', taskName);
+    setVal('edit-owner', plan.owner);
+    setVal('edit-progress', plan.progress);
+    setVal('edit-description', plan.description);
+  }
+
+  showToast('已自动填充计划数据', 'success');
 }
 
 // ============================================================
@@ -4200,7 +4357,9 @@ window.confirmOptFill = function(btn) {
     if (plan) {
       doPlanSelect(planId);
       // 计划内的劳动力
-      const laborList = plan.laborRequirements || plan.laborSchedule || [];
+    let laborList = plan.laborRequirements || plan.laborSchedule || [];
+    if (typeof laborList === 'string') try { laborList = JSON.parse(laborList); } catch (_) { laborList = []; }
+    if (!Array.isArray(laborList)) laborList = [];
       if (laborList.length > 0) {
         window._mPlanLabor = laborList;
         renderManualLaborRows(laborList, plan);
@@ -7883,60 +8042,63 @@ function _buildAllPagesHTML() {
   const hc = _getHeaderColor();
   const noBg = bg === 'none' ? ' no-bg' : '';
   let html = '';
+  const { weekStart, weekEnd } = getWeekRange();
+  const weekLabel = weekStart && weekEnd ? weekStart.replace(/-/g,'.')+' ~ '+weekEnd.replace(/-/g,'.') : '';
   _REPORT_PAGES.forEach(p => {
     const fn = _pageFn(p);
-    if (!fn) return;
-    fn();
+    if (!fn) { console.log('[BuildPage] skip', p, 'no fn'); return; }
+    try { fn(); } catch(e) { console.log('[BuildPage] error', p, e.message); return; }
+    console.log('[BuildPage] rendered', p, 'content length:', el.innerHTML.length);
     if (p === '01') {
       html += `<div class="report-page-frame${noBg}" style="page-break-after:always;">${el.innerHTML}</div>`;
     } else {
-      html += `<div class="report-page-frame${noBg}">
-        <div class="report-page-header">
-          <div class="trapezoid" style="background:${hc};"></div>
-          <div class="header-line" style="background:${hc};"></div>
-        </div>
-        <div class="report-page-content">${el.innerHTML}</div>
-      </div>`;
+      html += _pageWrapHTML(p, el.innerHTML, hc, noBg, weekLabel);
     }
     // 04（原 0301）续页（多组月份/专业）
     if (p === '04' && _milestonePages.length > 1) {
       for (let pi = 1; pi < _milestonePages.length; pi++) {
-        html += `<div class="report-page-frame${noBg}">
-          <div class="report-page-header">
-            <div class="trapezoid" style="background:${hc};"></div>
-            <div class="header-line" style="background:${hc};"></div>
-          </div>
-          <div class="report-page-content">${_milestonePages[pi].html}</div>
-        </div>`;
+        html += _pageWrapHTML(p, _milestonePages[pi].html, hc, noBg, weekLabel);
       }
     }
     // 05（原 04）续页（每页 12 行）
     if (p === '05' && _page04Pages.length > 1) {
       for (let pi = 1; pi < _page04Pages.length; pi++) {
-        html += `<div class="report-page-frame${noBg}">
-          <div class="report-page-header">
-            <div class="trapezoid" style="background:${hc};"></div>
-            <div class="header-line" style="background:${hc};"></div>
-          </div>
-          <div class="report-page-content">${_renderPage04Table(_page04Pages[pi])}</div>
-        </div>`;
+        html += _pageWrapHTML(p, _renderPage04Table(_page04Pages[pi]), hc, noBg, weekLabel);
       }
     }
     // 06（原 05）续页（每页 6 张照片）
     if (p === '06' && _page05Pages.length > 1) {
       for (let pi = 1; pi < _page05Pages.length; pi++) {
-        html += `<div class="report-page-frame${noBg}">
-          <div class="report-page-header">
-            <div class="trapezoid" style="background:${hc};"></div>
-            <div class="header-line" style="background:${hc};"></div>
-          </div>
-          <div class="report-page-content">${_renderPage05Grid(_page05Pages[pi])}</div>
-        </div>`;
+        html += _pageWrapHTML(p, _renderPage05Grid(_page05Pages[pi]), hc, noBg, weekLabel);
       }
     }
   });
   if (cur) cur.click();
   return html;
+}
+
+function _pageWrapHTML(page, content, hc, noBg, weekLabel) {
+  const title = _pageTitle(page);
+  const ph = typeof PAGE_HEADERS !== 'undefined' ? PAGE_HEADERS[page] : null;
+  const sub = ph && ph.subtitle ? ph.subtitle : '';
+  const pad = ph && ph.pad ? ph.pad : 80;
+  const subBar = sub
+    ? `<div style="position:absolute;top:82px;left:72px;width:285px;height:38px;background:linear-gradient(to right,#facc15,#f43f5e);z-index:2;border-radius:0 2px 2px 0;"></div>
+       <div style="position:absolute;top:82px;left:72px;height:38px;line-height:38px;padding-left:12px;color:#fff;font-size:16px;font-weight:700;z-index:3;letter-spacing:1px;">${sub}</div>`
+    : '';
+  const wkLabel = weekLabel
+    ? `<div class="header-subtitle" style="position:absolute;top:46px;left:80px;font-size:11px;color:#64748b;white-space:nowrap;">${weekLabel}</div>`
+    : '';
+  return `<div class="report-page-frame${noBg}">
+    <div class="report-page-header">
+      <div class="trapezoid" style="background:${hc};"></div>
+      <div class="header-line" style="background:${hc};"></div>
+      <div class="header-title" style="color:${hc};">${title}</div>
+      ${wkLabel}
+    </div>
+    ${subBar}
+    <div class="report-page-content" style="padding:${pad}px 30px 20px;">${content}</div>
+  </div>`;
 }
 
 function _getStyleText() {
@@ -7951,37 +8113,206 @@ function _getStyleText() {
 
 function printReport() {
   const pages = _buildAllPagesHTML();
-  const styles = _getStyleText();
   const hc = _getHeaderColor();
-  const bg = _getBgCss();
+  console.log('[Print] pages.length:', pages.length, 'frames:', (pages.match(/report-page-frame/g) || []).length);
+  if (!pages || pages.trim().length < 50) { alert('周报内容为空，请先录入数据'); return; }
+
   const baseUrl = window.location.href.substring(0, window.location.href.lastIndexOf('/') + 1);
   const bgUrl = customBgUrl || TEMPLATES[currentTemplate].bg;
-  const absBg = bgUrl ? baseUrl + bgUrl : '';
-  const w = window.open('', '_blank', 'width=1280,height=720');
-  w.document.write(`<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>中建三局集团周报</title>
-<base href="${baseUrl}">
-<style>${styles}
-  @page { size:1280px 720px; margin:0; }
-  body { margin:0; padding:0; background:#fff; }
-  .report-page-frame { width:1280px; height:720px; position:relative; overflow:hidden; margin:0; page-break-after:always; }
-  .report-page-frame.no-bg { background:#fff !important; }
-  .report-page-frame:last-child { page-break-after:auto; }
-  .report-page-header { position:absolute; top:0; left:0; right:0; height:75px; z-index:1; }
-  .report-page-header .trapezoid { position:absolute; top:23px; left:0; width:58px; height:52px;
-    background:${hc}; clip-path:polygon(0 0,60% 0,100% 100%,0 100%); }
-  .report-page-header .header-line { position:absolute; top:75px; left:72px; right:0; height:3px;
-    background:${hc}; }
-  .report-page-content { width:1280px; height:720px; padding:80px 30px 20px; box-sizing:border-box; overflow:hidden; }
-  .modal-header,.modal-footer,.mapping-tab,.page-nav,.export-bar,#weeklyMappingTabs,#toast,.floating-control{display:none!important}
-<\/style></head><body>${pages}
-<script>window.onload=function(){setTimeout(function(){window.print();window.close();},500)};<\/script>
-</body></html>`);
-  w.document.close();
+  const bgCss = bgUrl ? `background:url('${baseUrl}${bgUrl}') center/cover no-repeat;` : '';
+  // 用隐藏 iframe 打印，避免浏览器页眉/页脚显示 URL 和标题
+  var iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.left = '-9999px';
+  iframe.style.top = '0';
+  iframe.style.width = '1280px';
+  iframe.style.height = '720px';
+  iframe.style.border = 'none';
+  document.body.appendChild(iframe);
+  var iframeDoc = iframe.contentWindow.document;
+  iframeDoc.open();
+  iframeDoc.write('<!DOCTYPE html><html><head><meta charset="UTF-8">'
+    + '<style>'
+    + '@page { size:1280px 720px; margin:0; }'
+    + 'body { margin:0; padding:0; background:#fff; font-family:"Microsoft YaHei","PingFang SC",sans-serif; }'
+    + '.report-page-frame { width:1280px; height:720px; position:relative; overflow:hidden; margin:0; page-break-after:always; ' + bgCss + ' }'
+    + '.report-page-frame.no-bg { background:none !important; background-color:#fff !important; }'
+    + '.report-page-frame:last-child { page-break-after:auto; }'
+    + '.report-page-header { position:absolute; top:0; left:0; right:0; height:75px; z-index:1; }'
+    + '.report-page-header .trapezoid { position:absolute; top:23px; left:0; width:58px; height:52px; background:' + hc + '; clip-path:polygon(0 0,60% 0,100% 100%,0 100%); }'
+    + '.report-page-header .header-line { position:absolute; top:75px; left:72px; right:0; height:3px; background:' + hc + '; }'
+    + '.report-page-header .header-title { position:absolute; top:20px; left:80px; font-size:18px; font-weight:700; color:' + hc + '; white-space:nowrap; }'
+    + '.report-page-content { width:1280px; height:720px; box-sizing:border-box; overflow:hidden; }'
+    + '</style></head><body>' + pages + '</body></html>');
+  iframeDoc.close();
+
+  let printed = false;
+  let attempts = 0;
+  const maxAttempts = 20;
+
+  function tryPrint() {
+    if (printed) return;
+    attempts++;
+    try {
+      var doc = iframe.contentWindow.document;
+      var frames = doc.querySelectorAll('.report-page-frame');
+      var allImages = doc.querySelectorAll('img');
+      var imgsLoaded = true;
+      allImages.forEach(function (img) {
+        if (!img.complete || img.naturalHeight === 0) imgsLoaded = false;
+      });
+      console.log('[Print] attempt', attempts, 'frames:', frames.length, 'images loaded:', imgsLoaded);
+      if (frames.length >= 12 && imgsLoaded || attempts >= maxAttempts) {
+        printed = true;
+        setTimeout(function () { iframe.contentWindow.focus(); iframe.contentWindow.print(); }, 500);
+        return;
+      }
+    } catch (e) {
+      console.log('[Print] attempt error', attempts, e.message);
+    }
+    setTimeout(tryPrint, 500);
+  }
+  setTimeout(tryPrint, 300);
+
+  window.addEventListener('afterprint', function () {
+    try { if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe); } catch (_) {}
+  }, { once: true });
 }
 
 function exportReportPDF() {
-  printReport();
+  const pages = _buildAllPagesHTML();
+  if (!pages || pages.trim().length < 50) { alert('周报内容为空，请先录入数据'); return; }
+
+  var toast = function (msg, type) {
+    var d = document.createElement('div');
+    d.style.cssText = 'background:' + (type === 'error' ? '#ef4444' : '#2563eb') + ';color:#fff;padding:10px 16px;border-radius:6px;margin-bottom:8px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.2);white-space:nowrap;';
+    d.textContent = msg;
+    var c = document.getElementById('toast') || document.body;
+    c.appendChild(d);
+    setTimeout(function () { d.style.opacity = '0'; d.style.transition = 'opacity .3s'; }, 3000);
+    setTimeout(function () { d.remove(); }, 3400);
+  };
+
+  toast('开始导出 PDF...', 'info');
+
+  var loadLib = function (url, check) {
+    return new Promise(function (resolve) {
+      if (check()) { resolve(); return; }
+      var s = document.createElement('script');
+      s.src = url;
+      s.onload = resolve;
+      s.onerror = resolve;
+      document.head.appendChild(s);
+      setTimeout(resolve, 5000);
+    });
+  };
+
+  Promise.all([
+    loadLib('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js', function () { return window.jspdf && window.jspdf.jsPDF; }),
+    loadLib('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js', function () { return window.html2canvas; })
+  ]).then(function () {
+    var container = document.createElement('div');
+    container.id = '_exportPages';
+    container.innerHTML = pages;
+    container.style.cssText = 'position:fixed;left:-9999px;top:0;width:1280px;background:#fff;z-index:-1;';
+    document.body.appendChild(container);
+
+    var frames = container.querySelectorAll('.report-page-frame');
+    var pdf = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'px', format: [1280, 720], compress: true });
+    var idx = 0;
+
+    function captureNext() {
+      if (idx >= frames.length) {
+        pdf.save('百草园-清尚-周报.pdf');
+        container.remove();
+        toast('导出完成', 'success');
+        return;
+      }
+      toast('处理 ' + (idx + 1) + '/' + frames.length, 'info');
+      window.html2canvas(frames[idx], {
+        width: 1280, height: 720,
+        scale: 1.5, backgroundColor: '#ffffff',
+        useCORS: true, allowTaint: true,
+        imageTimeout: 20000, logging: false,
+        foreignObjectRendering: false,
+        onclone: function (clonedDoc) {
+          var all = clonedDoc.querySelectorAll('*');
+          for (var i = 0; i < all.length; i++) {
+            var el = all[i];
+            if (!el.textContent || !el.textContent.trim()) continue;
+            var cs = clonedDoc.defaultView.getComputedStyle(el);
+            var lh = cs.lineHeight;
+            if (lh && lh !== 'normal' && lh.indexOf('px') > -1) {
+              el.style.lineHeight = Math.max(1, parseFloat(lh) - 6) + 'px';
+            }
+            var pt = cs.paddingTop;
+            if (pt && pt.indexOf('px') > -1 && parseFloat(pt) >= 4) {
+              el.style.paddingTop = (parseFloat(pt) - 4) + 'px';
+            }
+          }
+          // fix clip-path
+          var all2 = clonedDoc.querySelectorAll('*');
+          for (var j = 0; j < all2.length; j++) {
+            var e = all2[j];
+            try { var cp = clonedDoc.defaultView.getComputedStyle(e).clipPath; } catch (ex) { continue; }
+            if (!cp || cp === 'none') continue;
+            var m = cp.match(/polygon\(([^)]+)\)/i);
+            if (!m) continue;
+            var r = e.getBoundingClientRect();
+            if (r.width <= 0 || r.height <= 0) continue;
+            var bg = clonedDoc.defaultView.getComputedStyle(e).backgroundColor;
+            if (!bg || bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent') bg = '#37a3eb';
+            var parent = e.parentElement;
+            while (parent && clonedDoc.defaultView.getComputedStyle(parent).position === 'static') parent = parent.parentElement;
+            if (!parent) parent = e.parentElement;
+            var pr = parent.getBoundingClientRect();
+            var cv = clonedDoc.createElement('canvas');
+            cv.width = r.width;
+            cv.height = r.height;
+            cv.style.cssText = 'position:absolute;top:' + (r.top - pr.top) + 'px;left:' + (r.left - pr.left) + 'px;width:' + r.width + 'px;height:' + r.height + 'px;z-index:100;pointer-events:none;';
+            var ctx = cv.getContext('2d');
+            ctx.fillStyle = bg;
+            var pairs = m[1].split(',');
+            ctx.beginPath();
+            for (var k = 0; k < pairs.length; k++) {
+              var xy = pairs[k].trim().split(/\s+/);
+              var x = xy[0].indexOf('%') > -1 ? (parseFloat(xy[0]) / 100) * r.width : parseFloat(xy[0]);
+              var y = xy[1].indexOf('%') > -1 ? (parseFloat(xy[1]) / 100) * r.height : parseFloat(xy[1]);
+              if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            }
+            ctx.closePath();
+            ctx.fill();
+            e.style.clipPath = 'none';
+            e.style.visibility = 'hidden';
+            parent.appendChild(cv);
+          }
+        }
+      }).then(function (canvas) {
+        var imgData = canvas.toDataURL('image/jpeg', 0.95);
+        if (idx > 0) pdf.addPage([1280, 720], 'landscape');
+        pdf.addImage(imgData, 'JPEG', 0, 0, 1280, 720);
+        idx++;
+        setTimeout(captureNext, 200);
+      }).catch(function (err) {
+        toast('页面 ' + (idx + 1) + ' 失败: ' + (err.message || err), 'error');
+        idx++;
+        setTimeout(captureNext, 200);
+      });
+    }
+
+    setTimeout(function () {
+      var imgs = container.querySelectorAll('img');
+      var total = imgs.length;
+      var loaded = 0;
+      function startCapture() { captureNext(); }
+      if (total === 0) { startCapture(); return; }
+      imgs.forEach(function (img) {
+        if (img.complete && img.naturalHeight > 0) { loaded++; if (loaded >= total) startCapture(); }
+        else { img.onload = img.onerror = function () { loaded++; if (loaded >= total) startCapture(); }; }
+      });
+      setTimeout(startCapture, 5000);
+    }, 100);
+  });
 }
 
 // ============================================================

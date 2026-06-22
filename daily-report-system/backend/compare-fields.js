@@ -11,8 +11,7 @@ const chatActions = readFileSync(join(__dirname, 'chat-actions.js'), 'utf-8');
 const llmTools = readFileSync(join(__dirname, 'llm-tools.js'), 'utf-8');
 const llmClient = readFileSync(join(__dirname, 'llm-client.js'), 'utf-8');
 const frontendHtml = readFileSync(join(__dirname, '..', 'index.html'), 'utf-8');
-const appJs = readFileSync(join(__dirname, 'app.js'), 'utf-8');
-const appV3 = readFileSync(join(__dirname, 'app.v3.js'), 'utf-8');
+const appV3Js = readFileSync(join(__dirname, '..', 'app.v3.js'), 'utf-8');
 
 // ============ 2. 解析数据库表结构 ============
 function extractTables(sql) {
@@ -117,7 +116,7 @@ function extractFormFields(html, js) {
   };
 }
 
-const frontendFields = extractFormFields(frontendHtml, appJs);
+const frontendFields = extractFormFields(frontendHtml, appV3Js);
 console.log('\n\n=== 前端字段提取 ===');
 console.log('data-field:', frontendFields.dataFields);
 console.log('JS 字段名:', frontendFields.jsFieldNames.slice(0, 30));
