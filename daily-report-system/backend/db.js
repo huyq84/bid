@@ -24,11 +24,6 @@ export async function query(text, params) {
   return result;
 }
 
-// 确保所有新连接使用 UTF-8 编码
-pool.on('connect', (client) => {
-  client.query("SET client_encoding TO 'UTF8'").catch(() => {});
-});
-
 export async function getClient() {
   return pool.connect();
 }
@@ -149,6 +144,7 @@ ALTER TABLE dr_events ADD COLUMN IF NOT EXISTS completion_type TEXT;
 ALTER TABLE dr_events ADD COLUMN IF NOT EXISTS building_no TEXT;
 ALTER TABLE dr_events ADD COLUMN IF NOT EXISTS floor_no TEXT;
 ALTER TABLE dr_events ADD COLUMN IF NOT EXISTS owner TEXT;
+ALTER TABLE dr_events ADD COLUMN IF NOT EXISTS task_name TEXT;
 
 -- 事项台账
 CREATE TABLE IF NOT EXISTS dr_issues (

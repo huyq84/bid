@@ -1294,7 +1294,7 @@ function renderEditPhotos(photos) {
   if (!photos || photos.length === 0) { sec.innerHTML = ''; return; }
   sec.innerHTML = `
     <div class="form-group">
-      <label class="form-label">现场照片（${photos.length} 张）<span style="font-size:10px;color:#f59e0b;background:#fffbeb;padding:1px 6px;border-radius:8px;margin-left:6px;">关闭"报表显示"则周报 05 不展示该照片标签</span></label>
+      <label class="form-label">现场照片（${photos.length} 张）<span style="font-size:10px;color:#f59e0b;background:#fffbeb;padding:1px 6px;border-radius:8px;margin-left:6px;">关闭"报表显示"则周报 06 不展示该照片标签</span></label>
       <div id="edit-photos-list" style="display:flex;flex-direction:column;gap:6px;">
         ${photos.map((p, i) => {
           const showCap = p.showInReport !== false;
@@ -1308,10 +1308,11 @@ function renderEditPhotos(photos) {
               <input class="form-input" type="text" id="edit-photo-caption-${i}" value="${cap}" placeholder="照片描述/标签" style="font-size:12px;padding:3px 6px;">
               <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#475569;cursor:pointer;">
                 <input type="checkbox" id="edit-photo-show-${i}" ${showCap ? 'checked' : ''} onchange="document.getElementById('edit-photo-row-${i}').style.opacity = this.checked ? '1' : '0.55'">
-                <span>在周报 05 中显示标签</span>
+                <span>在周报 06 中显示标签</span>
               </label>
             </div>
             <div id="edit-photo-row-${i}" style="opacity:${showCap ? '1' : '0.55'};"></div>
+            <button type="button" class="btn btn-xs btn-ghost" onclick="replaceEditPhoto('${p.id}')" style="font-size:11px;padding:2px 6px;background:rgba(245,158,11,0.1);" title="替换照片">🔄</button>
             <button type="button" class="btn btn-xs btn-ghost" onclick="removeEditPhoto('${p.id}')" style="font-size:11px;padding:2px 6px;" title="删除照片">🗑</button>
           </div>`;
         }).join('')}
@@ -1322,6 +1323,30 @@ function renderEditPhotos(photos) {
 window.removeEditPhoto = function(photoId) {
   const row = document.querySelector(`.edit-photo-row[data-photo-id="${photoId}"]`);
   if (row) row.remove();
+};
+window.replaceEditPhoto = function(photoId) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = function(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(ev) {
+      const row = document.querySelector(`.edit-photo-row[data-photo-id="${photoId}"]`);
+      if (!row) return;
+      const img = row.querySelector('img');
+      if (img) img.src = ev.target.result;
+      else {
+        const div = row.querySelector('div:first-child');
+        if (div) div.innerHTML = `<img src="${ev.target.result}" style="width:100%;height:100%;object-fit:cover;display:block;cursor:zoom-in;" onclick="openPhotoLightbox('${photoId}')" />`;
+      }
+      row.dataset.replaced = 'true';
+      row.dataset.newData = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+  input.click();
 };
 
 window.addEditTradeRow = function() {
@@ -1478,6 +1503,11 @@ function saveEventEdit() {
       if (!orig) return;
       orig.caption = capEl ? capEl.value.trim() : orig.caption;
       orig.showInReport = showEl ? showEl.checked : true;
+      if (row.dataset.replaced === 'true' && row.dataset.newData) {
+        orig.data = row.dataset.newData;
+        delete row.dataset.replaced;
+        delete row.dataset.newData;
+      }
       kept.push(orig);
       oldToNew.set(id, orig);
     });
@@ -6359,6 +6389,22 @@ function exportWeeklyReport() {
 // ============================================================
 // 周报数据映射预览（原型）
 // ============================================================
+let _weeklyApiData = null;
+
+async function loadWeeklyReportData() {
+  if (_weeklyApiData) return _weeklyApiData;
+  try {
+    const resp = await fetch('/api/data/all');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    _weeklyApiData = await resp.json();
+    return _weeklyApiData;
+  } catch (e) {
+    console.warn('[周报] 加载后端数据失败:', e.message);
+    _weeklyApiData = {};
+    return _weeklyApiData;
+  }
+}
+
 function openWeeklyReportMapping() {
   closeModal('modalWeekly');
   showModal('modalWeeklyMapping');
@@ -6377,7 +6423,7 @@ function openWeeklyReportMapping() {
   if (re) { _reportRangeEnd = wr.weekEnd; re.value = wr.weekEnd; }
   _updateReportRangeDisplay();
   _applyTemplate();
-  switchMappingTab('01');
+  loadWeeklyReportData().then(() => { switchMappingTab('01'); });
 }
 
 const PAGE_HEADERS = {
@@ -6508,13 +6554,14 @@ function renderEmptyPage(msg) {
 }
 
 function renderMappingPage01() {
-  const data = M.getPage01Data(currentProjectId, _reportDate || null);
-  if (!data) { renderEmptyPage('暂无项目数据'); return; }
+  const d = _weeklyApiData;
+  const projects = (d && d.PROJECTS) || [];
+  if (projects.length === 0) { renderEmptyPage('暂无项目数据'); return; }
+  const data = projects.find(p => p.id === currentProjectId) || projects[0];
   const hc = _getHeaderColor();
   const bg = _getBgCss();
   const el = document.getElementById('mappingContent');
   el.style.background = bg;
-  // 恢复 .frame-content 的固定 720 高度（避免被 06 页设置的 height:auto 污染）
   el.style.height = '720px';
   el.style.minHeight = '';
   el.style.overflow = 'hidden';
@@ -6534,8 +6581,8 @@ function renderMappingPage01() {
         <h3 style="color:#facc15;font-size:60px;font-weight:700;letter-spacing:0.2em;margin:0;text-shadow:0 2px 4px rgba(0,0,0,0.3);">工作周报</h3>
       </div>
       <div style="position:absolute;bottom:24px;right:48px;z-index:10;text-align:right;">
-        <p style="color:#fff;font-size:20px;font-weight:700;margin:0 0 4px;"><span style="color:#facc15;">汇报单位：</span><span style="color:#facc15;">${data.reporter}</span></p>
-        <p style="color:#facc15;font-size:20px;font-weight:700;letter-spacing:0.05em;margin:0;">${data.dateLabel}</p>
+        <p style="color:#fff;font-size:20px;font-weight:700;margin:0 0 4px;"><span style="color:#facc15;">汇报单位：</span><span style="color:#facc15;">${data.name}</span></p>
+        <p style="color:#facc15;font-size:20px;font-weight:700;letter-spacing:0.05em;margin:0;">${_reportDate || ''}</p>
       </div>
     </div>
   </section>
@@ -6578,11 +6625,24 @@ function renderMappingPage02() {
 function renderMappingPage03() {
   const fc = document.getElementById('pageFloatingControls');
   const { weekStart, weekEnd } = getWeekRange();
-  const stats = M.getWeekAttendanceStats(weekStart, weekEnd);
-  const hasAbsent = stats.some(s => !s.fullAttendance);
+  const d = _weeklyApiData;
+  const team = (d && d.MANAGEMENT_TEAM) || [];
 
   fc.innerHTML = '';
 
+  // Convert API data to attendance-compatible format
+  const stats = team.map((m, i) => ({
+    seq: i + 1,
+    position: m.position || m.role || '—',
+    name: m.name || '—',
+    phone: m.phone || '—',
+    presentDays: 5,
+    totalDays: 5,
+    fullAttendance: true,
+    absentReasons: []
+  }));
+
+  const hasAbsent = stats.some(s => !s.fullAttendance);
   const showReason = hasAbsent && _attendanceMode === 'actual';
   const absentCount = stats.filter(s => !s.fullAttendance).length;
   const toggleBtns = hasAbsent ? `
@@ -6986,44 +7046,55 @@ function _gen0301Table(year, monthList, categories, catNames, colWidths) {
 }
 
 function renderMappingPage0301() {
-  const data = M.getPage0301Data(currentProjectId);
+  const d = _weeklyApiData;
+  const plans = (d && d.MILESTONE_PLANS && d.MILESTONE_PLANS[currentProjectId]) || [];
   const el = document.getElementById('mappingContent');
+  if (plans.length === 0) { el.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8;">暂无节点数据</div>'; _milestonePages = []; return; }
+
+  // Transform API data to match expected format
+  const keyNodes = plans.filter(i => i.nodeType === '关键节点');
+  const subNodes = plans.filter(i => i.nodeType === '次要节点');
+  const months = [3,4,5,6,7,8];
+  const year = 2026;
+  const categories = { '软装(清尚)': '软装(清尚)' };
+
+  const data = {
+    year, months, categories,
+    keyNodes, subNodes
+  };
+
   if (!data || !data.categories) { el.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8;">暂无节点数据</div>'; _milestonePages = []; return; }
 
-  const { year, months, categories } = data;
-  const catNames = Object.keys(categories);
+  const { year: yr, months: mths, categories: cats } = data;
+  const catNames = Object.keys(cats);
   const availHeight = 720 - 125 - 20;
 
   _milestonePages = [];
 
-  // 辅助：将 (月份子集, 专业子集) 拆成不超高的一组页面
-  function addPages(monthList, cats, catKeys) {
-    const cw = _calcColWidths(monthList, cats, catKeys);
-    const h = _estimateTableHeight(monthList, cats, catKeys, cw);
+  function addPages(monthList, catsObj, catKeys) {
+    const cw = _calcColWidths(monthList, catsObj, catKeys);
+    const h = _estimateTableHeight(monthList, catsObj, catKeys, cw);
     if (h <= availHeight) {
-      _milestonePages.push({ html: _gen0301Table(year, monthList, cats, catKeys, cw) });
+      _milestonePages.push({ html: _gen0301Table(yr, monthList, catsObj, catKeys, cw) });
       return;
     }
-    // 先高度（切专业）
     if (catKeys.length > 1) {
       catKeys.forEach(k => {
-        const m = {}; m[k] = cats[k];
+        const m = {}; m[k] = catsObj[k];
         addPages(monthList, m, [k]);
       });
       return;
     }
-    // 再宽度（切月份）
     if (monthList.length > 1) {
       const mid = Math.ceil(monthList.length / 2);
-      addPages(monthList.slice(0, mid), cats, catKeys);
-      addPages(monthList.slice(mid), cats, catKeys);
+      addPages(monthList.slice(0, mid), catsObj, catKeys);
+      addPages(monthList.slice(mid), catsObj, catKeys);
       return;
     }
-    // 最后兜底：1专业 × 1月份，不可能超高
-    _milestonePages.push({ html: _gen0301Table(year, monthList, cats, catKeys, cw) });
+    _milestonePages.push({ html: _gen0301Table(yr, monthList, catsObj, catKeys, cw) });
   }
 
-  addPages(months, categories, catNames);
+  addPages(mths, cats, catNames);
 
   if (_milestonePage >= _milestonePages.length) _milestonePage = 0;
   el.innerHTML = _milestonePages[_milestonePage] ? _milestonePages[_milestonePage].html : '<div style="padding:40px;text-align:center;color:#94a3b8;">暂无数据</div>';
@@ -7064,9 +7135,16 @@ function _renderPage04Table(rows) {
 
 function renderMappingPage04() {
   const { weekStart, weekEnd } = getWeekRange();
-  const allRows = M.getPage04Data(currentProjectId, weekStart, weekEnd);
+  const d = _weeklyApiData;
+  const allEvents = ((d && d.EVENTS) || []).concat((d && d.HISTORY_EVENTS) || []);
+  const weekEvents = allEvents.filter(e =>
+    e.projectId === currentProjectId &&
+    e.type === 'progress' &&
+    e.date >= weekStart && e.date <= weekEnd &&
+    e.status === 'confirmed'
+  );
 
-  if (allRows.length === 0) {
+  if (weekEvents.length === 0) {
     document.getElementById('mappingContent').innerHTML = `
       <div style="text-align:center; padding:40px 0; color:#94a3b8;">
         <div style="font-size:40px;">📋</div>
@@ -7077,7 +7155,34 @@ function renderMappingPage04() {
     return;
   }
 
-  // 每页最多放 12 行（header + detail 混合计数）
+  // Group by area
+  const groups = {};
+  weekEvents.forEach(e => {
+    const key = e.areaId || '__unknown__';
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(e);
+  });
+
+  const allRows = [];
+  let seq = 0;
+  const areas = (d && d.AREAS && d.AREAS[currentProjectId]) || [];
+  Object.entries(groups).forEach(([areaId, events]) => {
+    const area = areas.find(a => a.id === areaId);
+    const areaName = area ? area.name : areaId;
+    allRows.push({ type: 'header', text: `${areaName}：` });
+    events.forEach(e => {
+      seq++;
+      const task = e.payload?.taskName || e.payload?.topic || e.note || '(未命名)';
+      const progress = e.payload?.progress || '';
+      allRows.push({
+        type: 'detail',
+        seq,
+        text: progress ? `${task}完成${progress}` : task,
+        owner: e.payload?.owner || e.owner || '—'
+      });
+    });
+  });
+
   const ROWS_PER_PAGE = 12;
   _page04Pages = [];
   for (let i = 0; i < allRows.length; i += ROWS_PER_PAGE) {
@@ -7121,26 +7226,47 @@ function _renderPage05Grid(photos) {
 
 function renderMappingPage05() {
   const { weekStart, weekEnd } = getWeekRange();
-  const result = M.getPage05Photos(currentProjectId, weekStart, weekEnd, 9999);
-  const allItems = result.items;
+  const d = _weeklyApiData;
+  const allEvents = ((d && d.EVENTS) || []).concat((d && d.HISTORY_EVENTS) || []);
+  const weekEvents = allEvents.filter(e =>
+    e.projectId === currentProjectId &&
+    e.date >= weekStart && e.date <= weekEnd
+  );
 
-  // 按区域聚合照片
-  const byArea = {};  // { areaName: [photoObj, ...] }
+  const photoMap = {};
+  weekEvents.forEach(e => {
+    (e.photos || []).forEach(p => {
+      if (p.showInReport === false) return;
+      const area = p.area || e.areaId || '其他';
+      if (!photoMap[area]) photoMap[area] = [];
+      if (photoMap[area].length >= 6) return;
+      photoMap[area].push({
+        id: p.id, caption: p.caption || '现场照片', area,
+        eventType: e.type, src: p.src
+      });
+    });
+  });
+
+  const allItems = [];
+  for (const [areaName, photos] of Object.entries(photoMap)) {
+    allItems.push({ type: 'header', text: areaName });
+    photos.forEach(p => allItems.push(p));
+  }
+
+  const byArea = {};
   let curArea = null;
   for (const it of allItems) {
     if (it.type === 'header') { curArea = it.text; byArea[curArea] = []; }
     else if (curArea) byArea[curArea].push(it);
   }
   const areaNames = Object.keys(byArea);
-  // 每个区域 = 1 个 sub-page（不再有"界面其它位置"的区域内容）
   _page05Pages = areaNames.map(name => byArea[name]);
   if (_page05Page >= _page05Pages.length) _page05Page = 0;
 
-  // 副标题 = 当前 sub-page 的区域名
   const curSubtitle = areaNames[_page05Page] || '本周暂无照片';
   if (typeof PAGE_HEADERS !== 'undefined') {
-    if (!PAGE_HEADERS['05']) PAGE_HEADERS['05'] = {};
-    PAGE_HEADERS['05'].subtitle = curSubtitle;
+    if (!PAGE_HEADERS['06']) PAGE_HEADERS['06'] = {};
+    PAGE_HEADERS['06'].subtitle = curSubtitle;
   }
 
   if (allItems.length === 0) {
@@ -7151,7 +7277,7 @@ function renderMappingPage05() {
         <p style="font-size:12px; margin-top:4px;">请先在日报中通过拍照录入</p>
       </div>`;
     _page05Pages = [];
-    if (typeof PAGE_HEADERS !== 'undefined' && PAGE_HEADERS['05']) PAGE_HEADERS['05'].subtitle = '本周暂无照片';
+    if (typeof PAGE_HEADERS !== 'undefined' && PAGE_HEADERS['06']) PAGE_HEADERS['06'].subtitle = '本周暂无照片';
     return;
   }
 
@@ -7163,14 +7289,48 @@ function renderMappingPage06() {
   const mode = localStorage.getItem(`page06_mode_${currentProjectId}`) || 'dynamic';
   const displayField = localStorage.getItem(`page06_displayField_${currentProjectId}`) || 'tradeName';
   const unit = localStorage.getItem(`page06_unit_${currentProjectId}`) || 'people';
-  const rows = M.getPage06Data(currentProjectId, weekStart, weekEnd, mode, displayField, unit);
+  const d = _weeklyApiData;
+
+  // Gather labor data from plans
+  const plans = (d && d.PLANS && d.PLANS[currentProjectId]) || [];
+  const weekPlans = plans.filter(p => {
+    if (p.startDate) return p.startDate >= weekStart && p.startDate <= weekEnd;
+    if (p.date) return p.date >= weekStart && p.date <= weekEnd;
+    return false;
+  });
+  const tradeCounts = {};
+  weekPlans.forEach(p => {
+    const list = p.laborSchedule || p.laborRequirements || [];
+    list.forEach(item => {
+      const trade = item.trade || item.laborType;
+      const count = item.count;
+      if (trade && count) tradeCounts[trade] = (tradeCounts[trade] || 0) + count;
+    });
+  });
+
+  // Standard trades from DB
+  const standardTrades = (d && d.STANDARD_TRADES) || [];
+  const rows = standardTrades.map((t, i) => {
+    const count = tradeCounts[t.tradeName] || 0;
+    return { seq: i + 1, trade: t.tradeName, thisWeek: count || '—', nextWeek: count || '—' };
+  });
+  if (rows.length === 0) {
+    // Try weekly labor data as fallback
+    const wlData = (d && d.WEEKLY_LABOR_DATA) || [];
+    wlData.forEach(w => {
+      if (w.projectId === currentProjectId) {
+        rows.push({ seq: rows.length + 1, trade: w.tradeName || '—', thisWeek: w.thisWeekCount || '—', nextWeek: w.nextWeekCount || '—' });
+      }
+    });
+  }
+
   const thisLabel = unit === 'manDays' ? '本周工日' : '本周人数';
   const nextLabel = unit === 'manDays' ? '下周工日' : '下周人数';
-  const photos = M.PAGE06_PHOTOS || [];
-  console.log('[Page06] render, currentProjectId:', currentProjectId, 'photos:', photos.length);
+  const photos = (d && d.PAGE06_PHOTOS && d.PAGE06_PHOTOS.filter(p => p.projectId === currentProjectId)) || [];
+
   const photoCards = photos.map(p => {
     const cardHtml = '<div style="border:1px solid #e2e8f0;border-radius:4px;overflow:hidden;background:#f8fafb;min-height:120px;">' +
-      '<div style="width:100%;height:120px;overflow:hidden;background:#f1f5f9;display:flex;align-items:center;justify-content:center;cursor:pointer;" onclick="enlargePage06Photo(\'' + p.id + '\')">' +
+      '<div style="width:100%;height:120px;overflow:hidden;background:#f1f5f9;display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
       '<img src="' + p.src + '" style="width:100%;height:100%;object-fit:contain;"></div>' +
       '<div style="padding:4px;font-size:11px;color:#64748b;">' + (p.caption || '无说明') +
       (p.tradeId ? '<br><span style="color:#00adef;">' + p.tradeId + '</span>' : '') + '</div></div>';
@@ -7179,12 +7339,10 @@ function renderMappingPage06() {
   const photoPanel = photos.length > 0 ? '<div style="margin-top:16px;background:#fff;border:1px solid #d1d5db;border-radius:4px;padding:12px;">' +
     '<div style="font-size:13px;font-weight:600;color:#374151;margin-bottom:8px;">📷 现场照片（共 ' + photos.length + ' 张）</div>' +
     '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;">' + photoCards + '</div></div>' : '';
-  const plansCount = (M.getPlansForProject ? M.getPlansForProject(currentProjectId) : []).length;
-  console.log('[Page06] currentProjectId:', currentProjectId, 'plans count:', plansCount, 'photos:', photos.length);
   const hasPhotos = photos.length > 0;
   const leftCol = hasPhotos ? '<div style="flex:1;display:flex;flex-direction:column;gap:16px;min-width:0;">' +
     '<div style="background:#fff;padding:8px;border:1px solid #d1d5db;border-radius:2px;flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;min-height:0;">' +
-    '<img src="' + photos[0].src + '" style="width:100%;height:100%;object-fit:contain;cursor:pointer;" onclick="enlargePage06Photo(\'' + photos[0].id + '\')">' +
+    '<img src="' + photos[0].src + '" style="width:100%;height:100%;object-fit:contain;cursor:pointer;">' +
     '</div>' +
     '<div style="background:#48a0f8;color:#fff;padding:8px 24px;text-align:center;font-size:14px;font-weight:700;width:fit-content;margin:0 auto;border-radius:0;">' +
     (photos[0].caption || '无说明') + '</div></div>' : '';
@@ -7211,13 +7369,11 @@ function renderMappingPage06() {
     }).join('') + '</tbody></table></div>' +
     '<div style="background:#48a0f8;color:#fff;padding:6px 20px;text-align:center;font-size:13px;font-weight:700;width:fit-content;margin:0 auto;border-radius:0;">全部人员在场情况</div>' +
     '</div></div>' + photoPanel;
-  console.log('[Page06] photoPanel.length:', photoPanel.length, 'fullHtml.length:', fullHtml.length);
   const el = document.getElementById('mappingContent');
   el.style.overflow = 'auto';
   el.style.height = 'auto';
   el.style.minHeight = '720px';
   el.innerHTML = fullHtml;
-  console.log('[Page06] children:', el.children.length, 'all divs:', el.querySelectorAll('div').length);
 }
 
 // 切换 06 页数据源模式（按项目保存）
@@ -7510,12 +7666,13 @@ window.deleteStandardTrade = async function(id) {
 };
 
 function renderMappingPage07() {
-  const stats = M.getPage07Data(currentProjectId);
-  const items = (M.ECC_ITEMS || []).filter(e => e.projectId === currentProjectId && e.id !== 'ECC099');
-  // 各 ECC 录入的照片
-  const itemPhotos = items.flatMap(e => (e.photos || []).map(src => ({ src, title: e.title, type: 'item' })));
-  // 汇总照片（来自 ECC_SUMMARIES）
-  const summaryPhotos = ((M.ECC_SUMMARIES || {})[currentProjectId] || {}).photos || [];
+  const d = _weeklyApiData;
+  const eccSummary = (d && d.ECC_SUMMARIES && d.ECC_SUMMARIES[currentProjectId]) || null;
+  const eccItems = (d && d.ECC_ITEMS && d.ECC_ITEMS.filter(e => e.projectId === currentProjectId && e.id !== 'ECC099')) || [];
+
+  const stats = eccSummary || { total: 0, closed: 0, closing: 0, open: 0, rate: '—' };
+  const itemPhotos = eccItems.flatMap(e => (e.photos || []).map(src => ({ src, title: e.title, type: 'item' })));
+  const summaryPhotos = (eccSummary && eccSummary.photos) || [];
   const summaryTagged = summaryPhotos.map(src => ({ src, title: '汇总照片', type: 'summary' }));
   const allPhotos = itemPhotos.concat(summaryTagged);
   const photoBlock = allPhotos.length > 0
@@ -7525,7 +7682,7 @@ function renderMappingPage07() {
         </div>
         <div style="padding:4px;display:grid;grid-template-columns:repeat(${Math.min(allPhotos.length, 4)}, 1fr);gap:4px;">
           ${allPhotos.slice(0, 16).map(p => `<div style="height:422px;overflow:hidden;background:#f8fafb;border:1px solid #e2e8f0;border-radius:2px;display:flex;align-items:center;justify-content:center;">
-            <img src="${p.src}" style="max-width:100%;max-height:calc(100% - 2mm);object-fit:contain;cursor:zoom-in;" onclick="enlargePage07Photo('${p.src}','${(p.title || '').replace(/'/g, '')}')">
+            <img src="${p.src}" style="max-width:100%;max-height:calc(100% - 2mm);object-fit:contain;cursor:zoom-in;">
           </div>`).join('')}
         </div>
       </div>`
@@ -7566,7 +7723,18 @@ function enlargePage07Photo(src, caption) {
 }
 
 function renderMappingPage08() {
-  const rows = M.getPage08Data(currentProjectId);
+  const d = _weeklyApiData;
+  const rows = (d && d.DRAWING_DEEPENINGS && d.DRAWING_DEEPENINGS.filter(dd => dd.projectId === currentProjectId)) || [];
+  if (rows.length === 0) {
+    document.getElementById('mappingContent').innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;">暂无图纸深化数据</div>';
+    return;
+  }
+  const mapped = rows.map((r, i) => ({
+    seq: i + 1,
+    task: r.task,
+    owner: r.owner,
+    progress: r.progress || r.status || '—'
+  }));
   document.getElementById('mappingContent').innerHTML = `
     <div style="background:#fff;border:1px solid #005e00;border-radius:4px;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.06);">
       <table style="width:100%;border-collapse:collapse;font-size:13px;">
@@ -7579,15 +7747,14 @@ function renderMappingPage08() {
           </tr>
         </thead>
         <tbody>
-          ${rows.map((r,i) => {
+          ${mapped.map((r,i) => {
             const bg = i%2===0?'#cbe0ff':'#e7f0ff';
-            const progress = r.progress || r.status || '—';
-            const progressColor = progress === '已完成' || progress === '100%' ? '#059669' : (progress === '—' ? '#94a3b8' : '#d97706');
+            const progressColor = r.progress === '已完成' || r.progress === '100%' ? '#059669' : (r.progress === '—' ? '#94a3b8' : '#d97706');
             return `<tr style="background:${bg};">
               <td style="padding:6px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;text-align:center;">${r.seq}</td>
               <td style="padding:6px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;">${r.task}</td>
               <td style="padding:6px;border-right:1px solid #005e00;border-bottom:1px solid #005e00;text-align:center;">${r.owner}</td>
-              <td style="padding:6px;border-bottom:1px solid #005e00;text-align:center;font-weight:600;color:${progressColor};">${progress}</td>
+              <td style="padding:6px;border-bottom:1px solid #005e00;text-align:center;font-weight:600;color:${progressColor};">${r.progress}</td>
             </tr>`;
           }).join('')}
         </tbody>
@@ -7596,12 +7763,11 @@ function renderMappingPage08() {
 }
 
 function renderMappingPage09() {
-  // 根据周报区间计算"下周"周一~周日
   const dayLabels = ['周一','周二','周三','周四','周五','周六','周日'];
   let mondayStr, sundayStr, monday;
   if (_reportRangeEnd) {
     const nextMon = new Date(_reportRangeEnd);
-    nextMon.setDate(nextMon.getDate() + 1); // _reportRangeEnd 是周日，+1 = 下周一
+    nextMon.setDate(nextMon.getDate() + 1);
     const nextSun = new Date(nextMon);
     nextSun.setDate(nextMon.getDate() + 6);
     const fmt = (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
@@ -7629,30 +7795,31 @@ function renderMappingPage09() {
     monday = new Date(mondayStr);
   }
 
-  const items = M.getPage09Data(currentProjectId, mondayStr, sundayStr);
+  const d = _weeklyApiData;
+  const items = (d && d.WEEKLY_GANTT_ITEMS) || [];
   if (items.length === 0) {
-    document.getElementById('mappingContent').innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;">暂无下周计划数据，请先在日计划中创建下周计划</div>';
+    document.getElementById('mappingContent').innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;">暂无下周计划数据</div>';
     return;
   }
   const areas = [...new Set(items.map(i => i.area))];
   const dateLabels = dayLabels.map((_, i) => {
-    const d = new Date(monday);
-    d.setDate(d.getDate() + i);
-    return (d.getMonth() + 1) + '月' + d.getDate() + '日';
+    const dd = new Date(monday);
+    dd.setDate(dd.getDate() + i);
+    return (dd.getMonth() + 1) + '月' + dd.getDate() + '日';
   });
   let html = `
     <div style="overflow-x:auto;">
     <table style="width:100%;border-collapse:collapse;font-size:10px;border:1px solid #005e00;background:#fff;">
       <thead>
         <tr>
-          <th colspan="13" style="font-size:13px;background:#fff;border:1px solid #005e00;padding:4px;color:#000;">北京清尚—食堂/南北塔健身房/北塔高管层/南北塔咖啡厅精装周工作计划</th>
+          <th colspan="13" style="font-size:13px;background:#fff;border:1px solid #005e00;padding:4px;color:#000;">北京清尚—精装周工作计划</th>
         </tr>
         <tr>
           <th rowspan="2" style="border:1px solid #005e00;padding:2px;background:#fff;width:26px;font-weight:700;font-size:10px;">序<br/>号</th>
           <th rowspan="2" style="border:1px solid #005e00;padding:2px;background:#fff;width:45px;font-weight:700;font-size:10px;">区域</th>
           <th rowspan="2" style="border:1px solid #005e00;padding:2px;background:#fff;min-width:120px;font-weight:700;font-size:10px;">工作内容</th>
           <th rowspan="2" style="border:1px solid #005e00;padding:2px;background:#fff;width:32px;font-weight:700;font-size:9px;writing-mode:vertical-rl;text-orientation:mixed;">工作天数</th>
-          ${dayLabels.map(d => `<th style="border:1px solid #005e00;padding:2px;background:#fff;width:36px;font-weight:700;font-size:9px;">${d}</th>`).join('')}
+          ${dayLabels.map(dl => `<th style="border:1px solid #005e00;padding:2px;background:#fff;width:36px;font-weight:700;font-size:9px;">${dl}</th>`).join('')}
           <th rowspan="2" style="border:1px solid #005e00;padding:2px;background:#fff;width:60px;font-weight:700;font-size:9px;">劳动力需求</th>
           <th rowspan="2" style="border:1px solid #005e00;padding:2px;background:#fff;width:50px;font-weight:700;font-size:9px;">材料准备</th>
         </tr>
@@ -7692,12 +7859,17 @@ function _getScheduleTableTitle() {
 }
 
 function renderMappingPage10() {
-  const sections = M.getPageSectionsData(currentProjectId);
+  const d = _weeklyApiData;
+  const sections = (d && d.PAGE06_PHOTOS && d.PAGE06_PHOTOS.filter(p => p.projectId === currentProjectId).map(p => ({
+    name: p.caption || '施工段',
+    items: [{ image: p.src, label: p.caption || '' }],
+    floorHeaders: [{ name: '一层', color: '#f4b084' }, { name: '二层', color: '#a9d08e' }],
+    rows: []
+  }))) || [];
   if (sections.length === 0) {
     document.getElementById('mappingContent').innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;">暂无数据</div>';
     return;
   }
-  // 2N sub-pages：偶数下标 = 施工段划分（图片），奇数下标 = 施工计划（表格）
   const totalSubs = sections.length * 2;
   if (_page10Page >= totalSubs) _page10Page = 0;
   const sectionIdx = Math.floor(_page10Page / 2);
@@ -7714,7 +7886,6 @@ function renderMappingPage10() {
     let body;
     if (validImages.length > 0) {
       const count = validImages.length;
-      // 列数：单图 1 列（铺满），2-3 张用 2 列（更宽更大），4+ 张用 3 列
       let cols;
       if (count <= 1) cols = 1;
       else if (count <= 3) cols = 2;
@@ -7734,21 +7905,17 @@ function renderMappingPage10() {
     }
     document.getElementById('mappingContent').innerHTML = `<div style="height:100%;padding-top:8px;">${body}</div>`;
   } else {
-    const floorHeaders = sec.floorHeaders || [
-      { name: '一层', color: '#f4b084' },
-      { name: '二层', color: '#a9d08e' }
-    ];
     let body;
     if ((sec.rows || []).length === 0) {
       body = `<div style="text-align:center;padding:80px 20px;color:#94a3b8;">暂无施工计划</div>`;
     } else {
       let header1 = `<th colspan="4" style="border:1px solid #999;padding:4px;background:#f2f2f2;font-size:14px;text-align:center;">${_getScheduleTableTitle()}</th>`;
-      header1 += floorHeaders.map(f => `<th colspan="3" style="border:1px solid #999;padding:4px;text-align:center;font-size:10px;background:${f.color};color:#000;">${f.name}</th>`).join('');
+      header1 += (sec.floorHeaders || []).map(f => `<th colspan="3" style="border:1px solid #999;padding:4px;text-align:center;font-size:10px;background:${f.color};color:#000;">${f.name}</th>`).join('');
       let header2 = `<th style="border:1px solid #999;padding:2px;width:28px;">序号</th>`;
       header2 += `<th style="border:1px solid #999;padding:2px;width:36px;">楼栋</th>`;
       header2 += `<th style="border:1px solid #999;padding:2px;width:36px;">部位</th>`;
       header2 += `<th style="border:1px solid #999;padding:2px;">工序</th>`;
-      header2 += floorHeaders.flatMap(() => ['开始时间','完成时间','日历天']).map(h => `<th style="border:1px solid #999;padding:2px;width:42px;">${h}</th>`).join('');
+      header2 += (sec.floorHeaders || []).flatMap(() => ['开始时间','完成时间','日历天']).map(h => `<th style="border:1px solid #999;padding:2px;width:42px;">${h}</th>`).join('');
       const rows = sec.rows.map((item, i) => {
         const bg = i % 2 === 0 ? '#f8fafc' : '#fff';
         const highlight = (i === 4 || i === 8) ? 'background:#ffff00;font-weight:700;' : '';
@@ -7757,7 +7924,7 @@ function renderMappingPage10() {
           <td style="border:1px solid #999;padding:2px;text-align:center;">${item.building}</td>
           <td style="border:1px solid #999;padding:2px;text-align:center;">${item.location}</td>
           <td style="border:1px solid #999;padding:2px;${highlight}">${item.process}</td>
-          ${item.floors.flatMap(f => [
+          ${(item.floors || []).flatMap(f => [
             `<td style="border:1px solid #999;padding:2px;text-align:center;">${f.startDate}</td>`,
             `<td style="border:1px solid #999;padding:2px;text-align:center;">${f.endDate}</td>`,
             `<td style="border:1px solid #999;padding:2px;text-align:center;">${f.days}</td>`
@@ -7766,10 +7933,7 @@ function renderMappingPage10() {
       }).join('');
       body = `<div style="overflow-x:auto;">
         <table style="width:100%;border-collapse:collapse;font-size:10px;border:1px solid #999;">
-          <thead>
-            <tr>${header1}</tr>
-            <tr>${header2}</tr>
-          </thead>
+          <thead><tr>${header1}</tr><tr>${header2}</tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>`;
@@ -7779,14 +7943,23 @@ function renderMappingPage10() {
 }
 
 function renderMappingPage12() {
-  const items = M.getPage12Data(currentProjectId, true);
-  const { weekStart, weekEnd } = getWeekRange();
+  const d = _weeklyApiData;
+  const allIssues = (d && d.ISSUES) || [];
+  const items = allIssues.filter(i =>
+    i.projectId === currentProjectId &&
+    i.type === 'coordination' &&
+    i.status !== 'closed'
+  ).map((i, idx) => ({
+    seq: idx + 1,
+    issue: i.title,
+    proposeDept: i.proposeDept || i.propose_dept || '—',
+    cooperateDept: i.cooperateDept || i.cooperate_dept || '—'
+  }));
 
   let html = `
     <div style="margin-bottom:12px; font-size:13px; color:#64748b;">
-      数据源：协调事宜登记（未闭环）
+      事项台账中的协调事宜
       <span style="margin-left:12px; font-weight:600; color:#0f172a;">${items.length} 项未闭环</span>
-      <span style="margin-left:8px; font-size:12px; color:#94a3b8;">（共 ${M.ISSUES.filter(i => i.projectId === currentProjectId && i.type === 'coordination').length} 项）</span>
     </div>
     <table style="width:100%; border-collapse:collapse; border:1px solid #166534;">
       <thead>
@@ -7902,6 +8075,228 @@ async function checkBackendHealth() {
   }
 }
 
+// LLM 设置页 Tab 切换
+function switchLLMTab(tab) {
+  const tabs = ['basic', 'custom', 'providers'];
+  const bodies = {
+    basic: document.getElementById('llmConfigBody'),
+    custom: document.getElementById('customModelsBody'),
+    providers: document.getElementById('providersBody')
+  };
+  const buttons = {
+    basic: document.getElementById('tabBasic'),
+    custom: document.getElementById('tabCustom'),
+    providers: document.getElementById('tabProviders')
+  };
+  for (const t of tabs) {
+    bodies[t].style.display = t === tab ? 'block' : 'none';
+    buttons[t].className = 'btn btn-sm ' + (t === tab ? 'btn-primary' : 'btn-secondary');
+    buttons[t].style.background = t === tab ? '#3b82f6' : 'rgba(255,255,255,0.1)';
+    buttons[t].style.color = '#f1f5f9';
+    buttons[t].style.border = 'none';
+  }
+  if (tab === 'basic') hideAddCustomModelForm();
+  if (tab === 'providers') loadProviders();
+  if (tab === 'custom') { hideAddCustomModelForm(); renderCustomModels(); }
+}
+
+function loadProviders() {
+  const list = document.getElementById('providersList');
+  const providers = [
+    { name: 'MiniMax（默认）', url: 'https://api.minimax.chat/v1', model: 'MiniMax-M3', status: 'active' },
+    { name: 'OpenAI', url: 'https://api.openai.com/v1', model: 'gpt-4o-mini', status: 'available' },
+    { name: 'Anthropic', url: 'https://api.anthropic.com/v1', model: 'claude-sonnet-4-20250514', status: 'available' },
+    { name: 'Together AI', url: 'https://api.together.xyz/v1', model: 'meta-llama/Llama-4-17B', status: 'available' },
+    { name: 'SiliconFlow', url: 'https://api.siliconflow.cn/v1', model: 'deepseek-ai/DeepSeek-V3', status: 'available' },
+    { name: '火山引擎', url: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-1.5-lite', status: 'available' }
+  ];
+  list.innerHTML = providers.map(p => `
+    <div style="background:rgba(30,41,59,0.8);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:10px 12px;">
+      <div style="font-size:13px;font-weight:600;color:#f1f5f9;">${p.name}</div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:4px;">${p.url}</div>
+      <div style="font-size:11px;color:#94a3b8;">模型：${p.model}</div>
+      <div style="margin-top:6px;font-size:11px;color:${p.status === 'active' ? '#86efac' : '#94a3b8'}">${p.status === 'active' ? '✅ 当前使用' : '⬜ 可用'}</div>
+    </div>
+  `).join('');
+}
+
+function showAddCustomModelForm(editId) {
+  const form = document.getElementById('addCustomModelForm');
+  form.style.display = 'block';
+  if (editId) {
+    form._editId = editId;
+    const models = JSON.parse(localStorage.getItem('customLLMModels') || '[]');
+    const m = models.find(x => x.id === editId);
+    if (m) {
+      document.getElementById('cmName').value = m.name;
+      document.getElementById('cmBaseUrl').value = m.baseUrl;
+      document.getElementById('cmApiKey').value = m.apiKey;
+      document.getElementById('cmModelId').value = m.modelId;
+      document.getElementById('cmMaxTokens').value = m.maxTokens;
+      document.getElementById('cmTemperature').value = m.temperature;
+    }
+    document.querySelector('#addCustomModelForm .btn-primary').textContent = '保存修改';
+  }
+}
+function hideAddCustomModelForm() {
+  const form = document.getElementById('addCustomModelForm');
+  form.style.display = 'none';
+  delete form._editId;
+  document.getElementById('cmName').value = '';
+  document.getElementById('cmBaseUrl').value = '';
+  document.getElementById('cmApiKey').value = '';
+  document.getElementById('cmModelId').value = '';
+  document.getElementById('cmMaxTokens').value = '4096';
+  document.getElementById('cmTemperature').value = '0.5';
+  document.querySelector('#addCustomModelForm .btn-primary').textContent = '添加模型';
+}
+function addCustomModel() {
+  const name = document.getElementById('cmName').value.trim();
+  const baseUrl = document.getElementById('cmBaseUrl').value.trim();
+  const apiKey = document.getElementById('cmApiKey').value.trim();
+  const modelId = document.getElementById('cmModelId').value.trim();
+  const maxTokens = parseInt(document.getElementById('cmMaxTokens').value) || 4096;
+  const temperature = parseFloat(document.getElementById('cmTemperature').value) || 0.5;
+  if (!name || !baseUrl || !modelId) { showToast('请填写模型名称、Base URL 和模型 ID', 'error'); return; }
+  const models = JSON.parse(localStorage.getItem('customLLMModels') || '[]');
+  const form = document.getElementById('addCustomModelForm');
+  if (form._editId) {
+    const idx = models.findIndex(x => x.id === form._editId);
+    if (idx !== -1) { models[idx] = { ...models[idx], name, baseUrl, apiKey, modelId, maxTokens, temperature }; }
+    localStorage.setItem('customLLMModels', JSON.stringify(models));
+    hideAddCustomModelForm();
+    renderCustomModels();
+    showToast(`✅ 已更新模型：${name}`, 'success');
+    return;
+  }
+  models.push({ name, baseUrl, apiKey, modelId, maxTokens, temperature, id: Date.now() });
+  localStorage.setItem('customLLMModels', JSON.stringify(models));
+  hideAddCustomModelForm();
+  renderCustomModels();
+  showToast(`✅ 已添加模型：${name}`, 'success');
+}
+function deactivateCustomModel() {
+  localStorage.removeItem('activeCustomModel');
+  document.getElementById('activeModelName').textContent = 'MiniMax-M3（默认）';
+  document.getElementById('resetToDefaultBtn').style.display = 'none';
+  renderCustomModels();
+  showToast('已恢复基础模型', 'info');
+}
+function renderCustomModels() {
+  const list = document.getElementById('customModelsList');
+  const activeId = localStorage.getItem('activeCustomModel');
+  const models = JSON.parse(localStorage.getItem('customLLMModels') || '[]');
+  if (!models.length) {
+    list.innerHTML = '<div style="text-align:center;padding:20px;color:#94a3b8;font-size:13px;">暂无自定义模型，点击上方「添加模型」按钮添加</div>';
+    return;
+  }
+  list.innerHTML = models.map(m => `
+    <div style="display:flex;align-items:center;justify-content:space-between;background:rgba(30,41,59,0.8);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:10px 12px;margin-bottom:8px;">
+      <div>
+        <div style="font-size:13px;font-weight:600;color:#f1f5f9;">${m.name} ${activeId == m.id ? '<span style="color:#86efac;font-size:11px;">✅ 使用中</span>' : ''}</div>
+        <div style="font-size:11px;color:#94a3b8;margin-top:2px;">${m.baseUrl} · ${m.modelId}</div>
+      </div>
+      <div style="display:flex;gap:6px;">
+        <button class="btn btn-sm" onclick="activateCustomModel(${m.id})" style="background:rgba(59,130,246,0.2);color:#93c5fd;border:none;font-size:11px;">使用</button>
+        <button class="btn btn-sm" onclick="showAddCustomModelForm(${m.id})" style="background:rgba(245,158,11,0.2);color:#fbbf24;border:none;font-size:11px;">编辑</button>
+        <button class="btn btn-sm" onclick="removeCustomModel(${m.id})" style="background:rgba(239,68,68,0.2);color:#fca5a5;border:none;font-size:11px;">删除</button>
+      </div>
+    </div>
+  `).join('');
+}
+function activateCustomModel(id) {
+  localStorage.setItem('activeCustomModel', id);
+  const models = JSON.parse(localStorage.getItem('customLLMModels') || '[]');
+  const model = models.find(m => m.id === id);
+  if (model) {
+    document.getElementById('activeModelName').textContent = model.name;
+    document.getElementById('resetToDefaultBtn').style.display = 'inline-block';
+  }
+  renderCustomModels();
+  showToast('✅ 已切换模型', 'success');
+}
+function removeCustomModel(id) {
+  let models = JSON.parse(localStorage.getItem('customLLMModels') || '[]');
+  models = models.filter(m => m.id !== id);
+  localStorage.setItem('customLLMModels', JSON.stringify(models));
+  const activeId = localStorage.getItem('activeCustomModel');
+  if (activeId == id) {
+    localStorage.removeItem('activeCustomModel');
+    document.getElementById('activeModelName').textContent = 'MiniMax-M3（默认）';
+    document.getElementById('resetToDefaultBtn').style.display = 'none';
+  }
+  renderCustomModels();
+  showToast('已删除模型', 'info');
+}
+function loadProviderModels() {
+  const provider = document.getElementById('cmProvider').value;
+  const select = document.getElementById('cmModelSelect');
+  const baseUrlInput = document.getElementById('cmBaseUrl');
+  const discoverBtn = document.getElementById('cmDiscoverBtn');
+  if (!provider) {
+    select.style.display = 'none';
+    discoverBtn.style.display = 'inline-block';
+    return;
+  }
+  // 自动填充推荐 base URL
+  const urlMap = {
+    openai: 'https://api.openai.com/v1',
+    anthropic: 'https://api.anthropic.com/v1',
+    together: 'https://api.together.xyz/v1',
+    siliconflow: 'https://api.siliconflow.cn/v1',
+    volcengine: 'https://ark.cn-beijing.volces.com/api/v3'
+  };
+  if (urlMap[provider] && !baseUrlInput.value) {
+    baseUrlInput.value = urlMap[provider];
+  }
+  const modelMap = {
+    openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+    anthropic: ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'],
+    together: ['meta-llama/Llama-4-17B', 'mistralai/Mixtral-8x22B', 'deepseek-ai/DeepSeek-V3'],
+    siliconflow: ['deepseek-ai/DeepSeek-V3', 'Qwen/Qwen2.5-72B', 'THUDM/glm-4-9b-chat'],
+    volcengine: ['doubao-1.5-lite', 'doubao-1.5-pro', 'deepseek-r1']
+  };
+  const models = modelMap[provider] || [];
+  select.innerHTML = '<option value="">选择预设模型...</option>' + models.map(m => `<option value="${m}">${m}</option>`).join('');
+  select.style.display = models.length ? 'block' : 'none';
+  discoverBtn.style.display = 'inline-block';
+}
+async function discoverModels() {
+  const baseUrl = document.getElementById('cmBaseUrl').value.trim();
+  const apiKey = document.getElementById('cmApiKey').value.trim();
+  const select = document.getElementById('cmModelSelect');
+  const discoverBtn = document.getElementById('cmDiscoverBtn');
+  if (!baseUrl) { showToast('请先填写 Base URL', 'error'); return; }
+  discoverBtn.disabled = true;
+  discoverBtn.textContent = '⏳ 获取中...';
+  showToast('🔍 正在从 ' + baseUrl + ' 获取模型列表...', 'info');
+  try {
+    const modelsUrl = baseUrl.replace(/\/+$/, '') + '/models';
+    const headers = { 'Content-Type': 'application/json' };
+    if (apiKey) headers['Authorization'] = 'Bearer ' + apiKey;
+    const r = await fetch(modelsUrl, { headers, signal: AbortSignal.timeout(15000) });
+    if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + r.statusText);
+    const data = await r.json();
+    let modelList = [];
+    if (data.data && Array.isArray(data.data)) {
+      modelList = data.data.map(m => m.id || m.name).filter(Boolean);
+    } else if (data.models && Array.isArray(data.models)) {
+      modelList = data.models.map(m => m.id || m.name).filter(Boolean);
+    }
+    if (!modelList.length) throw new Error('响应中未找到模型列表');
+    select.innerHTML = '<option value="">请选择模型...</option>' + modelList.map(m => `<option value="${m}">${m}</option>`).join('');
+    select.style.display = 'block';
+    showToast('✅ 获取到 ' + modelList.length + ' 个模型', 'success');
+  } catch (e) {
+    select.innerHTML = '<option value="">获取失败，请手动输入</option>';
+    select.style.display = 'block';
+    showToast('❌ 获取失败：' + e.message, 'error');
+  } finally {
+    discoverBtn.disabled = false;
+    discoverBtn.textContent = '🔍 获取列表';
+  }
+}
+
 // LLM 设置页
 async function openLLMSettings() {
   showModal('modalLLM');
@@ -7914,23 +8309,23 @@ async function openLLMSettings() {
     const cfg = await r.json();
 
     const statusBadge = cfg.configured
-      ? '<span style="background:#d1fae5; color:#065f46; padding:3px 10px; border-radius:999px; font-size:12px;">✅ LLM 已配置</span>'
-      : '<span style="background:#fef3c7; color:#92400e; padding:3px 10px; border-radius:999px; font-size:12px;">⚠️ LLM 未配置</span>';
+      ? '<span style="background:rgba(16,185,129,0.2); color:#86efac; padding:3px 10px; border-radius:999px; font-size:12px;">✅ LLM 已配置</span>'
+      : '<span style="background:rgba(245,158,11,0.2); color:#fbbf24; padding:3px 10px; border-radius:999px; font-size:12px;">⚠️ LLM 未配置</span>';
 
     body.innerHTML = `
       <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
-        <div style="font-size:18px; font-weight:600;">${cfg.provider}</div>
+        <div style="font-size:18px; font-weight:600;color:#f1f5f9;">${cfg.provider}</div>
         ${statusBadge}
       </div>
-      <div style="background:#f8fafc; border-radius:8px; padding:14px; font-size:13px; line-height:1.9;">
-        <div><strong style="color:#475569;">Base URL：</strong> <code style="background:#e0f2fe; padding:2px 6px; border-radius:4px;">${cfg.baseUrl || '未设置'}</code></div>
-        <div><strong style="color:#475569;">Model：</strong> <code style="background:#e0f2fe; padding:2px 6px; border-radius:4px;">${cfg.model || '未设置'}</code></div>
-        <div><strong style="color:#475569;">Group ID：</strong> ${cfg.groupId || '-'}</div>
-        <div><strong style="color:#475569;">API Key：</strong> <code style="background:#fef3c7; padding:2px 6px; border-radius:4px;">${cfg.apiKeyMasked || '未设置'}</code></div>
-        <div><strong style="color:#475569;">Max Tokens：</strong> ${cfg.maxTokens}</div>
-        <div><strong style="color:#475569;">Temperature：</strong> ${cfg.temperature}</div>
+      <div style="background:rgba(30,41,59,0.8); border:1px solid rgba(255,255,255,0.1); border-radius:8px; padding:14px; font-size:13px; line-height:1.9;">
+        <div><strong style="color:#cbd5e1;">Base URL：</strong> <code style="background:rgba(59,130,246,0.2); color:#93c5fd; padding:2px 6px; border-radius:4px;">${cfg.baseUrl || '未设置'}</code></div>
+        <div><strong style="color:#cbd5e1;">Model：</strong> <code style="background:rgba(59,130,246,0.2); color:#93c5fd; padding:2px 6px; border-radius:4px;">${cfg.model || '未设置'}</code></div>
+        <div><strong style="color:#cbd5e1;">Group ID：</strong> <span style="color:#f1f5f9;">${cfg.groupId || '-'}</span></div>
+        <div><strong style="color:#cbd5e1;">API Key：</strong> <code style="background:rgba(245,158,11,0.2); color:#fbbf24; padding:2px 6px; border-radius:4px;">${cfg.apiKeyMasked || '未设置'}</code></div>
+        <div><strong style="color:#cbd5e1;">Max Tokens：</strong> <span style="color:#f1f5f9;">${cfg.maxTokens}</span></div>
+        <div><strong style="color:#cbd5e1;">Temperature：</strong> <span style="color:#f1f5f9;">${cfg.temperature}</span></div>
       </div>
-      <div style="margin-top:14px; background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:10px 12px; font-size:12px; color:#92400e; line-height:1.6;">
+      <div style="margin-top:14px; background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.3); border-radius:6px; padding:10px 12px; font-size:12px; color:#fbbf24; line-height:1.6;">
         💡 <strong>配置来源</strong>：后端从 <code>daily-report-system/.env</code> 读取 <code>MINIMAX_*</code> 环境变量。<br>
         如需修改，编辑 <code>.env</code> 后重启后端服务（<code>backend/start.bat</code>）。
       </div>
@@ -7959,22 +8354,22 @@ async function testLLMConnection() {
     if (!data.success) throw new Error(data.error || '未知错误');
 
     resultDiv.innerHTML = `
-      <div style="background:#d1fae5; border:1px solid #10b981; border-radius:6px; padding:12px;">
-        <div style="font-size:14px; color:#065f46; font-weight:600;">✅ 连接成功</div>
-        <div style="font-size:12px; color:#065f46; margin-top:6px; line-height:1.7;">
-          模型：<code>${data.model}</code><br>
-          响应：<code>${data.reply}</code><br>
-          延迟：<strong>${data.latencyMs}ms</strong>
+      <div style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3); border-radius:6px; padding:12px;">
+        <div style="font-size:14px; color:#86efac; font-weight:600;">✅ 连接成功</div>
+        <div style="font-size:12px; color:#cbd5e1; margin-top:6px; line-height:1.7;">
+          模型：<code style="background:rgba(59,130,246,0.2); color:#93c5fd; padding:1px 4px; border-radius:3px;">${data.model}</code><br>
+          响应：<code style="background:rgba(59,130,246,0.2); color:#93c5fd; padding:1px 4px; border-radius:3px;">${data.reply}</code><br>
+          延迟：<strong style="color:#f1f5f9;">${data.latencyMs}ms</strong>
         </div>
       </div>
     `;
     showToast(`✅ LLM 连接成功 · ${data.latencyMs}ms`, 'success');
   } catch (e) {
     resultDiv.innerHTML = `
-      <div style="background:#fee2e2; border:1px solid #ef4444; border-radius:6px; padding:12px;">
-        <div style="font-size:14px; color:#991b1b; font-weight:600;">❌ 连接失败</div>
-        <div style="font-size:12px; color:#991b1b; margin-top:6px;">${e.message}</div>
-        <div style="font-size:11px; color:#7f1d1d; margin-top:6px;">系统将自动降级到 mock 模式运行</div>
+      <div style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); border-radius:6px; padding:12px;">
+        <div style="font-size:14px; color:#fca5a5; font-weight:600;">❌ 连接失败</div>
+        <div style="font-size:12px; color:#cbd5e1; margin-top:6px;">${e.message}</div>
+        <div style="font-size:11px; color:#94a3b8; margin-top:6px;">系统将自动降级到 mock 模式运行</div>
       </div>
     `;
     showToast('❌ LLM 连接失败', 'error');
@@ -8078,24 +8473,20 @@ function _buildAllPagesHTML() {
 }
 
 function _pageWrapHTML(page, content, hc, noBg, weekLabel) {
-  const title = _pageTitle(page);
   const ph = typeof PAGE_HEADERS !== 'undefined' ? PAGE_HEADERS[page] : null;
+  const title = ph && ph.title ? ph.title : _pageTitle(page);
   const sub = ph && ph.subtitle ? ph.subtitle : '';
   const pad = ph && ph.pad ? ph.pad : 80;
   const subBar = sub
     ? `<div style="position:absolute;top:82px;left:72px;width:285px;height:38px;background:linear-gradient(to right,#facc15,#f43f5e);z-index:2;border-radius:0 2px 2px 0;"></div>
        <div style="position:absolute;top:82px;left:72px;height:38px;line-height:38px;padding-left:12px;color:#fff;font-size:16px;font-weight:700;z-index:3;letter-spacing:1px;">${sub}</div>`
     : '';
-  const wkLabel = weekLabel
-    ? `<div class="header-subtitle" style="position:absolute;top:46px;left:80px;font-size:11px;color:#64748b;white-space:nowrap;">${weekLabel}</div>`
-    : '';
   return `<div class="report-page-frame${noBg}">
     <div class="report-page-header">
       <div class="trapezoid" style="background:${hc};"></div>
       <div class="header-line" style="background:${hc};"></div>
-      <div class="header-title" style="color:${hc};">${title}</div>
-      ${wkLabel}
     </div>
+    <div style="position:absolute;top:20px;left:72px;font-size:30px;font-weight:700;color:${hc};z-index:2;letter-spacing:2px;white-space:nowrap;">${title}</div>
     ${subBar}
     <div class="report-page-content" style="padding:${pad}px 30px 20px;">${content}</div>
   </div>`;
@@ -8180,8 +8571,10 @@ function printReport() {
 }
 
 function exportReportPDF() {
+  if (window._exportingPDF) return;
+  window._exportingPDF = true;
   const pages = _buildAllPagesHTML();
-  if (!pages || pages.trim().length < 50) { alert('周报内容为空，请先录入数据'); return; }
+  if (!pages || pages.trim().length < 50) { window._exportingPDF = false; alert('周报内容为空，请先录入数据'); return; }
 
   var toast = function (msg, type) {
     var d = document.createElement('div');
@@ -8211,107 +8604,150 @@ function exportReportPDF() {
     loadLib('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js', function () { return window.jspdf && window.jspdf.jsPDF; }),
     loadLib('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js', function () { return window.html2canvas; })
   ]).then(function () {
-    var container = document.createElement('div');
-    container.id = '_exportPages';
-    container.innerHTML = pages;
-    container.style.cssText = 'position:fixed;left:-9999px;top:0;width:1280px;background:#fff;z-index:-1;';
-    document.body.appendChild(container);
+    var hc = _getHeaderColor();
+    var baseUrl = window.location.href.substring(0, window.location.href.lastIndexOf('/') + 1);
+    var bgUrl = customBgUrl || TEMPLATES[currentTemplate].bg;
+    var bgCss = bgUrl ? 'background:url(\'' + baseUrl + bgUrl + '\') center/cover no-repeat;' : '';
+    var iframe = document.createElement('iframe');
+    iframe.style.cssText = 'position:fixed;left:0;top:0;width:1280px;opacity:0;pointer-events:none;z-index:-1;border:none;';
+    document.body.appendChild(iframe);
+    var iframeDoc = iframe.contentWindow.document;
+    iframeDoc.open();
+    iframeDoc.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><style>'
+      + 'body { margin:0; padding:0; width:1280px; background:#fff; font-family:"Microsoft YaHei","PingFang SC",sans-serif; }'
+      + '.report-page-frame { width:1280px; height:720px; position:relative; overflow:hidden; margin:0; ' + bgCss + ' }'
+      + '.report-page-frame.no-bg { background:none !important; background-color:#fff !important; }'
+      + '.report-page-header { position:absolute; top:0; left:0; right:0; height:75px; z-index:1; }'
+      + '.report-page-header .trapezoid { position:absolute; top:23px; left:0; width:58px; height:52px; background:' + hc + '; clip-path:polygon(0 0,60% 0,100% 100%,0 100%); }'
+      + '.report-page-header .header-line { position:absolute; top:75px; left:72px; right:0; height:3px; background:' + hc + '; }'
+      + '.report-page-header .header-title { position:absolute; top:20px; left:80px; font-size:18px; font-weight:700; color:' + hc + '; white-space:nowrap; }'
+      + '.report-page-content { width:1280px; height:720px; box-sizing:border-box; overflow:hidden; }'
+      + '</style></head><body>' + pages + '</body></html>');
+    iframeDoc.close();
 
-    var frames = container.querySelectorAll('.report-page-frame');
-    var pdf = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'px', format: [1280, 720], compress: true });
-    var idx = 0;
-
-    function captureNext() {
-      if (idx >= frames.length) {
-        pdf.save('百草园-清尚-周报.pdf');
-        container.remove();
-        toast('导出完成', 'success');
-        return;
+    function waitForImages(doc, cb) {
+      var imgs = doc.querySelectorAll('img');
+      var total = imgs.length;
+      if (total === 0) { cb(); return; }
+      var loaded = 0;
+      var checked = {};
+      function markLoaded(img) {
+        var key = img.src || img.outerHTML;
+        if (checked[key]) return;
+        checked[key] = true;
+        loaded++;
+        if (loaded >= total) cb();
       }
-      toast('处理 ' + (idx + 1) + '/' + frames.length, 'info');
-      window.html2canvas(frames[idx], {
-        width: 1280, height: 720,
-        scale: 1.5, backgroundColor: '#ffffff',
-        useCORS: true, allowTaint: true,
-        imageTimeout: 20000, logging: false,
-        foreignObjectRendering: false,
-        onclone: function (clonedDoc) {
-          var all = clonedDoc.querySelectorAll('*');
-          for (var i = 0; i < all.length; i++) {
-            var el = all[i];
-            if (!el.textContent || !el.textContent.trim()) continue;
-            var cs = clonedDoc.defaultView.getComputedStyle(el);
-            var lh = cs.lineHeight;
-            if (lh && lh !== 'normal' && lh.indexOf('px') > -1) {
-              el.style.lineHeight = Math.max(1, parseFloat(lh) - 6) + 'px';
-            }
-            var pt = cs.paddingTop;
-            if (pt && pt.indexOf('px') > -1 && parseFloat(pt) >= 4) {
-              el.style.paddingTop = (parseFloat(pt) - 4) + 'px';
-            }
-          }
-          // fix clip-path
-          var all2 = clonedDoc.querySelectorAll('*');
-          for (var j = 0; j < all2.length; j++) {
-            var e = all2[j];
-            try { var cp = clonedDoc.defaultView.getComputedStyle(e).clipPath; } catch (ex) { continue; }
-            if (!cp || cp === 'none') continue;
-            var m = cp.match(/polygon\(([^)]+)\)/i);
-            if (!m) continue;
-            var r = e.getBoundingClientRect();
-            if (r.width <= 0 || r.height <= 0) continue;
-            var bg = clonedDoc.defaultView.getComputedStyle(e).backgroundColor;
-            if (!bg || bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent') bg = '#37a3eb';
-            var parent = e.parentElement;
-            while (parent && clonedDoc.defaultView.getComputedStyle(parent).position === 'static') parent = parent.parentElement;
-            if (!parent) parent = e.parentElement;
-            var pr = parent.getBoundingClientRect();
-            var cv = clonedDoc.createElement('canvas');
-            cv.width = r.width;
-            cv.height = r.height;
-            cv.style.cssText = 'position:absolute;top:' + (r.top - pr.top) + 'px;left:' + (r.left - pr.left) + 'px;width:' + r.width + 'px;height:' + r.height + 'px;z-index:100;pointer-events:none;';
-            var ctx = cv.getContext('2d');
-            ctx.fillStyle = bg;
-            var pairs = m[1].split(',');
-            ctx.beginPath();
-            for (var k = 0; k < pairs.length; k++) {
-              var xy = pairs[k].trim().split(/\s+/);
-              var x = xy[0].indexOf('%') > -1 ? (parseFloat(xy[0]) / 100) * r.width : parseFloat(xy[0]);
-              var y = xy[1].indexOf('%') > -1 ? (parseFloat(xy[1]) / 100) * r.height : parseFloat(xy[1]);
-              if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-            }
-            ctx.closePath();
-            ctx.fill();
-            e.style.clipPath = 'none';
-            e.style.visibility = 'hidden';
-            parent.appendChild(cv);
-          }
-        }
-      }).then(function (canvas) {
-        var imgData = canvas.toDataURL('image/jpeg', 0.95);
-        if (idx > 0) pdf.addPage([1280, 720], 'landscape');
-        pdf.addImage(imgData, 'JPEG', 0, 0, 1280, 720);
-        idx++;
-        setTimeout(captureNext, 200);
-      }).catch(function (err) {
-        toast('页面 ' + (idx + 1) + ' 失败: ' + (err.message || err), 'error');
-        idx++;
-        setTimeout(captureNext, 200);
+      imgs.forEach(function (img) {
+        if (img.complete && img.naturalHeight > 0) { markLoaded(img); }
+        else { img.onload = function () { markLoaded(img); }; img.onerror = function () { markLoaded(img); }; }
       });
+      setTimeout(cb, 5000);
     }
 
-    setTimeout(function () {
-      var imgs = container.querySelectorAll('img');
-      var total = imgs.length;
-      var loaded = 0;
-      function startCapture() { captureNext(); }
-      if (total === 0) { startCapture(); return; }
-      imgs.forEach(function (img) {
-        if (img.complete && img.naturalHeight > 0) { loaded++; if (loaded >= total) startCapture(); }
-        else { img.onload = img.onerror = function () { loaded++; if (loaded >= total) startCapture(); }; }
-      });
-      setTimeout(startCapture, 5000);
-    }, 100);
+    waitForImages(iframeDoc, function () {
+      var frames = iframeDoc.querySelectorAll('.report-page-frame');
+      var pdf = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'px', format: [1280, 720], compress: true });
+      var idx = 0;
+
+      function captureNext() {
+        if (idx >= frames.length) {
+          pdf.save('百草园-清尚-周报.pdf');
+          iframe.remove();
+          window._exportingPDF = false;
+          toast('导出完成', 'success');
+          return;
+        }
+        toast('处理 ' + (idx + 1) + '/' + frames.length, 'info');
+        window.html2canvas(frames[idx], {
+          width: 1280, height: 720,
+          windowWidth: 1280, windowHeight: 720,
+          x: 0, y: 0, scrollX: 0, scrollY: 0,
+          scale: 1.5, backgroundColor: '#ffffff',
+          useCORS: true, allowTaint: true,
+          imageTimeout: 20000, logging: false,
+          foreignObjectRendering: false,
+          onclone: function (clonedDoc) {
+            var all = clonedDoc.querySelectorAll('*');
+            for (var i = 0; i < all.length; i++) {
+              var el = all[i];
+              var cs = clonedDoc.defaultView.getComputedStyle(el);
+              if (el.textContent && el.textContent.trim()) {
+                var lh = cs.lineHeight;
+                if (lh && lh !== 'normal') {
+                  if (lh.indexOf('px') > -1) {
+                    el.style.lineHeight = Math.max(1, parseFloat(lh) - 6) + 'px';
+                  } else {
+                    el.style.lineHeight = 'calc(' + lh + ' - 6px)';
+                  }
+                }
+                var pt = cs.paddingTop;
+                if (pt && pt.indexOf('px') > -1) {
+                  var ptNum = parseFloat(pt);
+                  if (ptNum >= 6) {
+                    el.style.paddingTop = (ptNum - 6) + 'px';
+                    el.style.paddingBottom = (parseFloat(cs.paddingBottom || '0') + 6) + 'px';
+                  } else if (ptNum > 0) {
+                    el.style.paddingTop = '0px';
+                    el.style.paddingBottom = (parseFloat(cs.paddingBottom || '0') + ptNum) + 'px';
+                  }
+                }
+                if (el.tagName === 'TD' || el.tagName === 'TH') {
+                  el.style.verticalAlign = el.hasAttribute('rowspan') && parseInt(el.getAttribute('rowspan')) > 1 ? 'middle' : 'top';
+                }
+              }
+            }
+            var all2 = clonedDoc.querySelectorAll('*');
+            for (var j = 0; j < all2.length; j++) {
+              var e = all2[j];
+              try { var cp = clonedDoc.defaultView.getComputedStyle(e).clipPath; } catch (ex) { continue; }
+              if (!cp || cp === 'none') continue;
+              var m = cp.match(/polygon\(([^)]+)\)/i);
+              if (!m) continue;
+              var r = e.getBoundingClientRect();
+              if (r.width <= 0 || r.height <= 0) continue;
+              var bg = clonedDoc.defaultView.getComputedStyle(e).backgroundColor;
+              if (!bg || bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent') bg = '#37a3eb';
+              var posCtx = e.parentElement;
+              while (posCtx && clonedDoc.defaultView.getComputedStyle(posCtx).position === 'static') posCtx = posCtx.parentElement;
+              if (!posCtx) posCtx = e.parentElement;
+              var pr = posCtx.getBoundingClientRect();
+              var cv = clonedDoc.createElement('canvas');
+              cv.width = r.width;
+              cv.height = r.height;
+              cv.style.cssText = 'position:absolute;top:' + (r.top - pr.top) + 'px;left:' + (r.left - pr.left) + 'px;width:' + r.width + 'px;height:' + r.height + 'px;z-index:100;pointer-events:none;';
+              var ctx = cv.getContext('2d');
+              ctx.fillStyle = bg;
+              var pairs = m[1].split(',');
+              ctx.beginPath();
+              for (var k = 0; k < pairs.length; k++) {
+                var xy = pairs[k].trim().split(/\s+/);
+                var x = xy[0].indexOf('%') > -1 ? (parseFloat(xy[0]) / 100) * r.width : parseFloat(xy[0]);
+                var y = xy[1].indexOf('%') > -1 ? (parseFloat(xy[1]) / 100) * r.height : parseFloat(xy[1]);
+                if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+              }
+              ctx.closePath();
+              ctx.fill();
+              e.style.clipPath = 'none';
+              e.style.visibility = 'hidden';
+              posCtx.appendChild(cv);
+            }
+          }
+        }).then(function (canvas) {
+          var imgData = canvas.toDataURL('image/jpeg', 0.95);
+          if (idx > 0) pdf.addPage([1280, 720], 'landscape');
+          pdf.addImage(imgData, 'JPEG', 0, 0, 1280, 720);
+          idx++;
+          setTimeout(captureNext, 200);
+        }).catch(function (err) {
+          toast('页面 ' + (idx + 1) + ' 失败: ' + (err.message || err), 'error');
+          idx++;
+          setTimeout(captureNext, 200);
+        });
+      }
+
+      captureNext();
+    });
   });
 }
 
@@ -8855,22 +9291,23 @@ function getCurrentUnreadCount() {
   return getUnreadCount(typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan');
 }
 
-// ------ WebSocket ------
+// ------ WebSocket / 轮询提醒 ------
 function initChatWebSocket() {
   try {
-    const wsUrl = 'ws://' + location.hostname + ':3010/ws/chat';
-    _ws = new WebSocket(wsUrl);
-    _ws.onopen = () => console.log('[WS] 已连接');
+    _ws = new WebSocket('ws://' + location.hostname + ':3010/ws/chat');
+    _ws.onopen = () => { _wsPolling = false; };
     _ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
         if (msg.type === 'reminders' && msg.reminders) handleProactiveReminders(msg.reminders);
-      } catch (err) { console.warn('[WS] 解析失败:', err); }
+      } catch (_) {}
     };
-    _ws.onclose = () => { console.log('[WS] 断开，3 秒后重连'); setTimeout(initChatWebSocket, 3000); };
-    _ws.onerror = (e) => console.warn('[WS] 错误:', e);
-  } catch (e) { console.warn('[WS] 初始化失败:', e); }
+    _ws.onclose = () => { if (!_wsPolling) setTimeout(initChatWebSocket, 15000); };
+    _ws.onerror = () => {};
+  } catch (_) { setTimeout(initChatWebSocket, 15000); }
 }
+
+let _wsPolling = false;
 
 function handleProactiveReminders(reminders) {
   if (!reminders || !reminders.length) return;
@@ -9444,6 +9881,29 @@ async function _mockChatReplyLocal(text) {
   updateChatProjectLabel();
   // 预加载会话
   loadSessions(pid);
+  // 聊天输入框粘贴图片支持
+  const input = document.getElementById('aiChatInput');
+  if (input) {
+    input.addEventListener('paste', function(e) {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      const imageFiles = [];
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) imageFiles.push(file);
+        }
+      }
+      if (imageFiles.length) {
+        // 不 preventDefault —— 让文本正常粘贴进输入框
+        // 图片在下一 tick 加入队列，不阻塞文本粘贴
+        setTimeout(function() {
+          const fakeInput = { files: imageFiles, value: '' };
+          handleChatPhoto(fakeInput);
+        }, 0);
+      }
+    });
+  }
 })();
 
 function getCurrentProjectName() {
@@ -9957,46 +10417,186 @@ function createEventFromChat(data) {
   if (typeof M === 'undefined' || !M.EVENTS) return;
   const projectId = typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan';
   const today = M.TODAY || new Date().toISOString().slice(0, 10);
-  const ev = { id: 'E' + String(Date.now()).slice(-3), projectId, date: today, time: new Date().toTimeString().slice(0, 5), type: data.type || 'progress', areaId: data.areaId || null, planId: data.planId || undefined, payload: { taskName: data.taskName || '', owner: data.owner || '', progress: typeof data.progress === 'string' ? data.progress : (data.progress != null ? data.progress + '%' : ''), headcount: data.headcount || 0, description: data.note || '' }, submitter: '张明', source: 'chat', confidence: 0.9, status: 'draft', note: data.note || '' };
+  const ev = { id: 'E' + String(Date.now()).slice(-3), projectId, date: today, time: new Date().toTimeString().slice(0, 5), type: data.type || 'progress', areaId: data.areaId || null, planId: data.planId || undefined, payload: { taskName: data.taskName || '', owner: data.owner || '', progress: typeof data.progress === 'string' ? data.progress : (data.progress != null ? data.progress + '%' : ''), headcount: data.headcount || 0, description: data.note || '' }, submitter: '张明', source: 'chat', confidence: 0.9, status: 'confirmed', note: data.note || '' };
+  if (data.photos && data.photos.length) ev.photos = data.photos;
   M.EVENTS.unshift(ev);
   if (M.saveEventsToStorage) M.saveEventsToStorage();
   if (typeof renderFilteredEvents === 'function') renderFilteredEvents();
   if (typeof renderDailyPlanCard === 'function') renderDailyPlanCard();
   if (typeof renderStats === 'function') renderStats();
   if (typeof updateCalendar === 'function') updateCalendar();
-  appendChatMessage('system', '✅ 日报事件已保存！\n' + (data.taskName ? '• 任务：' + data.taskName + '\n' : '') + (data.owner ? '• 负责人：' + data.owner + '\n' : '') + (data.progress ? '• 进度：' + data.progress + '\n' : '') + (data.headcount ? '• 人数：' + data.headcount + '人' : ''));
+  const photoLine = data.photos && data.photos.length ? '• 照片：' + data.photos.length + ' 张\n' : '';
+  appendChatMessage('system', '✅ 日报事件已保存！\n' + (data.taskName ? '• 任务：' + data.taskName + '\n' : '') + (data.owner ? '• 负责人：' + data.owner + '\n' : '') + (data.progress ? '• 进度：' + data.progress + '\n' : '') + (data.headcount ? '• 人数：' + data.headcount + '人\n' : '') + photoLine);
   // 同步到后端 DB（静默，不阻塞 UI）
   fetch('http://localhost:3010/api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ev) }).catch(function(){});
 }
 
-async function handleChatPhoto(input) {
-  const file = input?.files?.[0];
-  if (!file) return;
+var _chatPhotoQueue = [];
+
+function _removeChatPhoto(idx) {
+  _chatPhotoQueue.splice(idx, 1);
+  _renderChatPhotoStrip();
+  if (!_chatPhotoQueue.length) document.getElementById('aiChatInput').focus();
+}
+
+function _renderChatPhotoStrip() {
+  const strip = document.getElementById('chatPhotoStrip');
+  if (!strip) return;
+  if (!_chatPhotoQueue.length) { strip.style.display = 'none'; strip.innerHTML = ''; return; }
+  strip.style.display = 'flex';
+  const ready = _chatPhotoQueue.filter(function(p) { return p.dataUrl; });
+  strip.innerHTML =
+    ready.map(function(p, i) {
+      return '<div style="position:relative;width:48px;height:48px;flex-shrink:0;border-radius:6px;overflow:hidden;border:1px solid rgba(255,255,255,0.15);cursor:zoom-in;" ' +
+        'onclick="openPhotoLightboxSrc(\'' + p.dataUrl.replace(/'/g, "\\'") + '\',\'' + (p.name || '照片').replace(/'/g, "\\'") + '\')">' +
+        '<img src="' + p.dataUrl + '" style="width:100%;height:100%;object-fit:cover;display:block;">' +
+        '<span onclick="event.stopPropagation();_removeChatPhoto(' + i + ')" style="position:absolute;top:-3px;right:-3px;width:18px;height:18px;background:#ef4444;color:#fff;border-radius:50%;font-size:11px;line-height:18px;text-align:center;cursor:pointer;">✕</span>' +
+        '</div>';
+    }).join('') +
+    (_chatPhotoQueue.length > ready.length
+      ? '<div style="width:48px;height:48px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:11px;background:rgba(30,41,59,0.5);flex-shrink:0;">⏳</div>'
+      : '') +
+    '<div style="font-size:11px;color:#94a3b8;line-height:48px;margin-left:6px;">📷 ' + _chatPhotoQueue.length + ' 张</div>';
+}
+
+function handleChatPhoto(input) {
+  const fileArray = input.files ? Array.from(input.files) : [];
+  if (!fileArray.length) return;
   input.value = '';
-  appendChatMessage('user', '📷 [上传照片中...]');
-  showChatTyping();
-  try {
-    const reader = new FileReader();
-    const base64 = await new Promise((resolve, reject) => { reader.onload = () => resolve(reader.result.split(',')[1]); reader.onerror = reject; reader.readAsDataURL(file); });
-    const projectId = typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan';
-    const areas = typeof M !== 'undefined' && M.AREAS ? M.AREAS[projectId] || [] : [];
-    const plans = typeof M !== 'undefined' && M.PLANS ? M.PLANS[projectId] || [] : [];
-    const res = await fetch('http://localhost:3010/api/parse-photo', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageBase64: base64, caption: '', projectId, areas, plans })
-    });
-    hideChatTyping();
-    if (!res.ok) throw new Error('解析照片失败');
-    const result = await res.json();
-    const data = result || {};
-    createEventFromChat({ type: data.type || 'progress', areaId: data.areaId || null, taskName: data.payload?.taskName || data.taskHint || '拍照记录', owner: data.payload?.owner || '', progress: data.payload?.progress || '', headcount: data.payload?.headcount || 0, note: data.caption || '' });
-    appendChatMessage('system', '📸 照片已解析并保存为日报事件。');
-  } catch (e) {
-    hideChatTyping();
-    appendChatMessage('system', '⚠️ 照片解析失败：' + e.message + '，已降级为普通记录。');
-    createEventFromChat({ type: 'progress', taskName: file.name || '拍照记录', note: '照片上传记录' });
+  for (const file of fileArray) {
+    if (!file) continue;
+    const idx = _chatPhotoQueue.length;
+    _chatPhotoQueue.push({ file, dataUrl: null, name: file.name || '照片' });
+    const r = new FileReader();
+    r.onload = function() { _chatPhotoQueue[idx].dataUrl = r.result; _renderChatPhotoStrip(); };
+    r.onerror = function() { _chatPhotoQueue.splice(idx, 1); _renderChatPhotoStrip(); };
+    r.readAsDataURL(file);
   }
+  if (!_chatPhotoQueue.length) { showToast('⚠️ 无法读取图片文件', 'error'); return; }
+  _renderChatPhotoStrip();
+  showToast('📷 ' + _chatPhotoQueue.length + ' 张照片待发送，输入文字后点击发送', 'info');
+}
+
+function _appendSystemPhotoGrid(events) {
+  const container = document.getElementById('aiChatMessages');
+  if (!container || !events.length) return;
+  const div = document.createElement('div');
+  div.className = 'ai-message ai-message-system';
+  let html = '<div class="ai-message-avatar"><img src="assets/avatar-construction-girl.png" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></div><div class="ai-message-bubble">';
+  for (const ev of events) {
+    if (!ev.photos || !ev.photos.length) continue;
+    html += '<div style="font-size:12px;color:#cbd5e1;margin:4px 0 2px;">' + (ev.taskName || '拍照记录') + '</div>';
+    html += '<div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:6px;">';
+    for (const p of ev.photos) {
+      html += '<div style="width:64px;height:64px;border-radius:4px;overflow:hidden;cursor:zoom-in;border:1px solid rgba(255,255,255,0.1);" onclick="openPhotoLightboxSrc(\'' + p.data.replace(/'/g, "\\'") + '\',\'' + (p.caption || '').replace(/'/g, "\\'") + '\')"><img src="' + p.data + '" style="width:100%;height:100%;object-fit:cover;display:block;"></div>';
+    }
+    html += '</div>';
+  }
+  html += '</div>';
+  div.innerHTML = html;
+  container.appendChild(div);
+  scrollChatToBottom();
+}
+
+function _appendChatPhotos(photos) {
+  const container = document.getElementById('aiChatMessages');
+  if (!container || !photos.length) return;
+  const div = document.createElement('div');
+  div.className = 'ai-message user';
+  div.innerHTML = '<div class="ai-message-avatar">👤</div><div class="ai-message-bubble"><div style="display:flex;flex-wrap:wrap;gap:4px;">' +
+    photos.map(p => '<div style="width:72px;height:72px;border-radius:6px;overflow:hidden;cursor:zoom-in;border:1px solid rgba(255,255,255,0.15);flex-shrink:0;" onclick="openPhotoLightboxSrc(\'' + p.dataUrl.replace(/'/g, "\\'") + '\',\'' + (p.caption || '现场照片').replace(/'/g, "\\'") + '\')"><img src="' + p.dataUrl + '" style="width:100%;height:100%;object-fit:cover;display:block;"></div>'
+    ).join('') + '</div></div>';
+  container.appendChild(div);
+  scrollChatToBottom();
+}
+
+async function sendChatPhotos() {
+  // 等待所有照片完成读取
+  while (_chatPhotoQueue.some(function(p) { return !p.dataUrl; })) {
+    await new Promise(function(r) { setTimeout(r, 100); });
+  }
+  const queue = _chatPhotoQueue.slice();
+  _chatPhotoQueue = [];
+  _renderChatPhotoStrip();
+  if (!queue.length) return;
+  // 读取用户同时输入的文本
+  const chatInput = document.getElementById('aiChatInput');
+  const text = chatInput ? chatInput.value.trim() : '';
+  if (chatInput) chatInput.value = '';
+  const projectId = typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan';
+  const areas = typeof M !== 'undefined' && M.AREAS ? M.AREAS[projectId] || [] : [];
+  const plans = typeof M !== 'undefined' && M.PLANS ? M.PLANS[projectId] || [] : [];
+  // 用户消息显示文本 + 照片缩略图（替换待发送消息）
+  if (text) appendChatMessage('user', text);
+  _appendChatPhotos(queue.map(function(p) { return { dataUrl: p.dataUrl, caption: p.name }; }));
+  showChatTyping();
+  const parsedResults = [];
+  let successCount = 0;
+  let failCount = 0;
+  for (let i = 0; i < queue.length; i++) {
+    const item = queue[i];
+    try {
+      const base64 = item.dataUrl.split(',')[1];
+      const res = await fetch('http://localhost:3010/api/parse-photo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: base64, caption: item.name, projectId, areas, plans })
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const result = await res.json();
+      parsedResults.push({ ...result, photo: item });
+      successCount++;
+    } catch (e) {
+      parsedResults.push({ type: 'progress', taskHint: item.name, caption: '照片记录', payload: {}, photo: item });
+      failCount++;
+    }
+  }
+  hideChatTyping();
+  // 合并识别结果，相同 area+task 的合并为同一事件
+  const eventMap = {};
+  for (const r of parsedResults) {
+    const key = r.areaId || (r.payload?.taskName || r.taskHint || '其他');
+    if (!eventMap[key]) {
+      eventMap[key] = {
+        type: r.type || 'progress',
+        areaId: r.areaId || null,
+        planId: r.planId || undefined,
+        taskName: r.payload?.taskName || r.taskHint || '',
+        owner: r.payload?.owner || '',
+        progress: typeof r.payload?.progress === 'string' ? r.payload.progress : (r.payload?.progress != null ? r.payload.progress + '%' : ''),
+        headcount: r.payload?.headcount || 0,
+        note: r.caption || '',
+        photos: []
+      };
+    } else {
+      const ev = eventMap[key];
+      if (r.payload?.taskName && !ev.taskName) ev.taskName = r.payload.taskName;
+      if (r.payload?.owner && !ev.owner) ev.owner = r.payload.owner;
+      if (r.payload?.progress && !ev.progress) ev.progress = typeof r.payload.progress === 'string' ? r.payload.progress : r.payload.progress + '%';
+      if (r.payload?.headcount) ev.headcount = (ev.headcount || 0) + (r.payload.headcount || 0);
+      if (r.caption) ev.note = (ev.note ? ev.note + '；' : '') + r.caption;
+    }
+    eventMap[key].photos.push({
+      id: 'P' + String(Date.now()).slice(-3) + String(eventMap[key].photos.length),
+      caption: r.caption || r.taskHint || (r.photo?.name) || '现场照片',
+      area: r.areaId || null,
+      data: r.photo.dataUrl,
+      showInReport: true
+    });
+  }
+  // 为每个合并后的事件创建日报事件
+  const events = Object.values(eventMap);
+  for (const ev of events) {
+    createEventFromChat({ type: ev.type, areaId: ev.areaId, planId: ev.planId, taskName: ev.taskName, owner: ev.owner, progress: ev.progress, headcount: ev.headcount, note: ev.note, photos: ev.photos });
+  }
+  // 汇总消息（文本）
+  let summary = '📸 AI 照片识别完成！共处理 ' + queue.length + ' 张照片，成功 ' + successCount + ' 张' + (failCount ? '，' + failCount + ' 张降级' : '') + '，生成 ' + events.length + ' 条日报事件：\n';
+  for (const ev of events) {
+    summary += '\n**' + (ev.taskName || '拍照记录') + '**' + (ev.areaId ? ' `' + ev.areaId + '`' : '') + (ev.progress ? ' 进度:' + ev.progress : '') + (ev.headcount ? ' ' + ev.headcount + '人' : '');
+  }
+  appendChatMessage('system', summary);
+  // 追加缩略图网格（不经过 markdown 转义）
+  _appendSystemPhotoGrid(events);
 }
 
 let _chatRecognition = null;

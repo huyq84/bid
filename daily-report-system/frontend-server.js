@@ -1,15 +1,16 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const url = require('url');
 
 const PORT = 8080;
 const ROOT_DIR = __dirname;
 
 const MIME_TYPES = {
-  '.html': 'text/html',
-  '.css': 'text/css',
-  '.js': 'application/javascript',
-  '.json': 'application/json',
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.gif': 'image/gif',
@@ -17,7 +18,18 @@ const MIME_TYPES = {
 };
 
 http.createServer((req, res) => {
-  let filePath = path.join(ROOT_DIR, req.url === '/' ? '/index.html' : req.url);
+  const parsedUrl = url.parse(req.url, true);
+  let decodedUrl = decodeURIComponent(parsedUrl.pathname);
+  
+  let filePath = path.join(ROOT_DIR, decodedUrl === '/' || decodedUrl === '' ? '/周报汇总.html' : decodedUrl);
+  
+  // Security: prevent directory traversal
+  if (!filePath.startsWith(ROOT_DIR)) {
+    res.writeHead(403);
+    res.end('Forbidden');
+    return;
+  }
+  
   const ext = path.extname(filePath);
   const contentType = MIME_TYPES[ext] || 'application/octet-stream';
 
