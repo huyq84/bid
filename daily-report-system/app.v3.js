@@ -2,7 +2,7 @@
 // 主应用逻辑
 // ============================================================
 
-let M = window.MockData;
+M = window.MockData;
 
 // 记录已知在 DB 中不存在的事件 ID（幽灵事件），持久化到 localStorage 避免跨页面加载复活
 const _ghostEventIds = new Set();
@@ -109,8 +109,17 @@ async function loadDataFromAPI() {
     M.MILESTONES = data.MILESTONES || {};
     M.MILESTONE_PLANS = data.MILESTONE_PLANS || {};
 
-    // 签到
-    M.DAILY_ATTENDANCE = data.DAILY_ATTENDANCE || {};
+    // 签到：API 返回的是项目分桶格式 { [projectId]: { [date]: { [mgrId]: { present, reason } } } }
+    // 合并到 mock-data.js 的 module-level DAILY_ATTENDANCE（get/setAttendanceForDate 都按这个对象读写）
+    // 用 Object.keys(DATA) 合并每个项目桶，避免替换 M.DAILY_ATTENDANCE 引用（否则 getAttendanceForDate 写入会丢失）
+    if (data.DAILY_ATTENDANCE && typeof data.DAILY_ATTENDANCE === 'object') {
+      Object.keys(data.DAILY_ATTENDANCE).forEach(pid => {
+        if (!M.DAILY_ATTENDANCE[pid]) M.DAILY_ATTENDANCE[pid] = {};
+        Object.keys(data.DAILY_ATTENDANCE[pid] || {}).forEach(date => {
+          M.DAILY_ATTENDANCE[pid][date] = data.DAILY_ATTENDANCE[pid][date];
+        });
+      });
+    }
 
     // 标准工种模板（周报 06 表头，DB 管理）
     M.STANDARD_TRADES = data.STANDARD_TRADES || [];
@@ -410,6 +419,11 @@ function switchProject(projectId) {
   const prevPid = currentProjectId;
   currentProjectId = projectId;
   localStorage.setItem('current_project_id', projectId);
+  // 切项目时清掉周报缓存，强制重拉新项目数据
+  if (typeof invalidateWeeklyCache === 'function') {
+    invalidateWeeklyCache(prevPid);
+    invalidateWeeklyCache(projectId);
+  }
   // 同步 mock-data.js 的 CURRENT_PROJECT_ID（确保签到/节点等按项目隔离）
   try { M.setCurrentProjectId && M.setCurrentProjectId(projectId); } catch {}
   // 重置 milestone 缓存，使下次打开时从 M.MILESTONE_PLANS[新项目] 重新读取
@@ -6389,30 +6403,82 @@ function exportWeeklyReport() {
 // ============================================================
 // 周报数据映射预览（原型）
 // ============================================================
-let _weeklyApiData = null;
+// 周报数据缓存：按 projectId 分桶，失败时不缓存空对象（避免永久卡死"暂无项目数据"）
+// 切换项目时调用 invalidateWeeklyCache() 强制重拉
+// ============================================================
+let _weeklyApiData = {};        // { [projectId]: data | null(loading) }
+let _weeklyApiLoading = {};     // { [projectId]: Promise }
 
-async function loadWeeklyReportData() {
-  if (_weeklyApiData) return _weeklyApiData;
-  try {
-    const resp = await fetch('/api/data/all');
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    _weeklyApiData = await resp.json();
-    return _weeklyApiData;
-  } catch (e) {
-    console.warn('[周报] 加载后端数据失败:', e.message);
+function invalidateWeeklyCache(projectId) {
+  if (projectId) {
+    delete _weeklyApiData[projectId];
+    delete _weeklyApiLoading[projectId];
+  } else {
     _weeklyApiData = {};
-    return _weeklyApiData;
+    _weeklyApiLoading = {};
   }
 }
+
+async function loadWeeklyReportData(projectId, force = false) {
+  const pid = projectId || currentProjectId || 'baicaoyuan';
+  // 强制刷新：清掉缓存重新拉
+  if (force) invalidateWeeklyCache(pid);
+  // 命中缓存（且不是 loading 占位）
+  if (_weeklyApiData[pid] && !_weeklyApiData[pid].__loading) return _weeklyApiData[pid];
+  // 同一项目正在加载中：复用 Promise
+  if (_weeklyApiLoading[pid]) return _weeklyApiLoading[pid];
+  // 标记 loading
+  _weeklyApiData[pid] = { __loading: true };
+  const p = (async () => {
+    try {
+      const resp = await fetch(API_BASE + '/data/all');
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      _weeklyApiData[pid] = data;
+      return data;
+    } catch (e) {
+      console.warn('[周报] 加载后端数据失败:', e.message);
+      // 失败：清除 loading 占位，下次调用会重试
+      delete _weeklyApiData[pid];
+      throw e;
+    } finally {
+      delete _weeklyApiLoading[pid];
+    }
+  })();
+  _weeklyApiLoading[pid] = p;
+  return p;
+}
+
+// 手动刷新周报数据（不重置 UI，方便用户在不关弹窗的情况下拉取最新）
+async function refreshWeeklyReport() {
+  if (!currentProjectId) return;
+  invalidateWeeklyCache(currentProjectId);
+  try {
+    await loadWeeklyReportData(currentProjectId);
+    // 重新渲染当前 active tab
+    const cur = document.querySelector('#reportPageNav button.active[data-page]');
+    if (cur) switchMappingTab(cur.dataset.page);
+    showToast('周报数据已刷新', 'success');
+  } catch (e) {
+    showToast('刷新失败：' + e.message, 'error');
+  }
+}
+window.refreshWeeklyReport = refreshWeeklyReport;
 
 function openWeeklyReportMapping() {
   closeModal('modalWeekly');
   showModal('modalWeeklyMapping');
-  // 初始化日期输入为当天
+  // 初始化日期输入：优先用用户之前在签到 modal 或日历里选中的日期，而不是强制用今天
+  // 修复：之前强制 _reportDate = M.TODAY 会导致用户在签到 modal 改了 6-22 的记录后，
+  // 打开周报看到的却是 6-23 那一周 → 看不到刚才的修改
   const input = document.getElementById('reportDateInput');
   if (input) {
-    _reportDate = M.TODAY;
-    input.value = M.TODAY;
+    // 优先级：1) 签到 modal 里的 attendanceDate  2) 日历选中的日期  3) _reportDate  4) 今天
+    const attDate = document.getElementById('attendanceDate')?.value;
+    const calDate = (typeof selectedDates !== 'undefined' && selectedDates.length > 0) ? selectedDates[0] : '';
+    const reportDate = attDate || calDate || _reportDate || M.TODAY;
+    _reportDate = reportDate;
+    input.value = reportDate;
     _updateWeekRangeDisplay();
   }
   // 初始化区间选择器（默认当前周）
@@ -6423,7 +6489,8 @@ function openWeeklyReportMapping() {
   if (re) { _reportRangeEnd = wr.weekEnd; re.value = wr.weekEnd; }
   _updateReportRangeDisplay();
   _applyTemplate();
-  loadWeeklyReportData().then(() => { switchMappingTab('01'); });
+  // force=true：每次打开周报都重新拉数据，保证录入新事件后能立即看到（修复"必须刷新页面才更新"问题）
+  loadWeeklyReportData(null, true).then(() => { switchMappingTab('01'); });
 }
 
 const PAGE_HEADERS = {
@@ -6554,7 +6621,7 @@ function renderEmptyPage(msg) {
 }
 
 function renderMappingPage01() {
-  const d = _weeklyApiData;
+  const d = _weeklyApiData[currentProjectId] || {};
   const projects = (d && d.PROJECTS) || [];
   if (projects.length === 0) { renderEmptyPage('暂无项目数据'); return; }
   const data = projects.find(p => p.id === currentProjectId) || projects[0];
@@ -6625,22 +6692,32 @@ function renderMappingPage02() {
 function renderMappingPage03() {
   const fc = document.getElementById('pageFloatingControls');
   const { weekStart, weekEnd } = getWeekRange();
-  const d = _weeklyApiData;
-  const team = (d && d.MANAGEMENT_TEAM) || [];
+  // 修复：team 优先用 M.MANAGEMENT_TEAM（前端，包含运行时新建的人员），
+  // fallback 到 _weeklyApiData 的（后端）。两者不一致时周报会少显示新人。
+  const team = (M && M.MANAGEMENT_TEAM && M.MANAGEMENT_TEAM.length > 0)
+    ? M.MANAGEMENT_TEAM
+    : (_weeklyApiData[currentProjectId] && _weeklyApiData[currentProjectId].MANAGEMENT_TEAM) || [];
 
   fc.innerHTML = '';
 
-  // Convert API data to attendance-compatible format
-  const stats = team.map((m, i) => ({
-    seq: i + 1,
-    position: m.position || m.role || '—',
-    name: m.name || '—',
-    phone: m.phone || '—',
-    presentDays: 5,
-    totalDays: 5,
-    fullAttendance: true,
-    absentReasons: []
-  }));
+  // 用真实签到数据计算每个人的出勤情况（修复：之前硬编码 fullAttendance=true，永远满勤）
+  const weekStats = M.getWeekAttendanceStats(weekStart, weekEnd, currentProjectId);
+  // 按 id 索引（修复：之前用 name 索引，新建的未填 name 的人员匹配不上 → 永远满勤）
+  const statsById = {};
+  weekStats.forEach(s => { statsById[s.id] = s; });
+  const stats = team.map((m, i) => {
+    const s = statsById[m.id] || { fullAttendance: true, presentDays: 5, totalDays: 5, absentReasons: [] };
+    return {
+      seq: i + 1,
+      position: m.position || m.role || '—',
+      name: m.name || '—',
+      phone: m.phone || '—',
+      presentDays: s.presentDays,
+      totalDays: s.totalDays,
+      fullAttendance: s.fullAttendance,
+      absentReasons: s.absentReasons
+    };
+  });
 
   const hasAbsent = stats.some(s => !s.fullAttendance);
   const showReason = hasAbsent && _attendanceMode === 'actual';
@@ -6897,10 +6974,16 @@ async function s0301DelRow(major, row) {
   _renderMilestoneEditor();
 }
 
-function s0301Save() {
+async function s0301Save() {
   // 告知 mock-data.js 当前的 projectId（saveMilestoneData 会用其写 dr_milestone_plans）
   try { window.MOCK_CURRENT_PROJECT = currentProjectId; } catch {}
-  M.saveMilestoneData(_milestoneData);
+  // saveMilestoneData 现在是 async（会 POST 到后端），等其完成
+  await M.saveMilestoneData(_milestoneData);
+  // 把更新后的 M.MILESTONE_PLANS 同步到 _weeklyApiData（让 04 页读到最新数据）
+  if (M.MILESTONE_PLANS && _weeklyApiData[currentProjectId]) {
+    if (!_weeklyApiData[currentProjectId].MILESTONE_PLANS) _weeklyApiData[currentProjectId].MILESTONE_PLANS = {};
+    _weeklyApiData[currentProjectId].MILESTONE_PLANS[currentProjectId] = M.MILESTONE_PLANS[currentProjectId] || [];
+  }
   const activeBtn = document.querySelector('#reportPageNav button.active[data-page]');
   if (activeBtn && activeBtn.dataset.page === '04') switchMappingTab('04');
   showToast('里程碑已保存到后端', 'success');
@@ -7046,28 +7129,30 @@ function _gen0301Table(year, monthList, categories, catNames, colWidths) {
 }
 
 function renderMappingPage0301() {
-  const d = _weeklyApiData;
+  const d = _weeklyApiData[currentProjectId] || {};
   const plans = (d && d.MILESTONE_PLANS && d.MILESTONE_PLANS[currentProjectId]) || [];
   const el = document.getElementById('mappingContent');
   if (plans.length === 0) { el.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8;">暂无节点数据</div>'; _milestonePages = []; return; }
 
-  // Transform API data to match expected format
-  const keyNodes = plans.filter(i => i.nodeType === '关键节点');
-  const subNodes = plans.filter(i => i.nodeType === '次要节点');
-  const months = [3,4,5,6,7,8];
-  const year = 2026;
-  const categories = { '软装(清尚)': '软装(清尚)' };
-
-  const data = {
-    year, months, categories,
-    keyNodes, subNodes
-  };
-
-  if (!data || !data.categories) { el.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8;">暂无节点数据</div>'; _milestonePages = []; return; }
-
-  const { year: yr, months: mths, categories: cats } = data;
-  const catNames = Object.keys(cats);
+  // 用 M.getPage0301Data 把后端 MILESTONE_PLANS 转成 {categories: {[cat]: {keyNodes, subNodes}}} 格式
+  // 修复：之前 categories 硬编码为 { '软装(清尚)': '软装(清尚)' }，导致 keyNodes/subNodes 为 undefined，表格空白
+  const pageData = M.getPage0301Data(currentProjectId) || { year: 2026, months: [], categories: {} };
+  const months = pageData.months && pageData.months.length > 0 ? pageData.months : [3,4,5,6,7,8];
+  const year = pageData.year || 2026;
+  const categories = pageData.categories || {};
+  // 兼容：如果 categories 里某项不是 {keyNodes, subNodes}（旧硬编码），包装成空对象
+  Object.keys(categories).forEach(k => {
+    if (typeof categories[k] !== 'object' || !categories[k]) {
+      categories[k] = { keyNodes: {}, subNodes: {} };
+    }
+    if (!categories[k].keyNodes) categories[k].keyNodes = {};
+    if (!categories[k].subNodes) categories[k].subNodes = {};
+  });
   const availHeight = 720 - 125 - 20;
+  const yr = year;
+  const mths = months;
+  const cats = categories;
+  const catNames = Object.keys(categories);
 
   _milestonePages = [];
 
@@ -7135,7 +7220,7 @@ function _renderPage04Table(rows) {
 
 function renderMappingPage04() {
   const { weekStart, weekEnd } = getWeekRange();
-  const d = _weeklyApiData;
+  const d = _weeklyApiData[currentProjectId] || {};
   const allEvents = ((d && d.EVENTS) || []).concat((d && d.HISTORY_EVENTS) || []);
   const weekEvents = allEvents.filter(e =>
     e.projectId === currentProjectId &&
@@ -7174,10 +7259,21 @@ function renderMappingPage04() {
       seq++;
       const task = e.payload?.taskName || e.payload?.topic || e.note || '(未命名)';
       const progress = e.payload?.progress || '';
+      // 避免重复拼接：task 已包含 "完成" 或 "%" 时不再补 "完成progress"
+      const taskHasCompletion = /完成|%|％/.test(task);
+      let text;
+      if (progress && !taskHasCompletion) {
+        text = `${task}完成${progress}`;
+      } else if (progress && taskHasCompletion && !task.includes(progress)) {
+        // task 含 "完成" 但没含 progress（如 "墙面收尾 完成" + progress="50%"）
+        text = `${task}${progress}`;
+      } else {
+        text = task;
+      }
       allRows.push({
         type: 'detail',
         seq,
-        text: progress ? `${task}完成${progress}` : task,
+        text,
         owner: e.payload?.owner || e.owner || '—'
       });
     });
@@ -7226,7 +7322,7 @@ function _renderPage05Grid(photos) {
 
 function renderMappingPage05() {
   const { weekStart, weekEnd } = getWeekRange();
-  const d = _weeklyApiData;
+  const d = _weeklyApiData[currentProjectId] || {};
   const allEvents = ((d && d.EVENTS) || []).concat((d && d.HISTORY_EVENTS) || []);
   const weekEvents = allEvents.filter(e =>
     e.projectId === currentProjectId &&
@@ -7289,7 +7385,7 @@ function renderMappingPage06() {
   const mode = localStorage.getItem(`page06_mode_${currentProjectId}`) || 'dynamic';
   const displayField = localStorage.getItem(`page06_displayField_${currentProjectId}`) || 'tradeName';
   const unit = localStorage.getItem(`page06_unit_${currentProjectId}`) || 'people';
-  const d = _weeklyApiData;
+  const d = _weeklyApiData[currentProjectId] || {};
 
   // Gather labor data from plans
   const plans = (d && d.PLANS && d.PLANS[currentProjectId]) || [];
@@ -7666,7 +7762,7 @@ window.deleteStandardTrade = async function(id) {
 };
 
 function renderMappingPage07() {
-  const d = _weeklyApiData;
+  const d = _weeklyApiData[currentProjectId] || {};
   const eccSummary = (d && d.ECC_SUMMARIES && d.ECC_SUMMARIES[currentProjectId]) || null;
   const eccItems = (d && d.ECC_ITEMS && d.ECC_ITEMS.filter(e => e.projectId === currentProjectId && e.id !== 'ECC099')) || [];
 
@@ -7723,7 +7819,7 @@ function enlargePage07Photo(src, caption) {
 }
 
 function renderMappingPage08() {
-  const d = _weeklyApiData;
+  const d = _weeklyApiData[currentProjectId] || {};
   const rows = (d && d.DRAWING_DEEPENINGS && d.DRAWING_DEEPENINGS.filter(dd => dd.projectId === currentProjectId)) || [];
   if (rows.length === 0) {
     document.getElementById('mappingContent').innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;">暂无图纸深化数据</div>';
@@ -7795,7 +7891,7 @@ function renderMappingPage09() {
     monday = new Date(mondayStr);
   }
 
-  const d = _weeklyApiData;
+  const d = _weeklyApiData[currentProjectId] || {};
   const items = (d && d.WEEKLY_GANTT_ITEMS) || [];
   if (items.length === 0) {
     document.getElementById('mappingContent').innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;">暂无下周计划数据</div>';
@@ -7859,7 +7955,7 @@ function _getScheduleTableTitle() {
 }
 
 function renderMappingPage10() {
-  const d = _weeklyApiData;
+  const d = _weeklyApiData[currentProjectId] || {};
   const sections = (d && d.PAGE06_PHOTOS && d.PAGE06_PHOTOS.filter(p => p.projectId === currentProjectId).map(p => ({
     name: p.caption || '施工段',
     items: [{ image: p.src, label: p.caption || '' }],
@@ -7943,7 +8039,7 @@ function renderMappingPage10() {
 }
 
 function renderMappingPage12() {
-  const d = _weeklyApiData;
+  const d = _weeklyApiData[currentProjectId] || {};
   const allIssues = (d && d.ISSUES) || [];
   const items = allIssues.filter(i =>
     i.projectId === currentProjectId &&
@@ -8868,9 +8964,13 @@ async function removeManagementRow(id) {
   const ok = await showConfirm(`确定删除「${m.name || id}」？该人员的签到记录也会被清除。`, '删除管理人员', '🗑');
   if (!ok) return;
   M.MANAGEMENT_TEAM = M.MANAGEMENT_TEAM.filter(x => x.id !== id);
-  // 同步清掉该 id 在所有日期的签到记录
-  Object.keys(M.DAILY_ATTENDANCE || {}).forEach(d => {
-    if (M.DAILY_ATTENDANCE[d]) delete M.DAILY_ATTENDANCE[d][id];
+  // 同步清掉该 id 在所有项目/所有日期的签到记录（按项目分桶）
+  Object.keys(M.DAILY_ATTENDANCE || {}).forEach(pid => {
+    if (M.DAILY_ATTENDANCE[pid] && typeof M.DAILY_ATTENDANCE[pid] === 'object') {
+      Object.keys(M.DAILY_ATTENDANCE[pid]).forEach(d => {
+        if (M.DAILY_ATTENDANCE[pid][d]) delete M.DAILY_ATTENDANCE[pid][d][id];
+      });
+    }
   });
   try {
     await fetch('http://localhost:3010/api/management-team/' + encodeURIComponent(id), { method: 'DELETE' });
@@ -9157,11 +9257,17 @@ async function saveAttendance() {
     records[cb.value] = { present: cb.checked, reason: prev.reason || '' };
   });
   M.setAttendanceForDate(date, records);
-  // 持久化到后端
+  // 持久化到后端：只发送有变化的记录（present=false 的），避免全量覆盖
+  // 修复：之前 saveAttendance 遍历所有 24 人 checkbox → 后端 UPSERT 把所有人都设为 present=true
+  // 现在只 POST present=false 的记录
+  const changedRecords = {};
+  Object.entries(records).forEach(([id, rec]) => {
+    if (!rec.present) changedRecords[id] = rec;
+  });
   try {
     await fetch('http://localhost:3010/api/attendance', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ date, projectId: currentProjectId, records })
+      body: JSON.stringify({ date, projectId: currentProjectId, records: changedRecords })
     });
   } catch { /* 离线不报错 */ }
   closeModal('modalAttendance');

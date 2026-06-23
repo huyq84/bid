@@ -143,7 +143,7 @@ const MILESTONE_PLANS = {
       id: 'MP003',
       category: '软装',
       nodeType: '次要节点',
-      areaLabel: null,
+      areaLabel: null, year: 2026,
       subItems: [
         { seq: 1, label: '食堂',          text: '墙柱面基层封板（5.30）410评审后方案调整', targetMonth: 5 },
         { seq: 2, label: '高管',          text: '墙面基层施工（3.30）', targetMonth: 3 },
@@ -155,7 +155,7 @@ const MILESTONE_PLANS = {
       id: 'MP004',
       category: '软装',
       nodeType: '次要节点',
-      areaLabel: null,
+      areaLabel: null, year: 2026,
       subItems: [
         { seq: 1, label: '食堂',       text: '天花封板（6.15）410评审后开始龙骨施工', targetMonth: 6 },
         { seq: 2, label: '高管',       text: '吊顶造型及龙骨安装（4.30）', targetMonth: 4 },
@@ -168,7 +168,7 @@ const MILESTONE_PLANS = {
       id: 'MP005',
       category: '软装',
       nodeType: '次要节点',
-      areaLabel: null,
+      areaLabel: null, year: 2026,
       subItems: [
         { seq: 1, label: '食堂',       text: '地面混凝土浇筑（6.10）1层天花腻子基层后施工', targetMonth: 6 },
         { seq: 2, label: '高管',       text: '天花封板（6.30）需地暖施工后开始', targetMonth: 6 },
@@ -181,7 +181,7 @@ const MILESTONE_PLANS = {
       id: 'MP006',
       category: '软装',
       nodeType: '次要节点',
-      areaLabel: null,
+      areaLabel: null, year: 2026,
       subItems: [
         { seq: 1, label: '食堂',       text: '墙柱面饰面板安装、地面石材铺贴（8.30）', targetMonth: 8 },
         { seq: 2, label: '高管',       text: '地面面层施工（6.30）', targetMonth: 6 },
@@ -194,7 +194,7 @@ const MILESTONE_PLANS = {
       id: 'MP007',
       category: '软装',
       nodeType: '次要节点',
-      areaLabel: null,
+      areaLabel: null, year: 2026,
       subItems: [
         { seq: 1, label: '食堂',       text: '食堂（9.30）', targetMonth: 9 },
         { seq: 2, label: '健身房',     text: '南北健身房（8.20）', targetMonth: 8 },
@@ -206,7 +206,7 @@ const MILESTONE_PLANS = {
       id: 'MP008',
       category: '软装',
       nodeType: '次要节点',
-      areaLabel: null,
+      areaLabel: null, year: 2026,
       subItems: [
         { seq: 1, label: '北塔高管区', text: '北塔高管区（8.30）', targetMonth: 8 },
         { seq: 2, label: '北塔咖啡厅', text: '北塔咖啡厅：墙面木饰面（9.30）', targetMonth: 9 }
@@ -1179,15 +1179,16 @@ function getPage03Data() {
 
 // --- 页面 0301：重要节点 ---
 function getPage0301Data(projectId) {
-  var plans = MILESTONE_PLANS[projectId] || [];
+  // 优先读 window.MockData.MILESTONE_PLANS（运行时更新的），回退到模块级 MILESTONE_PLANS
+  var plans = (window && window.MockData && window.MockData.MILESTONE_PLANS && window.MockData.MILESTONE_PLANS[projectId]) || MILESTONE_PLANS[projectId] || [];
   if (plans.length === 0) return { year: 2026, months: [], categories: {} };
   var year = plans[0].year || 2026;
-  // 收集所有月份
+  // 收集所有有效月份（targetMonth 为数字的）
   var monthSet = {};
   plans.forEach(function (p) {
-    monthSet[p.targetMonth] = true;
+    if (typeof p.targetMonth === 'number') monthSet[p.targetMonth] = true;
     if (p.subItems) {
-      p.subItems.forEach(function (si) { if (si.targetMonth) monthSet[si.targetMonth] = true; });
+      p.subItems.forEach(function (si) { if (typeof si.targetMonth === 'number') monthSet[si.targetMonth] = true; });
     }
   });
   var months = Object.keys(monthSet).map(Number).sort(function (a, b) { return a - b; });
@@ -1228,16 +1229,20 @@ function getPage0301Data(projectId) {
 // --- 重要节点编辑器数据 ---
 function getMilestoneData() {
   var projectId = (typeof window !== 'undefined' && window.MOCK_CURRENT_PROJECT) || 'baicaoyuan';
-  var plans = MILESTONE_PLANS[projectId] || [];
+  // 优先读 window.MockData.MILESTONE_PLANS（运行时更新的），回退到模块级 MILESTONE_PLANS
+  var plans = (window && window.MockData && window.MockData.MILESTONE_PLANS && window.MockData.MILESTONE_PLANS[projectId]) || MILESTONE_PLANS[projectId] || [];
   // 收集所有月份 key
   var monthSet = {};
   plans.forEach(function (p) {
-    var key = p.year + '.' + p.targetMonth;
-    monthSet[key] = true;
+    var yr = p.year || 2026;
+    if (p.targetMonth) {
+      var key = yr + '.' + p.targetMonth;
+      monthSet[key] = true;
+    }
     if (p.subItems) {
       p.subItems.forEach(function (si) {
         if (si.targetMonth) {
-          var sk = p.year + '.' + si.targetMonth;
+          var sk = yr + '.' + si.targetMonth;
           monthSet[sk] = true;
         }
       });
@@ -1248,7 +1253,9 @@ function getMilestoneData() {
   var catMap = {};
   plans.forEach(function (p) {
     if (!catMap[p.category]) catMap[p.category] = { keyRows: [], subRows: [] };
-    var cellKey = p.year + '.' + p.targetMonth;
+    var yr = p.year || 2026;
+    // 次要节点的 targetMonth 是 null，用 subItems 的 targetMonth 构建 cellKey
+    var cellKey = p.targetMonth ? (yr + '.' + p.targetMonth) : null;
     var desc = p.description || '';
     if (p.areaLabel) desc = (p.areaLabel + '：' + desc);
     // 检查是否已有同级同类节点行
@@ -1256,10 +1263,10 @@ function getMilestoneData() {
       return r.row === p.nodeType && r.major === p.category;
     });
     if (existing) {
-      existing[cellKey] = (existing[cellKey] ? existing[cellKey] + '\n' : '') + desc;
+      if (cellKey) existing[cellKey] = (existing[cellKey] ? existing[cellKey] + '\n' : '') + desc;
     } else {
       var rowObj = { major: p.category, row: p.nodeType, rowType: p.nodeType === '关键节点' ? 'key' : 'sub' };
-      rowObj[cellKey] = desc;
+      if (cellKey) rowObj[cellKey] = desc;
       catMap[p.category][p.nodeType === '关键节点' ? 'keyRows' : 'subRows'].push(rowObj);
     }
     // 子项
@@ -1270,7 +1277,7 @@ function getMilestoneData() {
         catMap[p.category].subRows.push(subRow);
       }
       p.subItems.forEach(function (si) {
-        var sk = p.year + '.' + si.targetMonth;
+        var sk = yr + '.' + si.targetMonth;
         var siDesc = (si.seq ? si.seq + '.' : '') + (si.label ? si.label + '：' : '') + (si.text || '');
         subRow[sk] = (subRow[sk] ? subRow[sk] + '\n' : '') + siDesc;
       });
@@ -1285,9 +1292,140 @@ function getMilestoneData() {
 }
 
 function saveMilestoneData(data) {
+  // 持久化到 localStorage（保留旧的本地存储能力）
   try {
     localStorage.setItem('daily_milestone_data', JSON.stringify(data));
   } catch (e) {}
+  // 同步到后端：把编辑器格式 {months, rows} 转换成 dr_milestone_plans 格式并 POST
+  // 修复：之前只写 localStorage，不写后端，导致 04 周报预览（renderMappingPage0301 读后端）不同步
+  syncMilestoneDataToBackend(data);
+}
+
+// 把编辑器数据同步到后端 dr_milestone_plans
+async function syncMilestoneDataToBackend(data) {
+  try {
+    var projectId = (typeof window !== 'undefined' && window.MOCK_CURRENT_PROJECT) || 'baicaoyuan';
+    // 告诉 mock-data.js 当前项目
+    try { window.MOCK_CURRENT_PROJECT = projectId; } catch (e) {}
+    // 1) 拉后端现有的 plans（用于保留没在编辑器里编辑的字段如 subItems 复杂结构）
+    var existing = [];
+    try {
+      var resp = await fetch('http://localhost:3010/api/milestone-plans/' + encodeURIComponent(projectId));
+      if (resp.ok) existing = await resp.json();
+    } catch (e) { /* 离线不报错 */ }
+
+    // 2) 把编辑器 rows 拆成后端 records
+    //    每个 (major, row, "year.month" 单元格内容) 拆成一条后端记录
+    //    关键节点：description = 单元格内容（可能含 areaLabel 形式 "xxx：内容"）
+    //    次要节点：subItems = 按 \n 拆分的 [{seq, text}]，description=null
+    var newRecords = [];
+    var idCounter = 0;
+    (data.rows || []).forEach(function (row) {
+      var major = row.major;
+      var nodeType = row.row;  // "关键节点" 或 "次要节点"
+      (data.months || []).forEach(function (monthKey) {
+        // monthKey 格式 "2026.7" 或 "undefined.3"（次要节点的子项月份）
+        // 关键节点用标准月份；次要节点的 subItems 也会用类似的月份
+        var parts = String(monthKey).split('.');
+        var year = parseInt(parts[0], 10) || 2026;
+        var month = parseInt(parts[1], 10);
+        if (isNaN(month)) return;
+        var content = row[monthKey];
+        if (!content || !String(content).trim()) return;
+        var id = 'ME_' + projectId + '_' + (++idCounter) + '_' + Date.now();
+        if (nodeType === '关键节点') {
+          // content 可能是 "食堂：xxx\n健身房：yyy" → 拆成多条 areaLabel+description
+          var lines = String(content).split(/\n+/).map(function(s){return s.trim()}).filter(Boolean);
+          lines.forEach(function(line, idx) {
+            var areaLabel = null, desc = line;
+            var colonIdx = line.indexOf('：');
+            if (colonIdx > 0) {
+              areaLabel = line.substring(0, colonIdx).trim();
+              desc = line.substring(colonIdx + 1).trim();
+            }
+            newRecords.push({
+              id: id + '_' + idx,
+              category: major,
+              nodeType: nodeType,
+              areaLabel: areaLabel,
+              description: desc,
+              targetMonth: month,
+              year: year,
+              subItems: []
+            });
+          });
+        } else {
+          // 次要节点：按 \n 拆成 subItems
+          // 编辑器内容格式如："1.食堂：墙柱面基层封板（5.30）410评审后方案调整"
+          // 需要提取 seq, label, text, targetMonth
+          var lines2 = String(content).split(/\n+/).map(function(s){return s.trim()}).filter(Boolean);
+          var subItems = lines2.map(function(line, idx) {
+            var seq = null, label = '', text = line;
+            // 1) 提取前导序号 "1." "2."
+            var m = line.match(/^(\d+)\.\s*/);
+            if (m) { seq = parseInt(m[1], 10); text = line.substring(m[0].length).trim(); }
+            // 2) 提取标签 "食堂：" "高管："
+            var colonIdx = text.indexOf('：');
+            if (colonIdx > 0) {
+              label = text.substring(0, colonIdx).trim();
+              text = text.substring(colonIdx + 1).trim();
+            }
+            // 3) 提取目标月份 "（5.30）" "（6.15）" → targetMonth=5
+            var monthMatch = text.match(/[（\(](\d+)\./);
+            var targetMonth = monthMatch ? parseInt(monthMatch[1], 10) : null;
+            return { seq: seq || (idx + 1), label: label, text: text, targetMonth: targetMonth };
+          });
+          // 次要节点主记录：description=null，subItems 包含所有项
+          newRecords.push({
+            id: id,
+            category: major,
+            nodeType: nodeType,
+            areaLabel: null,
+            description: null,
+            targetMonth: month,
+            year: year,
+            subItems: subItems
+          });
+        }
+      });
+    });
+
+    // 3) 清空后端该项目的所有记录
+    try {
+      await fetch('http://localhost:3010/api/milestone-plans/clear/' + encodeURIComponent(projectId), {
+        method: 'POST'
+      });
+    } catch (e) { /* 离线不报错 */ }
+
+    // 4) 重新插入新记录
+    for (var i = 0; i < newRecords.length; i++) {
+      var rec = newRecords[i];
+      try {
+        await fetch('http://localhost:3010/api/milestone-plans', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: projectId,
+            id: rec.id,
+            category: rec.category,
+            nodeType: rec.nodeType,
+            areaLabel: rec.areaLabel,
+            description: rec.description,
+            targetMonth: rec.targetMonth,
+            year: rec.year,
+            subItems: rec.subItems
+          })
+        });
+      } catch (e) { /* 单条失败不中断 */ }
+    }
+    // 5) 更新 window.MockData.MILESTONE_PLANS（前端缓存）
+    if (window.MockData) {
+      if (!window.MockData.MILESTONE_PLANS) window.MockData.MILESTONE_PLANS = {};
+      window.MockData.MILESTONE_PLANS[projectId] = newRecords;
+    }
+  } catch (e) {
+    console.warn('[milestone] 同步后端失败:', e.message);
+  }
 }
 
 // --- 页面 06：人员统计 ---
@@ -1437,11 +1575,14 @@ function getPageSectionsData(projectId) {
   }));
 }
 
-function getWeekAttendanceStats(weekStart, weekEnd) {
-  var team = MANAGEMENT_TEAM || [];
+function getWeekAttendanceStats(weekStart, weekEnd, projectId) {
+  // 优先用 window.MockData.MANAGEMENT_TEAM（包含运行时新建的人员），fallback 到模块级 const
+  var team = (typeof window !== 'undefined' && window.MockData && window.MockData.MANAGEMENT_TEAM) || MANAGEMENT_TEAM || [];
   if (team.length === 0) {
     return [{ name: '张三', position: '项目经理', phone: '13800138000', fullAttendance: true, totalDays: 5, presentDays: 5, absentReasons: [] }];
   }
+  var pid = projectId || CURRENT_PROJECT_ID || 'baicaoyuan';
+  var projectBucket = DAILY_ATTENDANCE[pid] || {};
   // 生成周内日期列表
   var days = [];
   if (weekStart && weekEnd) {
@@ -1460,12 +1601,13 @@ function getWeekAttendanceStats(weekStart, weekEnd) {
     var absentDays = [];
     var presentCount = 0;
     days.forEach(function (d) {
-      var rec = (DAILY_ATTENDANCE[d] || {})[m.id];
+      var rec = (projectBucket[d] || {})[m.id];
       var present = rec ? rec.present : true;
       if (present) { presentCount++; }
       else { absentDays.push(d + (rec.reason ? '(' + rec.reason + ')' : '')); }
     });
     return {
+      id: m.id,
       name: m.name,
       position: m.position || '管理人员',
       phone: m.phone || '-',
@@ -1478,18 +1620,34 @@ function getWeekAttendanceStats(weekStart, weekEnd) {
 }
 
 // --- 每日签到数据 ---
+// 数据结构：{ [projectId]: { [date]: { [managerId]: { present, reason } } } }
+// 后端 /api/data/all 返回的 DAILY_ATTENDANCE 已是这个分桶格式（routes.js:104-110）
+// 这里维护一个 module-level 对象，启动时从 localStorage 恢复
 var DAILY_ATTENDANCE = {};
 try {
   var saved = localStorage.getItem('daily_attendance');
   if (saved) DAILY_ATTENDANCE = JSON.parse(saved);
 } catch (e) {}
 
-function getAttendanceForDate(date) {
-  return DAILY_ATTENDANCE[date] || {};
+// 当前操作的项目（复用文件顶部声明的 CURRENT_PROJECT_ID，app.v3.js 的 switchProject 已同步更新它）
+function setCurrentProjectId(projectId) {
+  CURRENT_PROJECT_ID = projectId;
 }
 
-function setAttendanceForDate(date, records) {
-  DAILY_ATTENDANCE[date] = records;
+// 获取指定项目 + 日期的签到 records（始终返回对象引用，不存在则自动创建空对象）
+// 这样 update 函数写入 records 会同步回 DAILY_ATTENDANCE
+function getAttendanceForDate(date, projectId) {
+  const pid = projectId || (typeof window !== 'undefined' && window.MOCK_CURRENT_PROJECT) || CURRENT_PROJECT_ID;
+  if (!DAILY_ATTENDANCE[pid]) DAILY_ATTENDANCE[pid] = {};
+  if (!DAILY_ATTENDANCE[pid][date]) DAILY_ATTENDANCE[pid][date] = {};
+  return DAILY_ATTENDANCE[pid][date];
+}
+
+// 设置指定项目 + 日期的签到 records（整体替换 + 持久化）
+function setAttendanceForDate(date, records, projectId) {
+  const pid = projectId || (typeof window !== 'undefined' && window.MOCK_CURRENT_PROJECT) || CURRENT_PROJECT_ID;
+  if (!DAILY_ATTENDANCE[pid]) DAILY_ATTENDANCE[pid] = {};
+  DAILY_ATTENDANCE[pid][date] = records;
   try {
     localStorage.setItem('daily_attendance', JSON.stringify(DAILY_ATTENDANCE));
   } catch (e) {}
@@ -1507,3 +1665,4 @@ window.MockData = {
   getPageSectionsData, getWeekAttendanceStats, getMilestoneData, saveMilestoneData,
   getAttendanceForDate, setAttendanceForDate
 };
+var M = window.MockData;
