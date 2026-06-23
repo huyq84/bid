@@ -14,10 +14,16 @@ import path from 'path';
 import http from 'http';
 import { fileURLToPath } from 'url';
 import { MinMaxClient } from './llm-client.js';
+import { query } from './db.js';
 import { mockParseVoice, mockParsePhoto, mockAggregateWeekly, mockOptimizeText } from './mock-fallback.js';
 import router from './routes.js';
 import { createWsServer, broadcastInspection } from './ws-server.js';
 import os from 'os';
+import { buildChatContext } from './chat-context.js';
+import { TOOLS, executeTool, getToolDescriptions } from './llm-tools.js';
+import { createMemory, recordQuery, recordAction, recordPreference } from './chat-memory.js';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { join } from 'path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -207,6 +213,174 @@ app.use(router);
 // ============================================================
 const server = http.createServer(app);
 const wss = createWsServer(server);
+
+// ============================================================
+// 聊天主端点 — ReAct 循环 + 工具调用
+// ============================================================
+const MAX_REACT_ITERATIONS = 15;
+
+app.post('/api/chat', async (req, res) => {
+  const { message, history, projectId, date, sessionId, permLevel } = req.body;
+  if (!message) return res.status(400).json({ error: 'message required' });
+
+  const start = Date.now();
+  const pid = projectId || 'baicaoyuan';
+  const d = date || new Date().toISOString().slice(0, 10);
+
+  try {
+    // 1. 构建上下文
+    const ctx = await buildChatContext(pid, d);
+
+    // 2. 构建系统提示
+    const toolDescs = getToolDescriptions();
+    const systemPrompt = `你是一个智能施工日报助手，负责查询和录入施工现场数据。
+
+## 可用工具（通过 tool_use 调用）
+${toolDescs}
+
+## 项目上下文
+${ctx.contextText || '暂无上下文数据'}
+
+## 回复规则
+1. 查询类请求：先调用查询工具（queryEvents/queryPlans/queryIssues/getStats/comparePlansVsActuals/queryConstructionData/queryProjects），然后基于结果生成自然语言回复。
+2. 录入类请求：直接调用写入工具（createEvent/updateEvent/closeIssue/createPlan/createAttendance），无需先查询。
+3. 闲聊/咨询类请求：直接回复，不调用工具。
+4. 写入操作：默认自动执行（除非用户明确要求先 dryRun 预览）。
+5. 回复用中文，简洁专业。
+
+## 工具调用格式
+当你需要调用工具时，回复格式为：
+[TOOL_USE:name=工具名,params={参数JSON}]
+
+## 重要
+- 收到工具执行结果后，直接用自然语言回复用户，**不要重复或引用工具结果的原始内容**
+- 查询事件时默认查今日（${d}），除非用户指定日期
+- 创建事件时 type 用：progress/material/safety/coordination/attendance/drawing
+- 更新事件时必须先用 queryEvents 找到正确的事件 ID
+- 写入操作完成后简要告知用户结果`;
+
+    // 3. 构建消息历史
+    const messages = [];
+    if (history && history.length > 0) {
+      messages.push(...history.slice(-10));
+    }
+    messages.push({ role: 'user', content: message });
+
+    // 4. ReAct 循环
+    let iterations = 0;
+    let reply = '';
+    const actions = [];
+    const results = [];
+    let pendingActions = [];
+    const memory = createMemory();
+    let currentMessages = [...messages];
+
+    while (iterations < MAX_REACT_ITERATIONS) {
+      iterations++;
+
+      // 调用 LLM
+      const rawReply = await llm.chat({
+        system: systemPrompt,
+        messages: currentMessages,
+        maxTokens: 4096,
+        temperature: 0.3
+      });
+
+      // 解析工具调用
+      const toolMatch = rawReply.match(/\[TOOL_USE:name=(\w+),params=(\{[\s\S]*?\})\]/);
+
+      if (toolMatch) {
+        const toolName = toolMatch[1];
+        const toolParams = JSON.parse(toolMatch[2]);
+
+        // 记录查询历史
+        if (toolName.startsWith('query') || toolName === 'getStats' || toolName === 'comparePlansVsActuals') {
+          recordQuery(memory, toolName, toolParams, 0);
+        }
+
+        try {
+          const toolResult = await executeTool(toolName, toolParams, {
+            projectId: pid,
+            date: d,
+            permLevel: permLevel || 'allow'
+          });
+
+          // 记录动作历史
+          if (toolName.startsWith('create') || toolName.startsWith('update') || toolName.startsWith('close') || toolName.startsWith('delete')) {
+            recordAction(memory, toolName, toolParams.id || toolParams.eventId || 'unknown');
+          }
+
+          const resultText = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult, null, 2);
+
+          // 如果是写入工具，记录结果
+          if (!toolName.startsWith('query') && toolName !== 'getStats' && toolName !== 'comparePlansVsActuals' && toolName !== 'triggerInspection' && toolName !== 'queryProjects') {
+            actions.push({ type: toolName, data: toolParams });
+            results.push({ ok: true, message: resultText.slice(0, 200) });
+          }
+
+          // 回灌工具结果（只喂原始结果，不加 [TOOL_RESULT] 包装，防止 LLM 回显）
+          currentMessages.push({
+            role: 'assistant',
+            content: rawReply
+          });
+          currentMessages.push({
+            role: 'user',
+            content: `工具执行结果 (${toolName}):\n${resultText}`
+          });
+
+        } catch (e) {
+          console.warn(`[chat] 工具执行失败: ${toolName}`, e.message);
+          currentMessages.push({
+            role: 'assistant',
+            content: rawReply
+          });
+          currentMessages.push({
+            role: 'user',
+            content: `工具执行出错 (${toolName}): ${e.message}`
+          });
+        }
+      } else {
+        // 没有工具调用，回复结束
+        reply = rawReply;
+        break;
+      }
+    }
+
+    if (!reply) {
+      reply = '抱歉，我暂时无法回答这个问题。';
+    }
+
+    // 5. 保存对话到数据库
+    if (sessionId) {
+      try {
+        await query('INSERT INTO dr_chat_messages (id, session_id, role, content) VALUES (gen_random_uuid(), $1, $2, $3)', [sessionId, 'user', message]);
+        await query('INSERT INTO dr_chat_messages (id, session_id, role, content) VALUES (gen_random_uuid(), $1, $2, $3)', [sessionId, 'assistant', reply]);
+        await query('UPDATE dr_chat_sessions SET updated_at = NOW() WHERE id = $1', [sessionId]);
+      } catch (e) {
+        console.warn('[chat] 保存消息失败:', e.message);
+      }
+    }
+
+    res.json({
+      reply,
+      source: 'llm',
+      latencyMs: Date.now() - start,
+      iterations,
+      actions,
+      results,
+      pendingActions
+    });
+
+  } catch (e) {
+    console.warn('[降级] LLM 聊天失败，回退 mock:', e.message);
+    res.json({
+      reply: `抱歉，LLM 暂时不可用：${e.message}`,
+      source: 'mock',
+      latencyMs: Date.now() - start,
+      fallbackReason: e.message
+    });
+  }
+});
 
 // ============================================================
 // 聊天辅助端点

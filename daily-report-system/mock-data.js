@@ -1198,7 +1198,7 @@ function getPage0301Data(projectId) {
     if (!categories[p.category]) categories[p.category] = { keyNodes: {}, subNodes: {} };
     if (p.nodeType === '关键节点') {
       var desc = p.description || '';
-      if (p.areaLabel) desc = (p.areaLabel + '\uff1a' + desc);
+      if (p.areaLabel) desc = (p.areaLabel + '：' + desc);
       if (categories[p.category].keyNodes[p.targetMonth]) {
         categories[p.category].keyNodes[p.targetMonth] += '\n' + desc;
       } else {
@@ -1207,7 +1207,7 @@ function getPage0301Data(projectId) {
     }
     if (p.subItems && p.subItems.length > 0) {
       p.subItems.forEach(function (si) {
-        var siDesc = (si.seq ? si.seq + '.' : '') + (si.label ? si.label + '\uff1a' : '') + (si.text || '');
+        var siDesc = (si.label ? si.label + '：' : '') + (si.text || '');
         var sm = si.targetMonth || p.targetMonth;
         if (!categories[p.category].subNodes[sm]) categories[p.category].subNodes[sm] = [];
         categories[p.category].subNodes[sm].push(siDesc);
@@ -1218,7 +1218,7 @@ function getPage0301Data(projectId) {
   plans.forEach(function (p) {
     if (p.nodeType === '次要节点' && p.description) {
       var desc = p.description || '';
-      if (p.areaLabel) desc = (p.areaLabel + '\uff1a' + desc);
+      if (p.areaLabel) desc = (p.areaLabel + '：' + desc);
       if (!categories[p.category].subNodes[p.targetMonth]) categories[p.category].subNodes[p.targetMonth] = [];
       categories[p.category].subNodes[p.targetMonth].push(desc);
     }
@@ -1228,7 +1228,9 @@ function getPage0301Data(projectId) {
 
 // --- 重要节点编辑器数据 ---
 function getMilestoneData() {
-  var projectId = (typeof window !== 'undefined' && window.MOCK_CURRENT_PROJECT) || 'baicaoyuan';
+  var projectId = (typeof window !== 'undefined' && window.MOCK_CURRENT_PROJECT) 
+               || (typeof CURRENT_PROJECT_ID !== 'undefined' ? CURRENT_PROJECT_ID : null)
+               || 'baicaoyuan';
   // 优先读 window.MockData.MILESTONE_PLANS（运行时更新的），回退到模块级 MILESTONE_PLANS
   var plans = (window && window.MockData && window.MockData.MILESTONE_PLANS && window.MockData.MILESTONE_PLANS[projectId]) || MILESTONE_PLANS[projectId] || [];
   // 收集所有月份 key
@@ -1277,8 +1279,9 @@ function getMilestoneData() {
         catMap[p.category].subRows.push(subRow);
       }
       p.subItems.forEach(function (si) {
-        var sk = yr + '.' + si.targetMonth;
-        var siDesc = (si.seq ? si.seq + '.' : '') + (si.label ? si.label + '：' : '') + (si.text || '');
+        var sm = si.targetMonth || p.targetMonth;
+        var sk = yr + '.' + sm;
+        var siDesc = (si.label ? si.label + '：' : '') + (si.text || '');
         subRow[sk] = (subRow[sk] ? subRow[sk] + '\n' : '') + siDesc;
       });
     }
@@ -1632,6 +1635,18 @@ try {
 // 当前操作的项目（复用文件顶部声明的 CURRENT_PROJECT_ID，app.v3.js 的 switchProject 已同步更新它）
 function setCurrentProjectId(projectId) {
   CURRENT_PROJECT_ID = projectId;
+  // 同时更新 MOCK_CURRENT_PROJECT，供 getMilestoneData 等函数使用
+  try { window.MOCK_CURRENT_PROJECT = projectId; } catch {}
+}
+
+// 重置里程碑缓存，使下次打开时从 M.MILESTONE_PLANS[新项目] 重新读取
+function resetMilestoneCache() {
+  // 清除 window.MockData.MILESTONE_PLANS 缓存，强制下次 getMilestoneData 从后端重新拉取
+  try {
+    if (window.MockData && window.MockData.MILESTONE_PLANS) {
+      delete window.MockData.MILESTONE_PLANS[CURRENT_PROJECT_ID];
+    }
+  } catch (e) { /* ignore */ }
 }
 
 // 获取指定项目 + 日期的签到 records（始终返回对象引用，不存在则自动创建空对象）
@@ -1663,6 +1678,6 @@ window.MockData = {
   getPage01Data, getPage03Data, getPage0301Data, getPage04Data, getPage05Photos,
   getPage06Data, getPage07Data, getPage08Data, getPage09Data, getPage10Data, getPage11Data, getPage12Data,
   getPageSectionsData, getWeekAttendanceStats, getMilestoneData, saveMilestoneData,
-  getAttendanceForDate, setAttendanceForDate
+  getAttendanceForDate, setAttendanceForDate, setCurrentProjectId, resetMilestoneCache
 };
 var M = window.MockData;

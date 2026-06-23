@@ -3898,7 +3898,7 @@ function savePhotoEvent() {
     source: 'photo',
     confidence: parseFloat(document.getElementById('pp-confidence').textContent) / 100 || 0.85,
     status: 'draft',
-    photos: [{ id: `P${String(Date.now()).slice(-3)}`, caption: caption || '现场照片', area: areaId }],
+    photos: [{ id: `P${String(Date.now()).slice(-3)}`, caption: caption || '现场照片', area: areaId, data: document.getElementById('photoPreviewImg').src || '' }],
     note
   };
   
@@ -7422,12 +7422,21 @@ function renderMappingPage06() {
 
   const thisLabel = unit === 'manDays' ? '本周工日' : '本周人数';
   const nextLabel = unit === 'manDays' ? '下周工日' : '下周人数';
-  const photos = (d && d.PAGE06_PHOTOS && d.PAGE06_PHOTOS.filter(p => p.projectId === currentProjectId)) || [];
+  // 从 EVENTS 和 HISTORY_EVENTS 中提取照片数据
+  const allEvents = ((d && d.EVENTS) || []).concat((d && d.HISTORY_EVENTS) || []);
+  const photos = [];
+  allEvents.forEach(function(ev) {
+    if (ev.projectId === currentProjectId && ev.photos && ev.photos.length > 0) {
+      ev.photos.forEach(function(p) {
+        photos.push({ data: p.data || p.src || '', caption: p.caption || '', tradeId: p.area || '' });
+      });
+    }
+  });
 
   const photoCards = photos.map(p => {
     const cardHtml = '<div style="border:1px solid #e2e8f0;border-radius:4px;overflow:hidden;background:#f8fafb;min-height:120px;">' +
       '<div style="width:100%;height:120px;overflow:hidden;background:#f1f5f9;display:flex;align-items:center;justify-content:center;cursor:pointer;">' +
-      '<img src="' + p.src + '" style="width:100%;height:100%;object-fit:contain;"></div>' +
+      '<img src="' + (p.data || p.src) + '" style="width:100%;height:100%;object-fit:contain;"></div>' +
       '<div style="padding:4px;font-size:11px;color:#64748b;">' + (p.caption || '无说明') +
       (p.tradeId ? '<br><span style="color:#00adef;">' + p.tradeId + '</span>' : '') + '</div></div>';
     return cardHtml;
@@ -9719,7 +9728,7 @@ async function sendChatMessage() {
       fetch('http://localhost:3010/api/chat/messages/' + encodeURIComponent(editMsgId), { method: 'DELETE' }).catch(()=>{});
     }
   }
-  if (!text || !_activeSessionId) return;
+  if (!text && !_chatPhotoQueue.length) return;
   input.value = '';
   document.getElementById('aiChatSendBtn').disabled = true;
 
@@ -9736,11 +9745,74 @@ async function sendChatMessage() {
     }
   }
 
+
+  // === 如果有照片，先走照片解析流程 ===
+  if (_chatPhotoQueue.length) {
+    // 等待所有照片完成读取
+    while (_chatPhotoQueue.some(function(p) { return !p.dataUrl; })) {
+      await new Promise(function(r) { setTimeout(r, 100); });
+    }
+    var photoQueue = _chatPhotoQueue.slice();
+    _chatPhotoQueue = [];
+    _renderChatPhotoStrip();
+
+    var projectId = typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan';
+    var areas = typeof M !== 'undefined' && M.AREAS ? M.AREAS[projectId] || [] : [];
+    var plans = typeof M !== 'undefined' && M.PLANS ? M.PLANS[projectId] || [] : [];
+
+    // 显示用户消息：文字+照片合并为一条气泡
+    _appendChatPhotosWithText(text, photoQueue);
+
+    // 解析每张照片
+    var parsedResults = [];
+    for (var pi = 0; pi < photoQueue.length; pi++) {
+      var item = photoQueue[pi];
+      try {
+        var base64 = item.dataUrl.split(',')[1];
+        var res = await fetch('http://localhost:3010/api/parse-photo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageBase64: base64, caption: item.name, projectId: projectId, areas: areas, plans: plans })
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        var result = await res.json();
+        parsedResults.push(Object.assign({}, result, { photo: item }));
+      } catch (e) {
+        parsedResults.push({ type: 'progress', taskHint: item.name, caption: '照片记录', payload: {}, photo: item });
+      }
+    }
+
+    // 合并解析结果，构建最终消息
+    var allTexts = parsedResults.map(function(r) {
+      var area = r.areaName || '';
+      if (r.areaId && typeof M !== 'undefined' && M.AREAS) {
+        var pid2 = typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan';
+        var found = (M.AREAS[pid2] || []).find(function(a) { return a.id === r.areaId; });
+        if (found) area = found.name;
+      }
+      return area + '：' + (r.taskHint || r.caption || '照片记录');
+    }).join('\n');
+
+    var combinedText = allTexts;
+    if (text) combinedText = text + '\n\n[照片内容]\n' + allTexts;
+    else combinedText = '照片记录：\n' + allTexts;
+
+    // 保存用户消息（含照片描述）
+    var savedId = await saveMsgToDB(_activeSessionId, 'user', combinedText);
+    if (!_messageCache[_activeSessionId]) _messageCache[_activeSessionId] = [];
+    _messageCache[_activeSessionId].push({ id: savedId, role: 'user', content: combinedText });
+
+    // 用组合文本调用 LLM
+    showChatTyping();
+    _callChatLLM(combinedText);
+    return;
+  }
+
   // 1. 保存并显示用户消息
-  const savedId = await saveMsgToDB(_activeSessionId, 'user', text);
+  const txtSavedId = await saveMsgToDB(_activeSessionId, 'user', text);
   if (!_messageCache[_activeSessionId]) _messageCache[_activeSessionId] = [];
-  _messageCache[_activeSessionId].push({ id: savedId, role: 'user', content: text });
-  appendChatMessage('user', text, false, savedId);
+  _messageCache[_activeSessionId].push({ id: txtSavedId, role: 'user', content: text });
+  appendChatMessage('user', text, false, txtSavedId);
 
   showChatTyping();
   _callChatLLM(text);
@@ -10612,6 +10684,25 @@ function _appendChatPhotos(photos) {
   div.innerHTML = '<div class="ai-message-avatar">👤</div><div class="ai-message-bubble"><div style="display:flex;flex-wrap:wrap;gap:4px;">' +
     photos.map(p => '<div style="width:72px;height:72px;border-radius:6px;overflow:hidden;cursor:zoom-in;border:1px solid rgba(255,255,255,0.15);flex-shrink:0;" onclick="openPhotoLightboxSrc(\'' + p.dataUrl.replace(/'/g, "\\'") + '\',\'' + (p.caption || '现场照片').replace(/'/g, "\\'") + '\')"><img src="' + p.dataUrl + '" style="width:100%;height:100%;object-fit:cover;display:block;"></div>'
     ).join('') + '</div></div>';
+  container.appendChild(div);
+  scrollChatToBottom();
+}
+
+function _appendChatPhotosWithText(text, photos) {
+  var container = document.getElementById('aiChatMessages');
+  if (!container || !photos.length) { if (text) appendChatMessage('user', text); return; }
+  var photoItems = photos.map(function(p) { return { dataUrl: p.dataUrl, caption: p.name }; });
+  var div = document.createElement('div');
+  div.className = 'ai-message user';
+  var bc = '';
+  if (text) bc += '<div style="margin-bottom:6px;white-space:pre-wrap;">' + text.replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>';
+  bc += '<div style="display:flex;flex-wrap:wrap;gap:4px;">';
+  for (var i = 0; i < photoItems.length; i++) {
+    var pp = photoItems[i];
+    bc += '<div style="width:80px;height:80px;border-radius:6px;overflow:hidden;cursor:zoom-in;border:1px solid rgba(255,255,255,0.15);flex-shrink:0;" onclick="openPhotoLightboxSrc(\'' + pp.dataUrl.replace(/'/g, "\'") + '\',\'' + (pp.caption||'现场照片').replace(/'/g, "\'") + '\')"><img src="' + pp.dataUrl + '" style="width:100%;height:100%;object-fit:cover;display:block;"></div>';
+  }
+  bc += '</div>';
+  div.innerHTML = '<div class="ai-message-avatar">👤</div><div class="ai-message-bubble">' + bc + '</div>';
   container.appendChild(div);
   scrollChatToBottom();
 }
