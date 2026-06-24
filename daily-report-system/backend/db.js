@@ -293,6 +293,39 @@ CREATE TABLE IF NOT EXISTS dr_page03_photo (
   updated_at TEXT
 );
 
+-- 事件类型管理（自定义类型持久化到 DB）
+CREATE TABLE IF NOT EXISTS dr_event_types (
+  id TEXT PRIMARY KEY,
+  label TEXT NOT NULL,
+  color TEXT NOT NULL DEFAULT '#64748b',
+  icon TEXT NOT NULL DEFAULT '📋',
+  custom INTEGER NOT NULL DEFAULT 1,
+  hidden INTEGER NOT NULL DEFAULT 0,
+  sort_order INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 预置事件类型种子（custom=0 表示预置，始终保证存在）
+-- hidden=0 确保种子数据插入时不被隐藏
+-- ⚠️ 注意：如果用户删除了预置类型（hidden=1），种子数据不会重置 hidden
+INSERT INTO dr_event_types (id, label, color, icon, custom, hidden, sort_order)
+VALUES
+  ('progress', '施工进度', '#00adef', '🏗️', 0, 0, 1),
+  ('material', '材料进场', '#f59e0b', '📦', 0, 0, 2),
+  ('safety', '安全检查', '#ef4444', '🛡️', 0, 0, 3),
+  ('coordination', '协调事项', '#8b5cf6', '🤝', 0, 0, 4),
+  ('attendance', '人员签到', '#10b981', '✅', 0, 0, 5),
+  ('drawing', '图纸深化', '#0ea5e9', '📐', 0, 0, 6)
+ON CONFLICT (id) DO UPDATE SET
+  label = CASE WHEN dr_event_types.hidden = 0 THEN EXCLUDED.label ELSE dr_event_types.label END,
+  color = CASE WHEN dr_event_types.hidden = 0 THEN EXCLUDED.color ELSE dr_event_types.color END,
+  icon = CASE WHEN dr_event_types.hidden = 0 THEN EXCLUDED.icon ELSE dr_event_types.icon END,
+  custom = CASE WHEN dr_event_types.hidden = 0 THEN EXCLUDED.custom ELSE dr_event_types.custom END,
+  hidden = CASE WHEN dr_event_types.hidden = 0 THEN EXCLUDED.hidden ELSE dr_event_types.hidden END,
+  sort_order = CASE WHEN dr_event_types.hidden = 0 THEN EXCLUDED.sort_order ELSE dr_event_types.sort_order END,
+  updated_at = CASE WHEN dr_event_types.hidden = 0 THEN NOW() ELSE dr_event_types.updated_at END;
+
 -- 系统设置（key-value）
 CREATE TABLE IF NOT EXISTS dr_settings (
   key TEXT PRIMARY KEY,

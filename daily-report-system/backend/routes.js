@@ -31,7 +31,7 @@ router.get('/api/db/stats', async (req, res) => {
 router.get('/api/data/all', async (req, res) => {
   try {
     if (!initialized) await initDatabase();
-    const [projects, areas, workers, team, milestones, milestonePlans, plans, events, issues, eccItems, drawings, gantt, zones, attendance, standardTrades, weeklyLabor, page06Photos, eccSummaries] = await Promise.all([
+    const [projects, areas, workers, team, milestones, milestonePlans, plans, events, issues, eccItems, drawings, gantt, zones, attendance, standardTrades, weeklyLabor, page06Photos, eccSummaries, eventTypes] = await Promise.all([
       query('SELECT * FROM dr_projects ORDER BY id'),
       query('SELECT * FROM dr_areas ORDER BY project_id, id'),
       query('SELECT * FROM dr_workers ORDER BY id'),
@@ -50,6 +50,7 @@ router.get('/api/data/all', async (req, res) => {
       query('SELECT * FROM dr_weekly_labor_data ORDER BY week_start, trade_id'),
       query('SELECT * FROM dr_page06_photos ORDER BY created_at'),
       query('SELECT * FROM dr_ecc_summaries'),
+      query('SELECT * FROM dr_event_types WHERE hidden=0 ORDER BY sort_order, id'),
     ]);
 
     // Build AREAS object (keyed by projectId)
@@ -199,6 +200,10 @@ router.get('/api/data/all', async (req, res) => {
         };
         return acc;
       }, {}),
+      EVENT_TYPES: eventTypes.rows.map(et => ({
+        id: et.id, label: et.label, color: et.color, icon: et.icon,
+        custom: et.custom, hidden: et.hidden ?? 0, sortOrder: et.sort_order,
+      })),
     });
   } catch (e) {
     console.error('[API] /api/data/all error:', e);
@@ -722,5 +727,80 @@ function getDefaultSettings() {
     inspection_times: { times: ['08:30', '13:00', '17:30'], interval: 60 }
   };
 }
+
+// ==================== 事件类型 CRUD ====================
+router.get('/api/event-types', async (req, res) => {
+  try {
+    const result = await query('SELECT * FROM dr_event_types WHERE hidden=0 ORDER BY sort_order, id');
+    res.json(result.rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/api/event-types', async (req, res) => {
+  try {
+    const { id, label, color, icon, custom, sort_order } = req.body;
+    if (!id || !label) return res.status(400).json({ error: 'id and label required' });
+    await query(
+      `INSERT INTO dr_event_types (id, label, color, icon, custom, sort_order)
+       VALUES ($1, $2, $3, $4, COALESCE($5, 1), COALESCE($6, 0))
+       ON CONFLICT (id) DO UPDATE SET label=$2, color=$3, icon=$4, updated_at=NOW()`,
+      [id, label, color || '#64748b', icon || '📋', custom ?? 1, sort_order ?? 0]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.put('/api/event-types/:id', async (req, res) => {
+  try {
+    // 锁定类型不可编辑/隐藏/取消隐藏
+    const LOCKED_IDS = ['progress', 'drawing'];
+    if (LOCKED_IDS.includes(req.params.id)) {
+      return res.status(403).json({ error: 'this type is locked' });
+    }
+    const { label, color, icon, sort_order, hidden } = req.body;
+    const sets = [];
+    const vals = [];
+    let idx = 1;
+    if (label !== undefined) { sets.push(`label=$${idx}`); vals.push(label); idx++; }
+    if (color !== undefined) { sets.push(`color=$${idx}`); vals.push(color); idx++; }
+    if (icon !== undefined) { sets.push(`icon=$${idx}`); vals.push(icon); idx++; }
+    if (sort_order !== undefined) { sets.push(`sort_order=$${idx}`); vals.push(sort_order); idx++; }
+    if (hidden !== undefined) { sets.push(`hidden=$${idx}`); vals.push(hidden); idx++; }
+    if (sets.length === 0) return res.status(400).json({ error: 'no fields to update' });
+    sets.push('updated_at=NOW()');
+    vals.push(req.params.id);
+    await query(`UPDATE dr_event_types SET ${sets.join(', ')} WHERE id=$${idx}`, vals);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.delete('/api/event-types/:id', async (req, res) => {
+  try {
+    // 锁定类型不可删除/隐藏
+    const LOCKED_IDS = ['progress', 'drawing'];
+    if (LOCKED_IDS.includes(req.params.id)) {
+      return res.status(403).json({ error: 'this type is locked' });
+    }
+    // 预置类型不允许物理删除，改为隐藏
+    const check = await query('SELECT custom FROM dr_event_types WHERE id=$1', [req.params.id]);
+    if (check.rows.length === 0) return res.status(404).json({ error: 'not found' });
+    if (check.rows[0].custom === 0) {
+      // 预置类型：标记 hidden=1
+      await query('UPDATE dr_event_types SET hidden=1, updated_at=NOW() WHERE id=$1', [req.params.id]);
+      return res.json({ ok: true, hidden: true });
+    }
+    // 自定义类型：真正删除
+    await query('DELETE FROM dr_event_types WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 export default router;

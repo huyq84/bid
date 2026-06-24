@@ -157,6 +157,13 @@ async function loadDataFromAPI() {
     // 标记首次加载完成，切换项目时不再写 localStorage
     M._initialLoadDone = true;
 
+    // 加载事件类型（从 DB 作为权威来源）
+    if (data.EVENT_TYPES && data.EVENT_TYPES.length > 0) {
+      M.DB_EVENT_TYPES = data.EVENT_TYPES;
+      // 合并到 customTypes：预置类型保留 custom=false，自定义类型 custom=true
+      initCustomTypesFromDB(data.EVENT_TYPES);
+    }
+
     // 重写保存方法：先同步写 localStorage（防刷新丢）→ 再异步同步到后端
     M.saveEventsToStorage = async function() {
       // 1. 立即写 localStorage（同步操作，瞬间完成）
@@ -2801,38 +2808,84 @@ function getProjectAreas() {
 }
 
 // 事件类型列表（可写）
-// 自定义事件类型（叠在 M.TYPE_META 之上），存 localStorage 'custom_event_types'
-// 结构：{ [typeId]: { label, color, icon, bgClass, custom: true } }
+// 自定义事件类型（叠在 M.TYPE_META 之上），优先从 DB 加载，localStorage 作缓存
+// 结构：{ [typeId]: { label, color, icon, bgClass, custom: true/false } }
 let customTypes = {};
 
+// 从后端 DB 加载的事件类型数据（权威来源）
+let dbEventTypes = null;
+
+/** 用后端 DB 数据重建 customTypes */
+function initCustomTypesFromDB(dbTypes) {
+  if (!dbTypes || !dbTypes.length) return;
+  dbEventTypes = dbTypes;
+  customTypes = {};
+  dbTypes.forEach(et => {
+    customTypes[et.id] = {
+      id: et.id,
+      label: et.label,
+      color: et.color,
+      icon: et.icon,
+      custom: !!et.custom,
+      sortOrder: et.sortOrder ?? 0,
+      bgClass: 'type-' + et.id,
+      _hidden: !!et.hidden,
+    };
+  });
+  // 叠加 localStorage 中用户改过的预置类型 label/color/icon（仅当 DB 中仍存在且为预置类型时）
+  try {
+    const saved = JSON.parse(localStorage.getItem('custom_event_types') || '{}');
+    Object.entries(saved).forEach(([id, meta]) => {
+      if (id === '__deleted__') return;
+      if (customTypes[id] && !customTypes[id].custom && M.TYPE_META && M.TYPE_META[id]) {
+        // 预置类型：用户改过 label/color/icon，用 localStorage 覆盖
+        if (meta.label) customTypes[id].label = meta.label;
+        if (meta.color) customTypes[id].color = meta.color;
+        if (meta.icon) customTypes[id].icon = meta.icon;
+      }
+    });
+  } catch (e) { /* ignore */ }
+  // 叠加 localStorage 中新增的纯自定义类型（DB 可能因网络失败没拉到）
+  // ⚠️ 注意：只恢复既不在 DB 也不在 M.TYPE_META 中的类型
+  try {
+    const saved = JSON.parse(localStorage.getItem('custom_event_types') || '{}');
+    Object.entries(saved).forEach(([id, meta]) => {
+      if (id === '__deleted__') return;
+      if (!customTypes[id] && !M.TYPE_META?.[id]) {
+        // localStorage 有但 DB 和 TYPE_META 都没有的纯自定义类型
+        customTypes[id] = { ...meta, custom: true, id, bgClass: 'type-' + id };
+      }
+    });
+  } catch (e) { /* ignore */ }
+  if (window.MockData) window.MockData.customTypes = customTypes;
+}
+
 // 初始化：合并用户保存的自定义类型（去重，保留 M.TYPE_META 预置）
+// 现在主要由 initCustomTypesFromDB 接管，此函数作为 fallback
 function initCustomTypes() {
   if (!M.TYPE_META) return;
-  // 先把预置的复制进来（标 custom=false），再叠加用户新增
+  // 如果 DB 数据已加载（initCustomTypesFromDB 已调用），跳过
+  if (dbEventTypes) return;
+  // fallback：纯 localStorage + TYPE_META 模式
   customTypes = {};
+  // 先加载被删除的预置类型
+  let deletedIds = [];
+  try {
+    deletedIds = JSON.parse(localStorage.getItem('deleted_event_types') || '[]');
+  } catch (e) { /* ignore */ }
   Object.entries(M.TYPE_META).forEach(([id, meta]) => {
+    // 跳过被删除的预置类型
+    if (deletedIds.includes(id)) return;
     customTypes[id] = { ...meta, custom: false };
   });
   try {
     const saved = JSON.parse(localStorage.getItem('custom_event_types') || '{}');
     Object.entries(saved).forEach(([id, meta]) => {
-      // 跳过特殊标记（防复活）
       if (id === '__deleted__') return;
-      // 跳过预置 ID（防止用户清空预置后被旧数据复活）
       if (M.TYPE_META[id]) {
-        // 预置类型：合并 label/color/icon 但保留 custom=false
         customTypes[id] = { ...customTypes[id], ...meta, custom: false, id };
       } else {
         customTypes[id] = { ...meta, custom: true, id };
-      }
-    });
-  } catch (e) { /* ignore */ }
-  // 加载被删除的类型记录
-  try {
-    const deleted = JSON.parse(localStorage.getItem('deleted_event_types') || '[]');
-    deleted.forEach(id => {
-      if (customTypes[id] && M.TYPE_META[id]) {
-        delete customTypes[id];
       }
     });
   } catch (e) { /* ignore */ }
@@ -2862,9 +2915,41 @@ function saveCustomTypes() {
       toSave.__deleted__ = stillDeleted;
     }
     localStorage.setItem('custom_event_types', JSON.stringify(toSave));
-    // 同步更新 deleted 记录
     localStorage.setItem('deleted_event_types', JSON.stringify(stillDeleted));
   } catch (e) { /* ignore */ }
+  // 同步到后端 DB（幂等操作）
+  syncTypesToBackend();
+}
+
+/** 把 customTypes 全量同步到后端 DB */
+function syncTypesToBackend() {
+  if (!customTypes || !Object.keys(customTypes).length) return;
+  // 收集所有类型（预置 + 自定义），标记 custom 标志，跳过 hidden 的预置类型
+  const types = Object.values(customTypes).filter(t => {
+    // 如果这个类型在 DB 中是 hidden 的预置类型，跳过不同步
+    if (!t.custom && M.TYPE_META?.[t.id]) {
+      // 检查 DB 中是否 hidden
+      if (M.DB_EVENT_TYPES) {
+        const dbType = M.DB_EVENT_TYPES.find(dt => dt.id === t.id);
+        if (dbType && dbType.hidden) return false;
+      }
+    }
+    return true;
+  }).map(t => ({
+    id: t.id,
+    label: t.label,
+    color: t.color,
+    icon: t.icon,
+    custom: t.custom ? 1 : 0,
+  }));
+  // 批量 POST（upsert）
+  types.forEach(t => {
+    fetch('http://localhost:3010/api/event-types', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(t),
+    }).catch(() => {});
+  });
 }
 
 // 获取所有事件类型（预置 + 自定义合并）
@@ -3085,18 +3170,25 @@ function renderTypesList() {
     container.innerHTML = '<div style="padding:20px; text-align:center; color:#94a3b8;">暂无事件类型</div>';
     return;
   }
+  // 不可操作的预置类型（锁定，不可编辑/删除）
+  const LOCKED_IDS = ['progress', 'drawing'];
   container.innerHTML = ids.map(id => {
     const t = all[id];
     const isCustom = !!t.custom;
+    const isHidden = !!t._hidden;
+    const isPreset = !isCustom;
+    const isLocked = LOCKED_IDS.includes(id);
+    const lockedTip = isLocked ? '（系统核心类型，不可修改）' : '';
     return `
-    <div style="display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid #f1f5f9;">
+    <div style="display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid #f1f5f9; ${isHidden ? 'opacity:0.5;' : ''}">
       <span style="flex:0 0 24px; font-size:18px;">${t.icon || '⚙️'}</span>
       <span style="flex:0 0 90px; font-family:monospace; font-size:11px; color:#64748b;">${id}</span>
       <span style="flex:0 0 90px; font-size:12px; color:${t.color}; font-weight:600;">${t.label}</span>
       <span style="flex:0 0 24px; height:14px; background:${t.color}; border-radius:3px; border:1px solid #e2e8f0;"></span>
-      <span style="flex:1; font-size:11px; color:${isCustom ? '#f59e0b' : '#94a3b8'};">${isCustom ? '★自定义' : '预置'}</span>
-      <button class="btn btn-sm btn-ghost" onclick="editType('${id}')" title="编辑">✏️</button>
-      <button class="btn btn-sm btn-danger" onclick="removeType('${id}')" title="删除">🗑</button>
+      <span style="flex:1; font-size:11px; color:${isCustom ? '#f59e0b' : '#94a3b8'};">${isCustom ? '★自定义' : '预置'}${isHidden ? ' · 🔒已隐藏' : ''}${isLocked ? ' · 🔒锁定' : ''}</span>
+      ${isLocked ? `<span style="font-size:10px;color:#94a3b8;">${lockedTip}</span>` : `<button class="btn btn-sm btn-ghost" onclick="editType('${id}')" title="编辑">✏️</button>`}
+      ${isHidden ? `<button class="btn btn-sm btn-success" onclick="restoreType('${id}')" title="恢复">🔄</button>` : ''}
+      ${!isHidden && !isLocked ? `<button class="btn btn-sm btn-danger" onclick="removeType('${id}')" title="${isPreset ? '隐藏（预置类型）' : '删除'}">🗑</button>` : ''}
     </div>`;
   }).join('');
 }
@@ -3122,11 +3214,6 @@ async function addCustomType() {
   if (!color) return;
   customTypes[id] = { label: label.trim(), color, icon, bgClass: 'type-' + id, custom: true };
   saveCustomTypes();
-  // 同步后端
-  fetch('http://localhost:3010/api/event-types', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, label: label.trim(), color, icon })
-  }).catch(err => console.warn('[自定义类型] 保存失败:', err));
   renderTypesList();
   refreshTypeSelectors();
   showToast(`已新增事件类型：${label}（${id}）`, 'success');
@@ -3134,6 +3221,11 @@ async function addCustomType() {
 
 // 编辑类型（label/color/icon，ID 不可改）
 async function editType(id) {
+  const LOCKED_IDS = ['progress', 'drawing'];
+  if (LOCKED_IDS.includes(id)) {
+    showToast(`「${id}」是系统核心类型，不可编辑`, 'error');
+    return;
+  }
   const t = customTypes[id];
   if (!t) return;
   const newLabel = await showPrompt('类型名称：', t.label);
@@ -3146,11 +3238,6 @@ async function editType(id) {
   t.icon = newIcon;
   t.color = newColor;
   saveCustomTypes();
-  // 同步后端
-  fetch('http://localhost:3010/api/event-types/' + encodeURIComponent(id), {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ label: t.label, color: t.color, icon: t.icon })
-  }).catch(err => console.warn('[自定义类型] 保存失败:', err));
   renderTypesList();
   refreshTypeSelectors();
   showToast('已更新', 'success');
@@ -3158,38 +3245,69 @@ async function editType(id) {
 
 // 删除类型：检查 EVENTS 和 PLANS 引用
 async function removeType(id) {
+  const LOCKED_IDS = ['progress', 'drawing'];
+  if (LOCKED_IDS.includes(id)) {
+    showToast(`「${id}」是系统核心类型，不可删除`, 'error');
+    return;
+  }
   const t = customTypes[id];
   if (!t) return;
   const { eventCount, planCount } = countTypeReferences(id);
   let confirmed;
   if (eventCount > 0 || planCount > 0) {
     confirmed = await showConfirm(
-      `事件类型 "${t.label}" 仍被引用：\n· 今日完成（事件）：${eventCount} 条\n· 今日计划：${planCount} 条\n\n删除后这些事件的类型显示将变回「未知」。\n确定删除？`,
-      '删除事件类型',
+      `事件类型 "${t.label}" 仍被引用：\n· 今日完成（事件）：${eventCount} 条\n· 今日计划：${planCount} 条\n\n隐藏后这些事件的类型将使用默认标签。\n确定隐藏？`,
+      '隐藏事件类型',
       '🗑️'
     );
   } else {
-    confirmed = await showConfirm(`确定删除事件类型 "${t.label}"？`, '删除事件类型', '🗑️');
+    confirmed = await showConfirm(`确定隐藏事件类型 "${t.label}"？\n\n隐藏后该类型不再出现在下拉列表中，但已有数据不受影响。`, '隐藏事件类型', '🗑️');
   }
   if (!confirmed) return;
+  // 预置类型标记 hidden=1，自定义类型物理删除
+  const isPreset = !t.custom;
   delete customTypes[id];
-  // 如果是预置类型，记录到 deleted_event_types 中
-  if (M.TYPE_META[id]) {
-    try {
-      const deleted = JSON.parse(localStorage.getItem('deleted_event_types') || '[]');
-      if (!deleted.includes(id)) {
-        deleted.push(id);
-        localStorage.setItem('deleted_event_types', JSON.stringify(deleted));
-      }
-    } catch (e) { /* ignore */ }
-  }
+  try {
+    const deleted = JSON.parse(localStorage.getItem('deleted_event_types') || '[]');
+    const stillDeleted = deleted.filter(d => d !== id);
+    localStorage.setItem('deleted_event_types', JSON.stringify(stillDeleted));
+  } catch (e) { /* ignore */ }
   saveCustomTypes();
-  // 同步后端
+  // 同步到后端 DB
   fetch('http://localhost:3010/api/event-types/' + encodeURIComponent(id), { method: 'DELETE' })
+    .then(r => r.json()).then(data => {
+      if (data.hidden) {
+        showToast(`已隐藏「${t.label}」`, 'info');
+      } else {
+        showToast(`已删除「${t.label}」`, 'success');
+      }
+    })
     .catch(err => console.warn('[自定义类型] 删除失败:', err));
   renderTypesList();
   refreshTypeSelectors();
-  showToast('已删除', 'success');
+}
+
+// 恢复被隐藏的预置类型
+async function restoreType(id) {
+  const t = customTypes[id];
+  if (!t) return;
+  const confirmed = await showConfirm(`确定恢复事件类型 "${t.label}"？\n\n恢复后该类型将重新出现在下拉列表中。`, '恢复事件类型', '🔄');
+  if (!confirmed) return;
+  // 调用后端取消 hidden
+  fetch('http://localhost:3010/api/event-types/' + encodeURIComponent(id), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hidden: 0 }),
+  }).then(r => r.json()).then(data => {
+    // 重新从后端加载
+    loadDataFromAPI();
+    renderTypesList();
+    refreshTypeSelectors();
+    showToast(`已恢复「${t.label}」`, 'success');
+  }).catch(err => {
+    console.warn('[自定义类型] 恢复失败:', err);
+    showToast('恢复失败', 'error');
+  });
 }
 
 // 刷新所有 type 下拉（modalManual / modalDailyPlan 等）
