@@ -41,10 +41,11 @@ const PROJECTS = [
 // ============================================================
 const AREAS = {
   baicaoyuan: [
-    { id: 'A1', name: '高管办公区', floor: '1F-3F', manager: '张明' },
-    { id: 'A2', name: '员工餐厅区', floor: '1F', manager: '李华' },
-    { id: 'A3', name: '多功能厅',    floor: 'B1',     manager: '王强' },
-    { id: 'A4', name: '商业展示区',  floor: '1F-2F', manager: '陈芳' }
+    { id: 'A1', name: '高管层',     floor: '1F-3F', manager: '张明' },
+    { id: 'A2', name: '食堂区',     floor: '1F-2F', manager: '李华' },
+    { id: 'A3', name: '南塔健身房', floor: '1F',   manager: '王强' },
+    { id: 'A4', name: '南塔咖啡厅', floor: '1F',   manager: '陈芳' },
+    { id: 'A5', name: '北咖啡厅',   floor: '1F',   manager: '周伟' }
   ],
   'lvcheng-riverside': [
     { id: 'B1', name: 'A 户型样板间', floor: '12F', manager: '赵刚' },
@@ -119,7 +120,7 @@ const MILESTONES = {
 };
 
 // ============================================================
-// 4b. 重要节点计划（周报 0301 页·表格用）
+// 4b. 重要节点计划（周报 04 页·表格用）
 // ============================================================
 const MILESTONE_PLANS = {
   baicaoyuan: [
@@ -644,7 +645,7 @@ const ISSUES = [
 ];
 
 // ============================================================
-// 7b. ECC 销项（周报 07 页）
+// 7b. ECC 销项（周报 08 页）
 // ============================================================
 const ECC_ITEMS = [
   { id: 'ECC001', projectId: 'baicaoyuan', title: '餐厅区天花平整度偏差', areaId: 'A2', discoveredDate: '2026-04-10', status: 'closed', closedDate: '2026-05-15' },
@@ -672,7 +673,7 @@ const ECC_ITEMS = [
 ];
 
 // ============================================================
-// 7c. 图纸深化（周报 08 页）
+// 7c. 图纸深化（周报 09 页）
 // ============================================================
 const DRAWING_DEEPENINGS = [
   { id: 'DD001', projectId: 'baicaoyuan', task: '1-2号咖啡厅样板段策划整理',                owner: '李欢',   status: '已完成' },
@@ -686,7 +687,7 @@ const DRAWING_DEEPENINGS = [
 ];
 
 // ============================================================
-// 7d. 周计划甘特图（周报 09 页）
+// 7d. 周计划甘特图（周报 10 页）
 // ============================================================
 const WEEKLY_GANTT_ITEMS = [
   // 高管层
@@ -810,7 +811,8 @@ const TYPE_META = {
   material:    { label: '材料',   color: '#f59e0b', icon: '📦', bgClass: 'type-material' },
   safety:      { label: '安全',   color: '#ef4444', icon: '🛡', bgClass: 'type-safety' },
   coordination:{ label: '协调',   color: '#8b5cf6', icon: '🤝', bgClass: 'type-coordination' },
-  attendance:  { label: '考勤',   color: '#10b981', icon: '👥', bgClass: 'type-attendance' }
+  attendance:  { label: '考勤',   color: '#10b981', icon: '👥', bgClass: 'type-attendance' },
+  drawing:     { label: '图纸深化', color: '#0ea5e9', icon: '📐', bgClass: 'type-drawing' }
 };
 
 const ISSUE_TYPE_META = {

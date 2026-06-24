@@ -253,7 +253,7 @@ END$$;
 -- 添加新主键
 ALTER TABLE dr_daily_attendance ADD CONSTRAINT dr_daily_attendance_pkey PRIMARY KEY (date, project_id, manager_id);
 
--- 标准工种模板（周报 06 人员统计表头，project_id 为 null 表示全局共享）
+-- 标准工种模板（周报 07 人员统计表头，project_id 为 null 表示全局共享）
 CREATE TABLE IF NOT EXISTS dr_standard_trades (
   id SERIAL PRIMARY KEY,
   project_id TEXT,
@@ -263,7 +263,7 @@ CREATE TABLE IF NOT EXISTS dr_standard_trades (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 周报 06 手工录入的本周/下周人数（固定模板模式下使用）
+-- 周报 07 手工录入的本周/下周人数（固定模板模式下使用）
 CREATE TABLE IF NOT EXISTS dr_weekly_labor_data (
   id SERIAL PRIMARY KEY,
   project_id TEXT NOT NULL,
@@ -275,7 +275,7 @@ CREATE TABLE IF NOT EXISTS dr_weekly_labor_data (
   UNIQUE(project_id, week_start, trade_id)
 );
 
--- 周报 06 现场照片
+-- 周报 07 现场照片
 CREATE TABLE IF NOT EXISTS dr_page06_photos (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL,
@@ -420,7 +420,7 @@ const SEED_MILESTONE_PLANS_HARD = [
   { project_id: 'baicaoyuan', id: 'MP008', category: '精装', node_type: '关键节点', area_label: '电梯厅', description: '标准层电梯厅精装施工', target_month: 8, year: 2026, sub_items: '[]' },
 ];
 
-// 标准工种模板（周报 06 人员统计表头，project_id 为 null 表示全局共享）
+// 标准工种模板（周报 07 人员统计表头，project_id 为 null 表示全局共享）
 const SEED_STANDARD_TRADES = [
   { trade_name: '5S小队',   map_from: '普工' },
   { trade_name: '电工',     map_from: '电工' },

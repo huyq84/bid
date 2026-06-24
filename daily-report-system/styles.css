@@ -349,6 +349,7 @@ aside .card { margin-bottom: 0; }
 .entry-icon.weekly { background: #d1fae5; color: #059669; }
 .entry-content { flex: 1; min-width: 0; }
 .entry-title { font-size: 12px; font-weight: 500; color: #0f172a; }
+.entry-subtitle { font-size: 10px; color: #64748b; margin-top: 2px; line-height: 1.3; }
 
 /* ---------- 事项台账 ---------- */
 .issue-row {

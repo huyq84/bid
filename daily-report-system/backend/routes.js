@@ -307,7 +307,7 @@ router.delete('/api/drawing-deepenings/:id', async (req, res) => {
 });
 
 // ==================== STANDARD TRADES CRUD ====================
-// 周报 06 人员统计的标准工种模板表头
+// 周报 07 人员统计的标准工种模板表头
 router.get('/api/standard-trades', async (req, res) => {
   try {
     const { projectId } = req.query;

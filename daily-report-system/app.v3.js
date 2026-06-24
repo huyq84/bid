@@ -49,6 +49,30 @@ async function loadDataFromAPI() {
     M.EVENTS.length = 0;
     M.EVENTS.push(...data.EVENTS, ...localOnlyEvents);
     M.HISTORY_EVENTS.length = 0; M.HISTORY_EVENTS.push(...data.HISTORY_EVENTS);
+    // 合并历史事件本地 override：API 拉回后套用字段改动；过滤 pendingDeletes
+    try {
+      const { overrides, pendingDeletes } = M.loadHistoryOverrides();
+      const delSet = new Set(pendingDeletes);
+      if (M.HISTORY_EVENTS.length > 0) {
+        for (const e of M.HISTORY_EVENTS) {
+          if (delSet.has(e.id)) { e._pendingDelete = true; continue; }
+          if (overrides[e.id]) {
+            Object.assign(e, overrides[e.id]);
+            e._localEdited = true;
+          }
+        }
+        if (delSet.size > 0) {
+          // 真正把 pendingDeletes 从数组里剔掉
+          for (let i = M.HISTORY_EVENTS.length - 1; i >= 0; i--) {
+            if (M.HISTORY_EVENTS[i]._pendingDelete) M.HISTORY_EVENTS.splice(i, 1);
+          }
+          // 持久化时清理掉已应用的 pendingDeletes
+          try {
+            localStorage.setItem('daily_history_overrides', JSON.stringify({ overrides, pendingDeletes: [] }));
+          } catch {}
+        }
+      }
+    } catch(err) { console.warn('[historyOverrides] 合并失败:', err.message); }
     M.ISSUES = data.ISSUES;
 
     // 合并：API 事件无照片但本地有 → 恢复本地照片
@@ -121,7 +145,7 @@ async function loadDataFromAPI() {
       });
     }
 
-    // 标准工种模板（周报 06 表头，DB 管理）
+    // 标准工种模板（周报 07 表头，DB 管理）
     M.STANDARD_TRADES = data.STANDARD_TRADES || [];
 
     // 固定模板模式下录入的本周/下周人数（按 project/week/trade 存）
@@ -324,12 +348,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch(e) { /* ignore */ }
     
     initCustomAreas();
+    initCustomTypes();
     initProject();
     initCalendarWithToday();
     renderProjectInfo();
     renderIssues();
     renderStats();
     populateAreaSelects();
+    refreshTypeSelectors();
     renderDailyPlanCard();
   } catch(e) {
     console.error('[Init] 初始化失败:', e);
@@ -481,8 +507,8 @@ function renderTodayEvents() {
         <div class="event-item" onclick="openEventDetail('${event.id}')">
           <div class="event-head">
             <span class="event-time">${event.time}</span>
-            <span class="event-type-badge" style="background:${M.TYPE_META[event.type].color};">
-              ${M.TYPE_META[event.type].icon} ${M.TYPE_META[event.type].label}
+            <span class="event-type-badge" style="background:${_typeMeta(event.type).color};">
+              ${_typeMeta(event.type).icon} ${_typeMeta(event.type).label}
             </span>
             ${completionBadge}
             <span class="event-area">${getAreaName(event.areaId)}</span>
@@ -582,8 +608,8 @@ function renderFilteredEvents() {
           <div class="event-head">
             <span class="event-date" style="font-size:10px; color:#64748b; margin-right:6px;">${item.date}</span>
             <span class="event-time">${item.displayTime}</span>
-            <span class="event-type-badge" style="background:${M.TYPE_META[item.type].color};">
-              ${M.TYPE_META[item.type].icon} ${M.TYPE_META[item.type].label}
+            <span class="event-type-badge" style="background:${_typeMeta(item.type).color};">
+              ${_typeMeta(item.type).icon} ${_typeMeta(item.type).label}
             </span>
             <span class="event-area">${getAreaName(item.areaId)}</span>
             <span style="font-size:10px; color:#00adef;">🔄 ${item.displayCount}次填报</span>
@@ -619,8 +645,8 @@ function renderFilteredEvents() {
           <div class="event-head">
             <span class="event-date" style="font-size:10px; color:#64748b; margin-right:6px;">${item.date}</span>
             <span class="event-time">${item.time}</span>
-            <span class="event-type-badge" style="background:${M.TYPE_META[item.type].color};">
-              ${M.TYPE_META[item.type].icon} ${M.TYPE_META[item.type].label}
+            <span class="event-type-badge" style="background:${_typeMeta(item.type).color};">
+              ${_typeMeta(item.type).icon} ${_typeMeta(item.type).label}
             </span>
             <span class="event-area">${getAreaName(item.areaId)}</span>
             <span class="event-source">${M.SOURCE_META[item.source]?.icon || '⚙️'}</span>
@@ -753,6 +779,12 @@ function getAreaName(areaId) {
   return areas.find(a => a.id === areaId)?.name || areaId;
 }
 
+// 安全取事件类型元数据（缺失类型不报错，返回兜底）
+function _typeMeta(type) {
+  const all = (typeof getAllTypes === 'function') ? getAllTypes() : (M.TYPE_META || {});
+  return all[type] || { icon: '⚙️', label: type || '未知', color: '#94a3b8', bgClass: 'type-unknown' };
+}
+
 function confirmAllPlanEvents(planId) {
   M.EVENTS.forEach(e => { if (e.planId === planId && e.status === 'draft') e.status = 'confirmed'; });
   if (M.saveEventsToStorage) M.saveEventsToStorage();
@@ -866,11 +898,78 @@ async function closeIssue(issueId) {
 // ============================================================
 // 事件操作
 // ============================================================
+
+// 在 EVENTS + HISTORY_EVENTS 两边查找（撤回/编辑/删除都要支持历史事件）
+function _findEvent(eventId) {
+  return M.EVENTS.find(e => e.id === eventId)
+      || (M.HISTORY_EVENTS || []).find(e => e.id === eventId);
+}
+
+// 在 EVENTS + HISTORY_EVENTS 任一边删除；返回 { ev, from: 'today'|'history' } 或 null
+function _removeEventAnywhere(eventId) {
+  let i = M.EVENTS.findIndex(e => e.id === eventId);
+  if (i > -1) { const [ev] = M.EVENTS.splice(i, 1); return { ev, from: 'today' }; }
+  const hist = M.HISTORY_EVENTS || [];
+  i = hist.findIndex(e => e.id === eventId);
+  if (i > -1) { const [ev] = hist.splice(i, 1); return { ev, from: 'history' }; }
+  return null;
+}
+
+// 历史事件编辑的轻量持久化：只存改动过的字段，避免重复写真实数据
+M.saveHistoryOverrides = function() {
+  try {
+    const overrides = {};
+    for (const e of (M.HISTORY_EVENTS || [])) {
+      if (e._localEdited) {
+        overrides[e.id] = {
+          status: e.status,
+          note: e.note,
+          payload: e.payload,
+          areaId: e.areaId,
+          time: e.time,
+          planId: e.planId,
+          completionType: e.completionType,
+          buildingNo: e.buildingNo,
+          floorNo: e.floorNo
+        };
+      }
+    }
+    // 保留现有 pendingDeletes
+    let pendingDeletes = [];
+    try {
+      const raw = localStorage.getItem('daily_history_overrides');
+      if (raw) {
+        const prev = JSON.parse(raw);
+        if (Array.isArray(prev.pendingDeletes)) pendingDeletes = prev.pendingDeletes;
+      }
+    } catch {}
+    localStorage.setItem('daily_history_overrides', JSON.stringify({ overrides, pendingDeletes }));
+  } catch(e) { console.warn('[historyOverrides] 写失败:', e.message); }
+};
+
+// 加载历史事件本地覆盖（仅合并 _localEdited 标志和改动字段；id 在 API 已删的会进 pendingDeletes）
+M.loadHistoryOverrides = function() {
+  try {
+    const raw = localStorage.getItem('daily_history_overrides');
+    if (!raw) return { overrides: {}, pendingDeletes: [] };
+    const obj = JSON.parse(raw);
+    return {
+      overrides: obj.overrides || {},
+      pendingDeletes: Array.isArray(obj.pendingDeletes) ? obj.pendingDeletes : []
+    };
+  } catch(e) {
+    console.warn('[historyOverrides] 读失败:', e.message);
+    return { overrides: {}, pendingDeletes: [] };
+  }
+};
+
 function confirmEvent(eventId) {
-  const event = M.EVENTS.find(e => e.id === eventId);
+  const event = _findEvent(eventId);
   if (event) {
     event.status = event.status === 'draft' ? 'confirmed' : 'draft';
+    event._localEdited = true;
     if (M.saveEventsToStorage) M.saveEventsToStorage();
+    M.saveHistoryOverrides();
     renderFilteredEvents();
     renderStats();
     if (typeof updateCalendar === 'function') updateCalendar();
@@ -905,14 +1004,24 @@ function confirmTodayReport() {
 async function deleteEvent(eventId) {
   const confirmed = await showConfirm('确定要删除这个事件吗？', '删除事件', '🗑️');
   if (!confirmed) return;
-  const index = M.EVENTS.findIndex(e => e.id === eventId);
-  if (index === -1) return;
-  const ev = M.EVENTS[index];
-  M.EVENTS.splice(index, 1);
-  // 同步到后端（如连接可用）
-  try {
-    await fetch('http://localhost:3010/api/events/' + eventId, { method: 'DELETE' });
-  } catch { /* 后端不可达时只删本地 */ }
+  const removed = _removeEventAnywhere(eventId);
+  if (!removed) return;
+  const ev = removed.ev;
+  // 当日事件才走后端；历史事件只走本地 override（API 不一定能删历史）
+  if (removed.from === 'today') {
+    try {
+      await fetch('http://localhost:3010/api/events/' + eventId, { method: 'DELETE' });
+    } catch { /* 后端不可达时只删本地 */ }
+  } else {
+    // 历史事件：记录到 pendingDeletes，下次拉取时与丢失的 id 比对才彻底清
+    try {
+      const raw = localStorage.getItem('daily_history_overrides');
+      const obj = raw ? JSON.parse(raw) : { overrides: {}, pendingDeletes: [] };
+      if (!Array.isArray(obj.pendingDeletes)) obj.pendingDeletes = [];
+      if (!obj.pendingDeletes.includes(eventId)) obj.pendingDeletes.push(eventId);
+      localStorage.setItem('daily_history_overrides', JSON.stringify(obj));
+    } catch(e) { console.warn('[historyOverrides] 记录删除失败:', e.message); }
+  }
   // 如果是图纸深化事件，级联删除 DRAWING_DEEPENINGS
   if (ev && ev.type === 'drawing') {
     const dd = M.DRAWING_DEEPENINGS && M.DRAWING_DEEPENINGS.find(d => d.eventId === eventId);
@@ -931,7 +1040,7 @@ async function deleteEvent(eventId) {
 }
 
 function openEventDetail(eventId) {
-  const event = M.EVENTS.find(e => e.id === eventId);
+  const event = _findEvent(eventId);
   if (!event) return;
 
   selectedEventId = eventId;
@@ -1070,7 +1179,7 @@ function editEventDirect(eventId) {
 }
 
 function openEventEdit() {
-  const event = M.EVENTS.find(e => e.id === selectedEventId);
+  const event = _findEvent(selectedEventId);
   if (!event) return;
   const p = event.payload || {};
 
@@ -1279,6 +1388,9 @@ function renderEditForm(type, p) {
       break;
     case 'drawing':
       html = `
+        <div style="margin-bottom:8px;padding:6px 10px;background:#f0f9ff;border-left:3px solid #0ea5e9;border-radius:3px;font-size:11px;color:#0c4a6e;">
+          💡 此图纸深化事件将作为 <strong>周报 09 图纸深化</strong> 表格的一行（任务/负责人/进度）
+        </div>
         <div class="form-group">
           <label class="form-label">计划事项 <span class="req">*</span></label>
           <textarea class="form-textarea" id="edit-task" rows="2">${(p.taskName||'').replace(/</g,'&lt;')}</textarea>
@@ -1383,7 +1495,7 @@ window.addEditTradeRow = function() {
 };
 
 function saveEventEdit() {
-  const event = M.EVENTS.find(e => e.id === selectedEventId);
+  const event = _findEvent(selectedEventId);
   if (!event) return;
 
   // 已确认事件不可编辑
@@ -1539,6 +1651,9 @@ function saveEventEdit() {
   }
   if (M.savePlansToStorage) M.savePlansToStorage();
   if (M.saveEventsToStorage) M.saveEventsToStorage();
+  // 历史事件的改动只走 override overlay
+  event._localEdited = true;
+  M.saveHistoryOverrides();
   closeModal('modalEventEdit');
   renderDailyPlanCard();
   renderFilteredEvents();
@@ -1551,7 +1666,7 @@ function saveEventEdit() {
 let _editPrevPlanId = '';
 
 function onEditPlanChange(planId) {
-  const event = M.EVENTS.find(e => e.id === selectedEventId);
+  const event = _findEvent(selectedEventId);
   if (!event) return;
 
   // 检查已有数据
@@ -1606,7 +1721,7 @@ function doEditPlanChange(planId) {
   const planType = plan.type || plan.eventType;
   if (planType && document.getElementById('edit-type').value !== planType) {
     document.getElementById('edit-type').value = planType;
-    const event = M.EVENTS.find(e => e.id === selectedEventId);
+    const event = _findEvent(selectedEventId);
     if (event) {
       event.type = planType;
       renderEditForm(planType, event.payload || {});
@@ -2689,6 +2804,73 @@ function getProjectAreas() {
   return customAreas[currentProjectId] || [];
 }
 
+// 事件类型列表（可写）
+// 自定义事件类型（叠在 M.TYPE_META 之上），存 localStorage 'custom_event_types'
+// 结构：{ [typeId]: { label, color, icon, bgClass, custom: true } }
+let customTypes = {};
+
+// 初始化：合并用户保存的自定义类型（去重，保留 M.TYPE_META 预置）
+function initCustomTypes() {
+  if (!M.TYPE_META) return;
+  // 先把预置的复制进来（标 custom=false），再叠加用户新增
+  customTypes = {};
+  Object.entries(M.TYPE_META).forEach(([id, meta]) => {
+    customTypes[id] = { ...meta, custom: false };
+  });
+  try {
+    const saved = JSON.parse(localStorage.getItem('custom_event_types') || '{}');
+    Object.entries(saved).forEach(([id, meta]) => {
+      // 跳过预置 ID（防止用户清空预置后被旧数据复活）
+      if (M.TYPE_META[id]) {
+        // 预置类型：合并 label/color/icon 但保留 custom=false
+        customTypes[id] = { ...customTypes[id], ...meta, custom: false, id };
+      } else {
+        customTypes[id] = { ...meta, custom: true, id };
+      }
+    });
+  } catch (e) { /* ignore */ }
+  if (window.MockData) window.MockData.customTypes = customTypes;
+}
+
+function saveCustomTypes() {
+  try {
+    // 只保存用户实际修改或新增的部分（避免冗余）
+    const toSave = {};
+    Object.entries(customTypes).forEach(([id, meta]) => {
+      if (meta.custom) {
+        toSave[id] = { label: meta.label, color: meta.color, icon: meta.icon, bgClass: meta.bgClass };
+      } else if (M.TYPE_META[id]) {
+        // 预置类型：仅当用户改过 label/color/icon 时才保存
+        const orig = M.TYPE_META[id];
+        if (orig.label !== meta.label || orig.color !== meta.color || orig.icon !== meta.icon) {
+          toSave[id] = { label: meta.label, color: meta.color, icon: meta.icon, bgClass: meta.bgClass };
+        }
+      }
+    });
+    localStorage.setItem('custom_event_types', JSON.stringify(toSave));
+  } catch (e) { /* ignore */ }
+}
+
+// 获取所有事件类型（预置 + 自定义合并）
+function getAllTypes() {
+  return customTypes;
+}
+
+// 引用计数：检查指定 typeId 被多少今日完成事件和今日计划引用
+function countTypeReferences(typeId) {
+  let eventCount = 0;
+  let planCount = 0;
+  if (M.EVENTS) {
+    eventCount = M.EVENTS.filter(e => e.type === typeId).length;
+  }
+  if (M.PLANS) {
+    for (const pid of Object.keys(M.PLANS)) {
+      planCount += (M.PLANS[pid] || []).filter(p => (p.type || p.eventType) === typeId).length;
+    }
+  }
+  return { eventCount, planCount };
+}
+
 // 查找区域（按 id）
 function findAreaById(areaId) {
   const areas = getProjectAreas();
@@ -2747,14 +2929,21 @@ async function addCustomArea(selectId) {
 // 删除区域
 async function removeArea(areaId) {
   const areaName = findAreaById(areaId)?.name || areaId;
-  const confirmed = await showConfirm(`确定删除区域 "${areaName}"？`, '删除区域', '🗑️');
-  if (!confirmed) return;
   if (!customAreas[currentProjectId]) return;
-  const area = customAreas[currentProjectId].find(a => a.id === areaId);
-  if (area && !area.custom) {
-    showToast('预置区域不能删除', 'error');
-    return;
+  // 检查 PLANS 中是否被引用
+  const plans = (M.PLANS && M.PLANS[currentProjectId]) || [];
+  const refCount = plans.filter(p => p.areaId === areaId).length;
+  let confirmed;
+  if (refCount > 0) {
+    confirmed = await showConfirm(
+      `区域 "${areaName}" 下有 ${refCount} 条今日计划/历史计划。\n删除后这些计划的区域引用将保留为空。\n确定删除？`,
+      '删除区域',
+      '🗑️'
+    );
+  } else {
+    confirmed = await showConfirm(`确定删除区域 "${areaName}"？`, '删除区域', '🗑️');
   }
+  if (!confirmed) return;
   customAreas[currentProjectId] = customAreas[currentProjectId].filter(a => a.id !== areaId);
   saveCustomAreas();
   // 同步删除后端
@@ -2828,7 +3017,7 @@ function renderAreasList() {
       <span style="flex:0 0 60px; font-family:monospace; font-size:11px; color:#64748b;">${a.id}</span>
       <span style="flex:1; font-size:12px;">${a.name}${a.custom ? ' <span style="color:#f59e0b; font-size:10px;">★自定义</span>' : ' <span style="color:#94a3b8; font-size:10px;">预置</span>'}</span>
       <button class="btn btn-sm btn-ghost" onclick="renameArea('${a.id}')" title="重命名">✏️</button>
-      ${a.custom ? `<button class="btn btn-sm btn-danger" onclick="removeArea('${a.id}')" title="删除">🗑</button>` : ''}
+      <button class="btn btn-sm btn-danger" onclick="removeArea('${a.id}')" title="删除">🗑</button>
     </div>
   `).join('');
 }
@@ -2862,6 +3051,137 @@ function addAreaFromManager() {
   document.getElementById('newAreaName').value = '';
   document.getElementById('newAreaId').value = '';
   showToast(`已新增：${name}（${newId}）`, 'success');
+}
+
+// ============================================================
+// 事件类型管理（CRUD）
+// ============================================================
+function manageEventTypes() {
+  showModal('modalEventTypes');
+  renderTypesList();
+}
+
+function renderTypesList() {
+  const all = getAllTypes();
+  const container = document.getElementById('typesListContainer');
+  const ids = Object.keys(all);
+  if (ids.length === 0) {
+    container.innerHTML = '<div style="padding:20px; text-align:center; color:#94a3b8;">暂无事件类型</div>';
+    return;
+  }
+  container.innerHTML = ids.map(id => {
+    const t = all[id];
+    const isCustom = !!t.custom;
+    return `
+    <div style="display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid #f1f5f9;">
+      <span style="flex:0 0 24px; font-size:18px;">${t.icon || '⚙️'}</span>
+      <span style="flex:0 0 90px; font-family:monospace; font-size:11px; color:#64748b;">${id}</span>
+      <span style="flex:0 0 90px; font-size:12px; color:${t.color}; font-weight:600;">${t.label}</span>
+      <span style="flex:0 0 24px; height:14px; background:${t.color}; border-radius:3px; border:1px solid #e2e8f0;"></span>
+      <span style="flex:1; font-size:11px; color:${isCustom ? '#f59e0b' : '#94a3b8'};">${isCustom ? '★自定义' : '预置'}</span>
+      <button class="btn btn-sm btn-ghost" onclick="editType('${id}')" title="编辑">✏️</button>
+      <button class="btn btn-sm btn-danger" onclick="removeType('${id}')" title="删除">🗑</button>
+    </div>`;
+  }).join('');
+}
+
+// 新增自定义事件类型
+async function addCustomType() {
+  const idRaw = await showPrompt('请输入类型 ID（英文，如 quality）：', '');
+  if (!idRaw || !idRaw.trim()) return;
+  const id = idRaw.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_');
+  if (!id) {
+    showToast('ID 只能包含英文/数字/下划线', 'error');
+    return;
+  }
+  if (customTypes[id]) {
+    showToast(`"${id}" 已存在`, 'error');
+    return;
+  }
+  const label = await showPrompt('类型名称（中文）：', '');
+  if (!label || !label.trim()) return;
+  const icon = await showPrompt('图标 emoji：', '📋');
+  if (!icon) return;
+  const color = await showPrompt('颜色（HEX，如 #ef4444）：', '#94a3b8');
+  if (!color) return;
+  customTypes[id] = { label: label.trim(), color, icon, bgClass: 'type-' + id, custom: true };
+  saveCustomTypes();
+  // 同步后端
+  fetch('http://localhost:3010/api/event-types', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, label: label.trim(), color, icon })
+  }).catch(err => console.warn('[自定义类型] 保存失败:', err));
+  renderTypesList();
+  refreshTypeSelectors();
+  showToast(`已新增事件类型：${label}（${id}）`, 'success');
+}
+
+// 编辑类型（label/color/icon，ID 不可改）
+async function editType(id) {
+  const t = customTypes[id];
+  if (!t) return;
+  const newLabel = await showPrompt('类型名称：', t.label);
+  if (!newLabel || !newLabel.trim() || newLabel === t.label) return;
+  const newIcon = await showPrompt('图标 emoji：', t.icon || '⚙️');
+  if (!newIcon) return;
+  const newColor = await showPrompt('颜色（HEX）：', t.color);
+  if (!newColor) return;
+  t.label = newLabel.trim();
+  t.icon = newIcon;
+  t.color = newColor;
+  saveCustomTypes();
+  // 同步后端
+  fetch('http://localhost:3010/api/event-types/' + encodeURIComponent(id), {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label: t.label, color: t.color, icon: t.icon })
+  }).catch(err => console.warn('[自定义类型] 保存失败:', err));
+  renderTypesList();
+  refreshTypeSelectors();
+  showToast('已更新', 'success');
+}
+
+// 删除类型：检查 EVENTS 和 PLANS 引用
+async function removeType(id) {
+  const t = customTypes[id];
+  if (!t) return;
+  const { eventCount, planCount } = countTypeReferences(id);
+  let confirmed;
+  if (eventCount > 0 || planCount > 0) {
+    confirmed = await showConfirm(
+      `事件类型 "${t.label}" 仍被引用：\n· 今日完成（事件）：${eventCount} 条\n· 今日计划：${planCount} 条\n\n删除后这些事件的类型显示将变回「未知」。\n确定删除？`,
+      '删除事件类型',
+      '🗑️'
+    );
+  } else {
+    confirmed = await showConfirm(`确定删除事件类型 "${t.label}"？`, '删除事件类型', '🗑️');
+  }
+  if (!confirmed) return;
+  delete customTypes[id];
+  saveCustomTypes();
+  // 同步后端
+  fetch('http://localhost:3010/api/event-types/' + encodeURIComponent(id), { method: 'DELETE' })
+    .catch(err => console.warn('[自定义类型] 删除失败:', err));
+  renderTypesList();
+  refreshTypeSelectors();
+  showToast('已删除', 'success');
+}
+
+// 刷新所有 type 下拉（modalManual / modalDailyPlan 等）
+function refreshTypeSelectors() {
+  const refreshOne = (selId) => {
+    const sel = document.getElementById(selId);
+    if (!sel) return;
+    const cur = sel.value;
+    const all = getAllTypes();
+    sel.innerHTML = Object.keys(all).map(id => {
+      const t = all[id];
+      return `<option value="${id}">${t.icon || '⚙️'} ${t.label}</option>`;
+    }).join('');
+    // 恢复选中值（如果还存在）
+    if (cur && all[cur]) sel.value = cur;
+  };
+  refreshOne('m-type');
+  refreshOne('dp-event-type');
 }
 
 // ============================================================
@@ -5943,7 +6263,7 @@ function _renderEccAutoSummary(s) {
       ${_renderEccPhotoToolbar()}
     </div>
     <div style="margin-top:8px;padding:8px 12px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:4px;font-size:12px;color:#78350f;">
-      💡 提示：录入 TAB 修改 ECC 后，汇总数字会立即更新。汇总照片可随时上传，保存后周报 07 即可展示。
+      💡 提示：录入 TAB 修改 ECC 后，汇总数字会立即更新。汇总照片可随时上传，保存后周报 08 即可展示。
     </div>`;
 }
 
@@ -5985,7 +6305,7 @@ function _renderEccManualSummary(m, auto) {
       </div>
     </div>
     <div style="margin-top:8px;padding:8px 12px;background:#dbeafe;border-left:3px solid #0ea5e9;border-radius:4px;font-size:12px;color:#0c4a6e;">
-      💡 手动保存后，周报 07 ECC 销项页将优先使用这里的值（数字 + 汇总照片），不受录入数据变化影响。
+      💡 手动保存后，周报 08 ECC 销项页将优先使用这里的值（数字 + 汇总照片），不受录入数据变化影响。
     </div>`;
 }
 
@@ -6571,7 +6891,13 @@ function switchMappingTab(page) {
         </div>`;
     }
     // 10 分页按钮：按楼栋/施工段 sub-page 切换（每 section 2 个 sub-page：图、表交替）
-    const sections10 = (M.getPageSectionsData(currentProjectId) || []);
+    // 数据源与 renderMappingPage10 一致：M.PLANS 聚合后的 building 列表
+    const plansForPaging = (M.PLANS && M.PLANS[currentProjectId]) || [];
+    const areasForPaging = (typeof getProjectAreas === 'function' ? getProjectAreas() : (M.AREAS[currentProjectId] || []));
+    const zoneRecords10 = aggregatePlansToConstructionZones(plansForPaging, areasForPaging);
+    const buildingSet10 = new Set();
+    zoneRecords10.forEach(z => { buildingSet10.add(z.building || '其他'); });
+    const sections10 = Array.from(buildingSet10);
     const is10Split = page === '11' && sections10.length > 0;
     const totalP10 = sections10.length * 2;
     if (is10Split) {
@@ -7338,7 +7664,7 @@ function renderMappingPage05() {
       if (photoMap[area].length >= 6) return;
       photoMap[area].push({
         id: p.id, caption: p.caption || '现场照片', area,
-        eventType: e.type, src: p.src
+        eventType: e.type, data: p.data
       });
     });
   });
@@ -7406,18 +7732,52 @@ function renderMappingPage06() {
 
   // Standard trades from DB
   const standardTrades = (d && d.STANDARD_TRADES) || [];
-  const rows = standardTrades.map((t, i) => {
-    const count = tradeCounts[t.tradeName] || 0;
-    return { seq: i + 1, trade: t.tradeName, thisWeek: count || '—', nextWeek: count || '—' };
+  // Raw → standard tradeName 标准化映射（dynamic 模式用 mapFrom 聚合 PLANS）
+  const nameMap = {};
+  standardTrades.forEach(t => {
+    if (t.mapFrom) nameMap[t.mapFrom] = t.tradeName;
+    nameMap[t.tradeName] = t.tradeName;
   });
-  if (rows.length === 0) {
-    // Try weekly labor data as fallback
+
+  const rows = [];
+  if (mode === 'fixed') {
+    // 固定模板：按 STANDARD_TRADES 顺序取本周/下周手工录入的 WEEKLY_LABOR_DATA
     const wlData = (d && d.WEEKLY_LABOR_DATA) || [];
+    const wlByTradeId = {};
     wlData.forEach(w => {
-      if (w.projectId === currentProjectId) {
-        rows.push({ seq: rows.length + 1, trade: w.tradeName || '—', thisWeek: w.thisWeekCount || '—', nextWeek: w.nextWeekCount || '—' });
+      if (w.projectId === currentProjectId && w.weekStart === weekStart) {
+        wlByTradeId[w.tradeId] = w;
       }
     });
+    standardTrades.forEach((t, i) => {
+      const wl = wlByTradeId[t.id];
+      rows.push({
+        seq: i + 1,
+        trade: t.tradeName,
+        thisWeek: wl ? wl.thisWeekCount : 0,
+        nextWeek: wl ? wl.nextWeekCount : 0
+      });
+    });
+  } else {
+    // 动态获取：按 STANDARD_TRADES 顺序，通过 mapFrom 聚合 PLANS 中的 trade
+    const standardCounts = {};
+    Object.keys(tradeCounts).forEach(rawName => {
+      const stdName = nameMap[rawName] || rawName;
+      standardCounts[stdName] = (standardCounts[stdName] || 0) + tradeCounts[rawName];
+    });
+    standardTrades.forEach((t, i) => {
+      const count = standardCounts[t.tradeName] || 0;
+      rows.push({ seq: i + 1, trade: t.tradeName, thisWeek: count || '—', nextWeek: count || '—' });
+    });
+    if (rows.length === 0) {
+      // STANDARD_TRADES 为空时，回退到 WEEKLY_LABOR_DATA（兼容历史）
+      const wlData = (d && d.WEEKLY_LABOR_DATA) || [];
+      wlData.forEach(w => {
+        if (w.projectId === currentProjectId) {
+          rows.push({ seq: rows.length + 1, trade: w.tradeName || '—', thisWeek: w.thisWeekCount || '—', nextWeek: w.nextWeekCount || '—' });
+        }
+      });
+    }
   }
 
   const thisLabel = unit === 'manDays' ? '本周工日' : '本周人数';
@@ -7447,7 +7807,7 @@ function renderMappingPage06() {
   const hasPhotos = photos.length > 0;
   const leftCol = hasPhotos ? '<div style="flex:1;display:flex;flex-direction:column;gap:16px;min-width:0;">' +
     '<div style="background:#fff;padding:8px;border:1px solid #d1d5db;border-radius:2px;flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;min-height:0;">' +
-    '<img src="' + photos[0].src + '" style="width:100%;height:100%;object-fit:contain;cursor:pointer;">' +
+    '<img src="' + photos[0].data + '" style="width:100%;height:100%;object-fit:contain;cursor:pointer;">' +
     '</div>' +
     '<div style="background:#48a0f8;color:#fff;padding:8px 24px;text-align:center;font-size:14px;font-weight:700;width:fit-content;margin:0 auto;border-radius:0;">' +
     (photos[0].caption || '无说明') + '</div></div>' : '';
@@ -7481,7 +7841,7 @@ function renderMappingPage06() {
   el.innerHTML = fullHtml;
 }
 
-// 切换 06 页数据源模式（按项目保存）
+// 切换 07 页（人员统计）数据源模式（按项目保存）
 window.setPage06Mode = function(mode) {
   const key = `page06_mode_${currentProjectId}`;
   localStorage.setItem(key, mode);
@@ -7495,14 +7855,14 @@ window.openStandardTradesManager = async function() {
   await renderStandardTradesList();
 };
 
-// 工人管理 tab 关闭后刷新周报 06
+// 工人管理 tab 关闭后刷新周报 07
 const _origCloseModal = window.closeModal;
 window.closeModal = function(modalId) {
   if (typeof _origCloseModal === 'function') _origCloseModal(modalId);
   if (modalId === 'modalAttendance') {
-    // 关闭签到弹窗后，如果当前在 06 页面，刷新它（应用最新数据）
+    // 关闭签到弹窗后，如果当前在 07 页面（人员统计），刷新它（应用最新数据）
     setTimeout(() => {
-      const nav = document.querySelector('#reportPageNav button.active[data-page="06"]');
+      const nav = document.querySelector('#reportPageNav button.active[data-page="07"]');
       if (nav) renderMappingPage06();
     }, 100);
   }
@@ -7533,13 +7893,13 @@ window.switchAttendanceTab = function(tab) {
   if (tab === 'workers') {
     if (saveBtn) saveBtn.style.display = 'none';
     if (doneBtn) doneBtn.style.display = '';
-    if (title) title.textContent = '👷 工人管理（标准工种模板）';
+    if (title) title.innerHTML = '👷 工人管理（标准工种模板）<span style="font-size:11px;color:#94a3b8;font-weight:400;margin-left:6px;">→ 周报 07 人员统计</span>';
     // 关键：切到 workers tab 时立即渲染列表（避免空表）
     renderStandardTradesList();
   } else {
     if (saveBtn) saveBtn.style.display = '';
     if (doneBtn) doneBtn.style.display = 'none';
-    if (title) title.textContent = '✓ 管理人员签到';
+    if (title) title.innerHTML = '✓ 管理人员签到<span style="font-size:11px;color:#94a3b8;font-weight:400;margin-left:6px;">→ 周报 03 管理人员</span>';
   }
 };
 
@@ -7588,8 +7948,8 @@ async function renderStandardTradesList() {
   }
   if (hint) {
     hint.textContent = showLaborInputs
-      ? '使用「固定模板」：在下方「本周人数」「下周人数」手工录入，周报 06 直接显示该数据'
-      : '使用「动态获取」：周报 06 自动从已确认的施工进度事件 + 下周计划汇总';
+      ? '使用「固定模板」：在下方「本周人数」「下周人数」手工录入，周报 07 直接显示该数据'
+      : '使用「动态获取」：周报 07 自动从已确认的施工进度事件 + 下周计划汇总';
   }
 
   // 显示字段切换（仅动态模式）
@@ -7653,20 +8013,20 @@ async function renderStandardTradesList() {
   renderPage06PhotoGrid();
 }
 
-// 切换工人管理数据源模式（与周报 06 共用 localStorage key）
+// 切换工人管理数据源模式（与周报 07 共用 localStorage key）
 window.setWorkersMode = function(mode) {
   localStorage.setItem(`page06_mode_${currentProjectId}`, mode);
   renderStandardTradesList();
 };
 
-// 切换周报 06 显示字段（模板名称 / 映射来源名称）
+// 切换周报 07 显示字段（模板名称 / 映射来源名称）
 window.setPage06DisplayField = function(field) {
   localStorage.setItem(`page06_displayField_${currentProjectId}`, field);
   renderStandardTradesList();
   renderMappingPage06();
 };
 
-// 切换周报 06 统计口径（人数 / 工日）
+// 切换周报 07 统计口径（人数 / 工日）
 window.setPage06Unit = function(unit) {
   localStorage.setItem(`page06_unit_${currentProjectId}`, unit);
   // 同步按钮样式
@@ -7828,18 +8188,28 @@ function enlargePage07Photo(src, caption) {
 }
 
 function renderMappingPage08() {
-  const d = _weeklyApiData[currentProjectId] || {};
-  const rows = (d && d.DRAWING_DEEPENINGS && d.DRAWING_DEEPENINGS.filter(dd => dd.projectId === currentProjectId)) || [];
+  // 09 图纸深化：今日完成的图纸深化工作（不是计划）
+  // 数据源：M.EVENTS，type='drawing' AND date=TODAY
+  const allEvents = (M.EVENTS && M.EVENTS.length > 0 ? M.EVENTS : (M.HISTORY_EVENTS || []));
+  const today = (typeof M !== 'undefined' && M.TODAY) || new Date().toISOString().slice(0, 10);
+  const rows = allEvents.filter(e =>
+    e.projectId === currentProjectId &&
+    e.type === 'drawing' &&
+    e.date === today
+  );
   if (rows.length === 0) {
-    document.getElementById('mappingContent').innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;">暂无图纸深化数据</div>';
+    document.getElementById('mappingContent').innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;">今日暂无图纸深化完成事项</div>';
     return;
   }
-  const mapped = rows.map((r, i) => ({
-    seq: i + 1,
-    task: r.task,
-    owner: r.owner,
-    progress: r.progress || r.status || '—'
-  }));
+  const mapped = rows.map((r, i) => {
+    const p = r.payload || {};
+    return {
+      seq: i + 1,
+      task: p.taskName || p.description || r.note || '—',
+      owner: p.owner || '—',
+      progress: p.progress || p.status || '—'
+    };
+  });
   document.getElementById('mappingContent').innerHTML = `
     <div style="background:#fff;border:1px solid #005e00;border-radius:4px;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.06);">
       <table style="width:100%;border-collapse:collapse;font-size:13px;">
@@ -7900,13 +8270,32 @@ function renderMappingPage09() {
     monday = new Date(mondayStr);
   }
 
-  const d = _weeklyApiData[currentProjectId] || {};
-  const items = (d && d.WEEKLY_GANTT_ITEMS) || [];
-  if (items.length === 0) {
-    document.getElementById('mappingContent').innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;">暂无下周计划数据</div>';
+  // 10 周计划：从 PLANS（编辑界面日计划）聚合下周的计划
+  // 只显示事件类型为「进度」的计划
+  const allPlans = (M.PLANS && M.PLANS[currentProjectId]) || [];
+  const progressPlans = allPlans.filter(p => p.type === 'progress');
+  const allAreas = (typeof getProjectAreas === 'function' ? getProjectAreas() : (M.AREAS[currentProjectId] || []));
+  const gantt = aggregatePlansToGantt(progressPlans, mondayStr, sundayStr, allAreas);
+  if (gantt.length === 0) {
+    document.getElementById('mappingContent').innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;">本周暂无「进度」类周计划数据，请到"日计划"录入（事件类型选「进度」）</div>';
     return;
   }
-  const areas = [...new Set(items.map(i => i.area))];
+  // 区域按 AREAS 顺序排列
+  const orderedAreas = [];
+  const seen = new Set();
+  allAreas.forEach(a => {
+    if (gantt.some(g => g.areaId === a.id) && !seen.has(a.id)) {
+      orderedAreas.push(a);
+      seen.add(a.id);
+    }
+  });
+  gantt.forEach(g => {
+    if (!seen.has(g.areaId)) {
+      orderedAreas.push({ id: g.areaId, name: g.area });
+      seen.add(g.areaId);
+    }
+  });
+  const areas = orderedAreas.map(a => a.name);
   const dateLabels = dayLabels.map((_, i) => {
     const dd = new Date(monday);
     dd.setDate(dd.getDate() + i);
@@ -7934,13 +8323,14 @@ function renderMappingPage09() {
       </thead>
       <tbody>`;
   areas.forEach(area => {
-    const areaItems = items.filter(i => i.area === area);
+    const areaItems = gantt.filter(i => i.area === area);
     areaItems.forEach((item, idx) => {
       const isFirst = idx === 0;
+      const contMark = item.isContinuation ? '<span class="continuation-marker" style="color:#f59e0b;font-size:9px;">（延续）</span> ' : '';
       html += `<tr>
         <td style="border:1px solid #005e00;padding:2px;text-align:center;">${item.seq}</td>
         ${isFirst ? `<td style="border:1px solid #005e00;padding:2px;text-align:center;background:#00a2ff;color:#fff;font-weight:700;font-size:10px;" rowspan="${areaItems.length}">${area}</td>` : ''}
-        <td style="border:1px solid #005e00;padding:2px;">${item.task}</td>
+        <td style="border:1px solid #005e00;padding:2px;">${contMark}${item.task}</td>
         <td style="border:1px solid #005e00;padding:2px;text-align:center;">${item.durationDays}</td>
         ${(item.schedule || []).map(active =>
           `<td style="border:1px solid #005e00;padding:0;width:36px;height:18px;background:${active ? '#00b0f0' : '#fff'};"></td>`
@@ -7954,6 +8344,74 @@ function renderMappingPage09() {
   document.getElementById('mappingContent').innerHTML = html;
 }
 
+// 聚合 PLANS 到 GANTT 行（仅返回与目标周区间有交集的计划）
+// 输入：plans - PLANS[]；weekStart/weekEnd - YYYY-MM-DD 字符串；areas - 区域档案（用于解析 areaId → name）
+// 输出：[{areaId, area, seq, task, durationDays, schedule[7], labor, material, isContinuation}]
+function aggregatePlansToGantt(plans, weekStart, weekEnd, areas) {
+  if (!Array.isArray(plans) || plans.length === 0) return [];
+  const ws = new Date(weekStart + 'T00:00:00');
+  const we = new Date(weekEnd + 'T00:00:00');
+  const areaMap = {};
+  (areas || []).forEach(a => { areaMap[a.id] = a.name; });
+  // 过滤出与本周有交集的计划
+  const inWeek = plans.filter(p => {
+    if (!p.startDate || !p.endDate) return false;
+    const ps = new Date(p.startDate + 'T00:00:00');
+    const pe = new Date(p.endDate + 'T00:00:00');
+    return ps <= we && pe >= ws;
+  });
+  if (inWeek.length === 0) return [];
+  // 按 areaId 分组
+  const groups = {};
+  inWeek.forEach(p => {
+    const aid = p.areaId || '_unassigned';
+    if (!groups[aid]) groups[aid] = [];
+    groups[aid].push(p);
+  });
+  const out = [];
+  Object.keys(groups).forEach(aid => {
+    // 区域内按 startDate 升序
+    const list = groups[aid].sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''));
+    list.forEach((p, idx) => {
+      const ps = new Date(p.startDate + 'T00:00:00');
+      const pe = new Date(p.endDate + 'T00:00:00');
+      // 与周区间求交
+      const clipS = ps < ws ? ws : ps;
+      const clipE = pe > we ? we : pe;
+      const durationDays = Math.round((clipE - clipS) / 86400000) + 1;
+      // 周一到周日每天是否在 [clipS, clipE] 内
+      const schedule = [0, 0, 0, 0, 0, 0, 0];
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(ws);
+        d.setDate(ws.getDate() + i);
+        if (d >= clipS && d <= clipE) schedule[i] = 1;
+      }
+      // 劳动力
+      const laborList = (p.laborRequirements || []).map(l => `${l.trade || ''} ${l.count || 0}人`.trim());
+      const labor = laborList.filter(Boolean).join('、') || '—';
+      // 材料
+      const hasMaterials = Array.isArray(p.materials) && p.materials.length > 0;
+      const material = hasMaterials ? '已到场' : '待进场';
+      // 任务名：优先 taskName，否则 description 前 30 字
+      const task = p.taskName || (p.description ? String(p.description).slice(0, 30) : '—');
+      // 是否跨周延续
+      const isContinuation = ps < ws || pe > we;
+      out.push({
+        areaId: aid,
+        area: areaMap[aid] || aid,
+        seq: idx + 1,
+        task,
+        durationDays,
+        schedule,
+        labor,
+        material,
+        isContinuation
+      });
+    });
+  });
+  return out;
+}
+
 // 表格标题按当前周报日期取年月："26年5月施工进度计划跟踪表"
 function _getScheduleTableTitle() {
   const base = _reportDate || (typeof M !== 'undefined' && M.TODAY) || '';
@@ -7963,16 +8421,141 @@ function _getScheduleTableTitle() {
   return `${m[1].slice(2)}年${parseInt(m[2])}月施工进度计划跟踪表`;
 }
 
+// 把 M.PLANS 聚合成 CONSTRUCTION_ZONE_SCHEDULES 形状（楼栋/部位/工序 × 楼层列）
+// 输入：plans - M.PLANS[]（不按周过滤，显示全部）；areas - 区域档案
+// 输出：[{id, building, location, process, floors:[{floor, startDate(M/D), endDate(M/D), days}]}]
+//   building ← PLANS.buildingNo（空→"其他"）
+//   location ← areaMap[PLANS.areaId] || "—"
+//   process  ← PLANS.taskName
+//   floor    ← PLANS.floorNo
+//   days     ← endDate - startDate + 1（缺一为""）
+function aggregatePlansToConstructionZones(plans, areas) {
+  if (!Array.isArray(plans) || plans.length === 0) return [];
+  const areaMap = {};
+  (areas || []).forEach(a => { areaMap[a.id] = a.name; });
+  // YYYY-MM-DD → M/D
+  const fmtMD = (s) => {
+    if (!s) return '';
+    const m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+    if (!m) return s;
+    return `${parseInt(m[2])}/${parseInt(m[3])}`;
+  };
+  // 计算日历天
+  const daysBetween = (a, b) => {
+    if (!a || !b) return '';
+    const da = new Date(a + 'T00:00:00');
+    const db = new Date(b + 'T00:00:00');
+    if (isNaN(da) || isNaN(db)) return '';
+    return Math.round((db - da) / 86400000) + 1;
+  };
+  // 按 (buildingNo, areaId, taskName) 分组
+  const groups = {};
+  plans.forEach(p => {
+    if (!p.taskName) return;
+    const b = p.buildingNo || '其他';
+    const a = p.areaId || '';
+    const t = p.taskName;
+    const key = `${b}|||${a}|||${t}`;
+    if (!groups[key]) {
+      groups[key] = {
+        id: key,
+        building: b,
+        location: areaMap[a] || a || '—',
+        process: t,
+        floors: []
+      };
+    }
+    groups[key].floors.push({
+      floor: p.floorNo || '—',
+      startDate: fmtMD(p.startDate),
+      endDate: fmtMD(p.endDate),
+      days: daysBetween(p.startDate, p.endDate)
+    });
+  });
+  // 组内按楼层排序（常见顺序优先，未知顺序保稳）
+  const FLOOR_RANK = { '1F': 1, '2F': 2, '3F': 3, '4F': 4, '5F': 5, '6F': 6, '7F': 7, '8F': 8, '9F': 9, '10F': 10, 'B1': 90, 'B2': 91 };
+  const sortFloors = (floors) => floors.slice().sort((a, b) => {
+    const ra = FLOOR_RANK[a.floor];
+    const rb = FLOOR_RANK[b.floor];
+    if (ra != null && rb != null) return ra - rb;
+    if (ra != null) return -1;
+    if (rb != null) return 1;
+    return String(a.floor).localeCompare(String(b.floor));
+  });
+  return Object.values(groups).map(g => ({ ...g, floors: sortFloors(g.floors) }));
+}
+
 function renderMappingPage10() {
-  const d = _weeklyApiData[currentProjectId] || {};
-  const sections = (d && d.PAGE06_PHOTOS && d.PAGE06_PHOTOS.filter(p => p.projectId === currentProjectId).map(p => ({
-    name: p.caption || '施工段',
-    items: [{ image: p.src, label: p.caption || '' }],
-    floorHeaders: [{ name: '一层', color: '#f4b084' }, { name: '二层', color: '#a9d08e' }],
-    rows: []
-  }))) || [];
+  // 11 施工段划分与计划：数据源切换为 M.PLANS（编辑界面日计划），
+  // 不按周截断，显示全部计划。楼层图片来源仍走 PLANS.zoneImages。
+  const allPlans = (M.PLANS && M.PLANS[currentProjectId]) || [];
+  const allAreas = (typeof getProjectAreas === 'function' ? getProjectAreas() : (M.AREAS[currentProjectId] || []));
+  const zoneRecords = aggregatePlansToConstructionZones(allPlans, allAreas);
+  // 楼层颜色调色板（一层=橙、二层=绿、B1(1)=蓝、B1(2)=紫，超出循环复用）
+  const FLOOR_COLORS = ['#f4b084', '#a9d08e', '#9dc3e6', '#c9a3e0', '#ffd966', '#f8cbad'];
+  // 楼层图片来源：从日计划的 zoneImages（编辑界面上传）按 buildingNo 聚合
+  const zoneImagesByBuilding = {};
+  const projectPlans = (M.PLANS && M.PLANS[currentProjectId]) || [];
+  projectPlans.forEach(p => {
+    if (p.buildingNo && Array.isArray(p.zoneImages) && p.zoneImages.length > 0) {
+      if (!zoneImagesByBuilding[p.buildingNo]) zoneImagesByBuilding[p.buildingNo] = [];
+      p.zoneImages.forEach(z => {
+        zoneImagesByBuilding[p.buildingNo].push({
+          image: z.dataUrl || z.src || '',
+          label: z.name || p.taskName || ''
+        });
+      });
+    }
+  });
+  // 兜底：默认每个楼栋使用 mock-data 中预定义的图片（getPage10Data 风格）
+  const DEFAULT_ZONE_IMAGES = {
+    '食堂': [
+      { label: '食堂一层', image: '10下周计划施工段划分-食堂一层.png' },
+      { label: '食堂二层', image: '10下周计划施工段划分-食堂二层.png' },
+      { label: '食堂B1层', image: '10下周计划施工段划分-食堂B1层.png' }
+    ]
+  };
+  // 按 building 分组
+  const groupedByBuilding = {};
+  zoneRecords.forEach(z => {
+    const b = z.building || '其他';
+    if (!groupedByBuilding[b]) groupedByBuilding[b] = [];
+    groupedByBuilding[b].push(z);
+  });
+  // 构造 sections
+  const sections = Object.keys(groupedByBuilding).map(building => {
+    const rawRows = groupedByBuilding[building];
+    // 收集所有 floor 名称，去重保序（以首次出现顺序为准）
+    const floorOrder = [];
+    rawRows.forEach(r => {
+      (r.floors || []).forEach(f => {
+        if (f.floor && !floorOrder.includes(f.floor)) floorOrder.push(f.floor);
+      });
+    });
+    const floorHeaders = floorOrder.map((name, i) => ({
+      name: name,
+      color: FLOOR_COLORS[i % FLOOR_COLORS.length]
+    }));
+    // 把每行的 floors 按 floorOrder 重排，缺失的填空占位
+    const rows = rawRows.map(r => {
+      const byFloor = {};
+      (r.floors || []).forEach(f => { byFloor[f.floor] = f; });
+      return {
+        ...r,
+        floors: floorOrder.map(name => byFloor[name] || { floor: name, startDate: '', endDate: '', days: '' })
+      };
+    });
+    const items = (zoneImagesByBuilding[building] || DEFAULT_ZONE_IMAGES[building] || [])
+      .map(img => ({ image: img.image || img.src, label: img.label || '' }));
+    return {
+      name: building,
+      items: items,
+      floorHeaders: floorHeaders,
+      rows: rows
+    };
+  });
   if (sections.length === 0) {
-    document.getElementById('mappingContent').innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;">暂无数据</div>';
+    document.getElementById('mappingContent').innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;">暂无施工段计划数据</div>';
     return;
   }
   const totalSubs = sections.length * 2;
@@ -8503,7 +9086,7 @@ let _attendanceMode = 'full'; // 'full'=按满勤 'actual'=按实际出勤
 let _s03Photo = '';   // 管理人员合影照片 dataURL
 let _s03PhotoCaption = '管理人员合影';
 
-// 周报 06 照片持久化（使用 PostgreSQL）
+// 周报 07 照片持久化（使用 PostgreSQL）
 async function _loadPage06Photos() {
   await loadPage06Photos();
 }
@@ -8639,6 +9222,7 @@ function printReport() {
     + '.report-page-header .header-line { position:absolute; top:75px; left:72px; right:0; height:3px; background:' + hc + '; }'
     + '.report-page-header .header-title { position:absolute; top:20px; left:80px; font-size:18px; font-weight:700; color:' + hc + '; white-space:nowrap; }'
     + '.report-page-content { width:1280px; height:720px; box-sizing:border-box; overflow:hidden; }'
+    + '.continuation-marker { display:none !important; }'
     + '</style></head><body>' + pages + '</body></html>');
   iframeDoc.close();
 
@@ -8727,6 +9311,7 @@ function exportReportPDF() {
       + '.report-page-header .header-line { position:absolute; top:75px; left:72px; right:0; height:3px; background:' + hc + '; }'
       + '.report-page-header .header-title { position:absolute; top:20px; left:80px; font-size:18px; font-weight:700; color:' + hc + '; white-space:nowrap; }'
       + '.report-page-content { width:1280px; height:720px; box-sizing:border-box; overflow:hidden; }'
+      + '.continuation-marker { display:none !important; }'
       + '</style></head><body>' + pages + '</body></html>');
     iframeDoc.close();
 
@@ -9146,7 +9731,7 @@ function toggleAttendanceReason(cb) {
 }
 
 // ============================================================
-// 周报 06 照片管理
+// 周报 07 照片管理
 // ============================================================
 
 function _genId() { return 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }

@@ -60,6 +60,7 @@
               <div class="entry-icon weekly">📊</div>
               <div class="entry-content">
                 <div class="entry-title">周报</div>
+                <div class="entry-subtitle">12 页周报预览</div>
               </div>
             </div>
             <div class="entry-card" onclick="openMonthlyReport()">
@@ -72,18 +73,21 @@
               <div class="entry-icon" style="background:#8b5cf6;">✓</div>
               <div class="entry-content">
                 <div class="entry-title">签到</div>
+                <div class="entry-subtitle">→ 周报 03 管理人员</div>
               </div>
             </div>
             <div class="entry-card" onclick="openMilestoneEditor()">
               <div class="entry-icon" style="background:#f59e0b;">◈</div>
               <div class="entry-content">
                 <div class="entry-title">节点</div>
+                <div class="entry-subtitle">→ 周报 04 重要节点</div>
               </div>
             </div>
             <div class="entry-card" onclick="openEccEditor()">
               <div class="entry-icon" style="background:#0ea5e9;">⚑</div>
               <div class="entry-content">
                 <div class="entry-title">ECC</div>
+                <div class="entry-subtitle">→ 周报 08 ECC销项</div>
               </div>
             </div>
           </div>
@@ -605,10 +609,13 @@
         <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
           <div class="form-group">
             <label class="form-label">事件类型 <span class="req">*</span></label>
-            <select class="form-select" id="m-type" onchange="renderManualForm()">
-              <option value="progress">🔨 进度</option>
-              <option value="drawing">📐 图纸深化</option>
-            </select>
+            <div style="display:flex; gap:4px; align-items:center;">
+              <select class="form-select" id="m-type" onchange="renderManualForm()" style="flex:1;">
+                <option value="progress">🔨 进度</option>
+                <option value="drawing">📐 图纸深化</option>
+              </select>
+              <button class="btn btn-xs btn-ghost" onclick="manageEventTypes()" title="管理事件类型">⚙️</button>
+            </div>
           </div>
           <div class="form-group">
             <label class="form-label">日期 <span class="req">*</span></label>
@@ -688,10 +695,13 @@
   <div class="modal-mask" id="modalIssue">
     <div class="modal">
       <div class="modal-header">
-        <div class="modal-title">🤝 协调登记</div>
+        <div class="modal-title">🤝 协调登记 <span style="font-size:11px;color:#94a3b8;font-weight:400;margin-left:6px;">→ 周报 12 协调事宜</span></div>
         <button class="modal-close" onclick="closeModal('modalIssue')">✕</button>
       </div>
       <div class="modal-body">
+        <div style="margin-bottom:10px;padding:6px 10px;background:#eef2ff;border-left:3px solid #6366f1;border-radius:3px;font-size:11px;color:#3730a3;">
+          💡 此处登记的协调事项将作为 <strong>周报 12 协调事宜</strong> 表格数据源（未关闭的会自动展示）
+        </div>
         <div class="form-group">
           <label class="form-label">需协调事宜 <span class="req">*</span></label>
           <input class="form-input" type="text" id="i-title" placeholder="一句话说清楚需协调什么问题">
@@ -962,10 +972,13 @@
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">事件类型 <span class="req">*</span></label>
-              <select class="form-select" id="dp-event-type" onchange="filterPlanFormByType()">
-                <option value="progress">🔨 进度</option>
-                <option value="drawing">📐 图纸深化</option>
-              </select>
+              <div style="display:flex; gap:4px; align-items:center;">
+                <select class="form-select" id="dp-event-type" onchange="filterPlanFormByType()" style="flex:1;">
+                  <option value="progress">🔨 进度</option>
+                  <option value="drawing">📐 图纸深化</option>
+                </select>
+                <button class="btn btn-xs btn-ghost" onclick="manageEventTypes()" title="管理事件类型">⚙️</button>
+              </div>
             </div>
             <div class="form-group">
               <label class="form-label">状态</label>
@@ -1065,7 +1078,10 @@
 
         <!-- 施工段示意图 -->
         <div class="form-section" data-dp-show="progress,material,drawing">
-          <div class="section-title">施工段示意图</div>
+          <div class="section-title">施工段示意图 <span style="font-size:11px;color:#94a3b8;font-weight:400;margin-left:6px;">→ 周报 11 施工段划分</span></div>
+          <div style="margin-bottom:8px;padding:6px 10px;background:#ecfeff;border-left:3px solid #06b6d4;border-radius:3px;font-size:11px;color:#155e75;">
+            💡 上传的图片按 <strong>楼栋号</strong> 聚合到 <strong>周报 11 施工段划分</strong> 对应楼栋（无楼栋的不会展示）
+          </div>
           <div class="form-group">
             <label class="form-label">上传区域平面图（可多选）</label>
             <input class="form-input" type="file" id="dp-zone-images" accept="image/*" multiple onchange="previewZoneImages(event)">
@@ -1120,11 +1136,33 @@
     </div>
   </div>
 
+  <!-- ============== 模态框：事件类型管理 ============== -->
+  <div class="modal-mask" id="modalEventTypes">
+    <div class="modal" style="max-width:560px;">
+      <div class="modal-header">
+        <div class="modal-title">🏷️ 事件类型管理 <span style="font-size:11px;color:#94a3b8;font-weight:400;margin-left:6px;">→ 影响周报各页（09/10 等）</span></div>
+        <button class="modal-close" onclick="closeModal('modalEventTypes')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="font-size:11px; color:#64748b; margin-bottom:8px; padding:6px 10px; background:#f0f9ff; border-left:3px solid #0ea5e9; border-radius:3px;">
+          💡 增/改/删后，今日完成（事件）和今日计划中对应类型会同步显示新名称/颜色
+        </div>
+        <div class="form-group" style="display:flex; gap:4px;">
+          <button class="btn btn-primary" onclick="addCustomType()" style="flex:1;">➕ 新增事件类型</button>
+        </div>
+        <div id="typesListContainer" style="max-height:340px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:4px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="closeModal('modalEventTypes')">完成</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ============== 模态框：每日签到 / 工人管理 ============== -->
   <div class="modal-mask" id="modalAttendance">
     <div class="modal" style="max-width:720px;">
       <div class="modal-header">
-        <div class="modal-title" id="attendanceModalTitle">✓ 管理人员签到</div>
+        <div class="modal-title" id="attendanceModalTitle">✓ 管理人员签到 <span style="font-size:11px;color:#94a3b8;font-weight:400;margin-left:6px;">→ 周报 03 管理人员</span></div>
         <button class="modal-close" onclick="closeModal('modalAttendance')">✕</button>
       </div>
       <!-- Tab 切换栏 -->
@@ -1172,21 +1210,21 @@
             <button id="attWorkerModeBtn-fixed" onclick="setWorkersMode('fixed')" style="font-size:11px;padding:3px 10px;border-radius:3px;cursor:pointer;background:#00adef;color:#fff;border:1px solid #0081cc;">📋 固定模板</button>
             <button id="attWorkerModeBtn-dynamic" onclick="setWorkersMode('dynamic')" style="font-size:11px;padding:3px 10px;border-radius:3px;cursor:pointer;background:#fff;color:#475569;border:1px solid #cbd5e1;">⚡ 动态获取</button>
             <div style="flex:1;"></div>
-            <span id="attWorkerModeHint" style="font-size:10px;color:#94a3b8;">使用「固定模板」：在下方表格手工录入本周/下周人数，周报 06 直接显示该数据</span>
+            <span id="attWorkerModeHint" style="font-size:10px;color:#94a3b8;">使用「固定模板」：在下方表格手工录入本周/下周人数，周报 07 直接显示该数据</span>
           </div>
           <!-- 显示字段切换（仅动态模式可见） -->
           <div id="attDisplayFieldRow" style="display:none;align-items:center;gap:8px;background:#f8fafc;padding:4px 10px;border-radius:4px;margin-bottom:6px;">
             <span style="font-size:11px;color:#475569;font-weight:600;">🏷️ 显示字段：</span>
             <button id="attDisplayFieldBtn-tradeName" onclick="setPage06DisplayField('tradeName')" style="font-size:11px;padding:2px 8px;border-radius:3px;cursor:pointer;background:#00adef;color:#fff;border:1px solid #0081cc;">模板名称</button>
             <button id="attDisplayFieldBtn-mapFrom" onclick="setPage06DisplayField('mapFrom')" style="font-size:11px;padding:2px 8px;border-radius:3px;cursor:pointer;background:#fff;color:#475569;border:1px solid #cbd5e1;">映射来源名称（不转换）</button>
-            <span style="font-size:10px;color:#94a3b8;margin-left:4px;">周报 06 显示的工种列</span>
+            <span style="font-size:10px;color:#94a3b8;margin-left:4px;">周报 07 显示的工种列</span>
           </div>
           <div id="standardTradesList" style="max-height:380px;overflow-y:auto;"></div>
           <button class="btn btn-ghost btn-sm" onclick="addStandardTradeRow()" style="margin-top:8px;font-size:11px;">+ 新增工种</button>
           <div style="margin-top:10px;display:flex;gap:6px;justify-content:flex-end;">
             <button class="btn btn-sm btn-primary" onclick="saveWeeklyLaborData()" style="font-size:11px;background:#059669;border-color:#047857;">💾 保存本周/下周人数</button>
           </div>
-          <!-- 周报 06 照片管理 -->
+          <!-- 周报 07 照片管理 -->
           <div style="margin-top:12px;border-top:1px solid #e2e8f0;padding-top:10px;">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
               <span style="font-size:12px;font-weight:600;color:#374151;">📷 现场照片</span>
@@ -1214,7 +1252,7 @@
   <div class="modal-mask" id="modalEcc">
     <div class="modal" style="max-width:960px;">
       <div class="modal-header">
-        <div class="modal-title">⚑ ECC 销项管理</div>
+        <div class="modal-title">⚑ ECC 销项管理 <span style="font-size:11px;color:#94a3b8;font-weight:400;margin-left:6px;">→ 周报 08 ECC 销项</span></div>
         <button class="modal-close" onclick="closeModal('modalEcc')">✕</button>
       </div>
       <div style="display:flex;background:#f1f5f9;border-bottom:1px solid #e2e8f0;">
@@ -1309,7 +1347,7 @@
     </div>
   </div>
 
-  <!-- ============== 周报 06 照片放大 ============== -->
+  <!-- ============== 周报 07 照片放大 ============== -->
   <div id="page06PhotoEnlargeOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:10000;align-items:center;justify-content:center;flex-direction:column;gap:12px;">
     <button onclick="document.getElementById('page06PhotoEnlargeOverlay').style.display='none'" style="position:absolute;top:16px;right:16px;background:none;border:none;color:#fff;font-size:24px;cursor:pointer;">✕</button>
     <img id="page06PhotoEnlargeImg" src="" style="max-width:90vw;max-height:80vh;object-fit:contain;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,0.5);">
@@ -1318,10 +1356,13 @@
   <div class="modal-mask" id="modalMilestone">
     <div class="modal" style="max-width:820px;">
       <div class="modal-header">
-        <div class="modal-title">◈ 重要节点编辑</div>
+        <div class="modal-title">◈ 重要节点编辑 <span style="font-size:11px;color:#94a3b8;font-weight:400;margin-left:6px;">→ 周报 04 重要节点</span></div>
         <button class="modal-close" onclick="closeModal('modalMilestone')">✕</button>
       </div>
       <div class="modal-body" id="milestoneEditorBody" style="max-height:500px;overflow:auto;position:relative;">
+        <div style="margin-bottom:10px;padding:6px 10px;background:#fffbeb;border-left:3px solid #f59e0b;border-radius:3px;font-size:11px;color:#78350f;">
+          💡 此处编辑的专业×月份节点，作为 <strong>周报 04 重要节点</strong> 甘特表格数据源
+        </div>
         <div id="cellZoomEditor" style="display:none;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;border:2px solid #3b82f6;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,0.3);z-index:100;width:400px;">
           <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:#3b82f6;color:#fff;font-size:12px;border-radius:6px 6px 0 0;">
             <span id="cellZoomLabel">编辑内容</span>
