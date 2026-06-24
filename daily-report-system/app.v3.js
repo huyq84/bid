@@ -1165,6 +1165,9 @@ function openEventDetail(eventId) {
     </div>
   `;
   document.getElementById('eventDetailConfirmBtn').textContent = event.status === 'draft' ? '✅ 确认事件' : '🔄 撤回确认';
+  // 已确认的事件，隐藏编辑按钮
+  const editBtn = document.getElementById('eventDetailEditBtn');
+  if (editBtn) editBtn.style.display = event.status === 'confirmed' ? 'none' : '';
   showModal('modalEventDetail');
 }
 
@@ -1223,13 +1226,6 @@ function openEventEdit() {
     el.style.display = allowed.includes(event.type) ? '' : 'none';
   });
   
-  // 已确认的事件，保存按钮置灰
-  if (event.status === 'confirmed') {
-    const saveBtn = modal.querySelector('.modal-footer .btn-primary');
-    if (saveBtn) saveBtn.disabled = true;
-    saveBtn.title = '已确认，不可编辑';
-  }
-
   closeModal('modalEventDetail');
   showModal('modalEventEdit');
 }
@@ -1497,12 +1493,6 @@ window.addEditTradeRow = function() {
 function saveEventEdit() {
   const event = _findEvent(selectedEventId);
   if (!event) return;
-
-  // 已确认事件不可编辑
-  if (event.status === 'confirmed') {
-    showToast('已确认事件不可编辑', 'warning');
-    return;
-  }
 
   const type = document.getElementById('edit-type').value;
   const date = document.getElementById('edit-date').value;
@@ -2299,8 +2289,10 @@ function openDailyPlanForm() {
   document.getElementById('dp-start-date').value = today;
   document.getElementById('dp-end-date').value = today;
   
-  // 清空其他字段
-  document.getElementById('dp-event-type').value = 'progress';
+  // 恢复上次使用的事件类型（否则默认 progress）
+  let lastType = 'progress';
+  try { lastType = localStorage.getItem('dp_last_event_type') || 'progress'; } catch(e) {}
+  document.getElementById('dp-event-type').value = lastType;
   document.getElementById('dp-status').value = 'active';
   document.getElementById('dp-building-no').value = '';
   document.getElementById('dp-floor-no').value = '';
@@ -2375,6 +2367,8 @@ function filterPlanFormByType() {
   if (sectionTitle) {
     sectionTitle.textContent = isDrawing ? '图纸深化' : '工序信息';
   }
+  // 持久化事件类型选择
+  try { localStorage.setItem('dp_last_event_type', type); } catch(e) {}
 }
 
 // 日报手动录入表单字段过滤（与 filterPlanFormByType 平行）
@@ -2395,6 +2389,8 @@ function filterManualFormByType() {
       });
     }
   });
+  // 持久化事件类型选择
+  try { localStorage.setItem('m_last_event_type', type); } catch(e) {}
 }
 
 function addLaborRow() {
@@ -2820,12 +2816,23 @@ function initCustomTypes() {
   try {
     const saved = JSON.parse(localStorage.getItem('custom_event_types') || '{}');
     Object.entries(saved).forEach(([id, meta]) => {
+      // 跳过特殊标记（防复活）
+      if (id === '__deleted__') return;
       // 跳过预置 ID（防止用户清空预置后被旧数据复活）
       if (M.TYPE_META[id]) {
         // 预置类型：合并 label/color/icon 但保留 custom=false
         customTypes[id] = { ...customTypes[id], ...meta, custom: false, id };
       } else {
         customTypes[id] = { ...meta, custom: true, id };
+      }
+    });
+  } catch (e) { /* ignore */ }
+  // 加载被删除的类型记录
+  try {
+    const deleted = JSON.parse(localStorage.getItem('deleted_event_types') || '[]');
+    deleted.forEach(id => {
+      if (customTypes[id] && M.TYPE_META[id]) {
+        delete customTypes[id];
       }
     });
   } catch (e) { /* ignore */ }
@@ -2847,7 +2854,16 @@ function saveCustomTypes() {
         }
       }
     });
+    // 记录被删除的预置类型（用户手动删除的）
+    const deleted = JSON.parse(localStorage.getItem('deleted_event_types') || '[]');
+    // 找出已被删除但在 deleted 中还有记录的预置类型
+    const stillDeleted = deleted.filter(id => !customTypes[id] && M.TYPE_META[id]);
+    if (stillDeleted.length > 0) {
+      toSave.__deleted__ = stillDeleted;
+    }
     localStorage.setItem('custom_event_types', JSON.stringify(toSave));
+    // 同步更新 deleted 记录
+    localStorage.setItem('deleted_event_types', JSON.stringify(stillDeleted));
   } catch (e) { /* ignore */ }
 }
 
@@ -3157,6 +3173,16 @@ async function removeType(id) {
   }
   if (!confirmed) return;
   delete customTypes[id];
+  // 如果是预置类型，记录到 deleted_event_types 中
+  if (M.TYPE_META[id]) {
+    try {
+      const deleted = JSON.parse(localStorage.getItem('deleted_event_types') || '[]');
+      if (!deleted.includes(id)) {
+        deleted.push(id);
+        localStorage.setItem('deleted_event_types', JSON.stringify(deleted));
+      }
+    } catch (e) { /* ignore */ }
+  }
   saveCustomTypes();
   // 同步后端
   fetch('http://localhost:3010/api/event-types/' + encodeURIComponent(id), { method: 'DELETE' })
@@ -4249,6 +4275,9 @@ function openUnifiedInput(mode = 'manual', planId) {
 
   document.getElementById('m-date').value = defaultDate;
   document.getElementById('m-time').value = nowStr;
+  // 恢复上次使用的事件类型（否则默认 progress）
+  let lastType = 'progress';
+  try { lastType = localStorage.getItem('m_last_event_type') || 'progress'; } catch(e) {}
   // 如果指定了 planId，从计划推断事件类型
   if (planId) {
     const projectPlans = (M.PLANS && M.PLANS[currentProjectId]) || [];
@@ -4256,10 +4285,10 @@ function openUnifiedInput(mode = 'manual', planId) {
     if (plan && plan.type) {
       document.getElementById('m-type').value = plan.type;
     } else {
-      document.getElementById('m-type').value = 'progress';
+      document.getElementById('m-type').value = lastType;
     }
   } else {
-    document.getElementById('m-type').value = 'progress';
+    document.getElementById('m-type').value = lastType;
   }
   document.getElementById('m-note').value = '';
   if (document.getElementById('m-building-no')) document.getElementById('m-building-no').value = '';
