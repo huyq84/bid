@@ -17,11 +17,12 @@ import { MinMaxClient } from './llm-client.js';
 import { query } from './db.js';
 import { mockParseVoice, mockParsePhoto, mockAggregateWeekly, mockOptimizeText } from './mock-fallback.js';
 import router from './routes.js';
-import { createWsServer, broadcastInspection } from './ws-server.js';
+import { createWsServer, broadcastInspection, broadcastRefresh } from './ws-server.js';
 import os from 'os';
 import { buildChatContext } from './chat-context.js';
 import { TOOLS, executeTool, getToolDescriptions } from './llm-tools.js';
 import { createMemory, recordQuery, recordAction, recordPreference } from './chat-memory.js';
+import { runReactLoop } from './react-engine.js';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 
@@ -120,7 +121,7 @@ app.post('/api/llm/test', async (req, res) => {
       model: model,
       override: {
         baseUrl: baseUrl || undefined,
-        apiKey: apiKey || undefined,
+        apiKey: LLM_CONFIG.apiKey || undefined,
         protocol: protocol || undefined
       }
     });
@@ -223,7 +224,7 @@ const server = http.createServer(app);
 const wss = createWsServer(server);
 
 // ============================================================
-// 聊天主端点 — ReAct 循环 + 工具调用
+// 聊天主端点 — 增强版 ReAct 引擎
 // ============================================================
 const MAX_REACT_ITERATIONS = 15;
 
@@ -234,7 +235,6 @@ app.post('/api/chat', async (req, res) => {
   const start = Date.now();
   const pid = projectId || 'baicaoyuan';
   const d = date || new Date().toISOString().slice(0, 10);
-  // 客户端可以临时指定 model（来自设置页切换的自定义模型）；不传则用 .env 默认
   const chatModel = (model && String(model).trim()) || LLM_CONFIG.model;
   const overrideBaseUrl = (baseUrl && String(baseUrl).trim()) || null;
   const overrideApiKey = (apiKey && String(apiKey).trim()) || null;
@@ -244,10 +244,9 @@ app.post('/api/chat', async (req, res) => {
   }
 
   try {
-    // 1. 构建上下文（本地模型上下文窗口小，限制数据量）
+    // 1. 构建上下文
     const ctx = await buildChatContext(pid, d);
     if (overrideProtocol === 'openai') {
-      // 截断事件，只保留最近 5 条，避免本地小模型 context 溢出
       if (ctx.today?.events?.length > 5) ctx.today.events = ctx.today.events.slice(-5);
       if (ctx.today?.plans?.length > 5) ctx.today.plans = ctx.today.plans.slice(-5);
     }
@@ -263,8 +262,8 @@ ${toolDescs}
 ${ctx.contextText || '暂无上下文数据'}
 
 ## 回复规则
-1. 查询类请求：先调用查询工具（queryEvents/queryPlans/queryIssues/getStats/comparePlansVsActuals/queryConstructionData/queryProjects），然后基于结果生成自然语言回复。
-2. 录入类请求：直接调用写入工具（createEvent/updateEvent/closeIssue/createPlan/createAttendance），无需先查询。
+1. 查询类请求：先调用查询工具，然后基于结果生成自然语言回复。
+2. 录入类请求：直接调用写入工具，无需先查询。
 3. 闲聊/咨询类请求：直接回复，不调用工具。
 4. 写入操作：默认自动执行（除非用户明确要求先 dryRun 预览）。
 5. 回复用中文，简洁专业。
@@ -287,101 +286,30 @@ ${ctx.contextText || '暂无上下文数据'}
     }
     messages.push({ role: 'user', content: message });
 
-    // 4. ReAct 循环
-    let iterations = 0;
-    let reply = '';
-    const actions = [];
-    const results = [];
-    let pendingActions = [];
-    const memory = createMemory();
-    let currentMessages = [...messages];
-
-    while (iterations < MAX_REACT_ITERATIONS) {
-      iterations++;
-
-      // 调用 LLM
-      const rawReply = await llm.chat({
-        system: systemPrompt,
-        messages: currentMessages,
-        maxTokens: 4096,
-        temperature: 0.3,
-        model: chatModel,
-        override: {
-          baseUrl: overrideBaseUrl || undefined,
-          apiKey: overrideApiKey || undefined,
-          protocol: overrideProtocol || undefined
-        }
-      });
-
-      // 解析工具调用
-      const toolMatch = rawReply.match(/\[TOOL_USE:name=(\w+),params=(\{[\s\S]*?\})\]/);
-
-      if (toolMatch) {
-        const toolName = toolMatch[1];
-        const toolParams = JSON.parse(toolMatch[2]);
-
-        // 记录查询历史
-        if (toolName.startsWith('query') || toolName === 'getStats' || toolName === 'comparePlansVsActuals') {
-          recordQuery(memory, toolName, toolParams, 0);
-        }
-
-        try {
-          const toolResult = await executeTool(toolName, toolParams, {
-            projectId: pid,
-            date: d,
-            permLevel: permLevel || 'allow'
-          });
-
-          // 记录动作历史
-          if (toolName.startsWith('create') || toolName.startsWith('update') || toolName.startsWith('close') || toolName.startsWith('delete')) {
-            recordAction(memory, toolName, toolParams.id || toolParams.eventId || 'unknown');
-          }
-
-          const resultText = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult, null, 2);
-
-          // 如果是写入工具，记录结果
-          if (!toolName.startsWith('query') && toolName !== 'getStats' && toolName !== 'comparePlansVsActuals' && toolName !== 'triggerInspection' && toolName !== 'queryProjects') {
-            actions.push({ type: toolName, data: toolParams });
-            results.push({ ok: true, message: resultText.slice(0, 200) });
-          }
-
-          // 回灌工具结果（只喂原始结果，不加 [TOOL_RESULT] 包装，防止 LLM 回显）
-          currentMessages.push({
-            role: 'assistant',
-            content: rawReply
-          });
-          currentMessages.push({
-            role: 'user',
-            content: `工具执行结果 (${toolName}):\n${resultText}`
-          });
-
-        } catch (e) {
-          console.warn(`[chat] 工具执行失败: ${toolName}`, e.message);
-          currentMessages.push({
-            role: 'assistant',
-            content: rawReply
-          });
-          currentMessages.push({
-            role: 'user',
-            content: `工具执行出错 (${toolName}): ${e.message}`
-          });
-        }
-      } else {
-        // 没有工具调用，回复结束
-        reply = rawReply;
-        break;
+    // 4. 使用增强版 ReAct 引擎（支持嵌套 JSON / 多工具 / 上下文压缩 / 死循环检测）
+    const engineResult = await runReactLoop({
+      llm,
+      systemPrompt,
+      messages,
+      maxIterations: MAX_REACT_ITERATIONS,
+      chatModel,
+      override: {
+        baseUrl: overrideBaseUrl || undefined,
+        apiKey: overrideApiKey || undefined,
+        protocol: overrideProtocol || undefined
+      },
+      ctx: {
+        projectId: pid,
+        date: d,
+        permLevel: permLevel || 'allow'
       }
-    }
-
-    if (!reply) {
-      reply = '抱歉，我暂时无法回答这个问题。';
-    }
+    });
 
     // 5. 保存对话到数据库
     if (sessionId) {
       try {
         await query('INSERT INTO dr_chat_messages (id, session_id, role, content) VALUES (gen_random_uuid(), $1, $2, $3)', [sessionId, 'user', message]);
-        await query('INSERT INTO dr_chat_messages (id, session_id, role, content) VALUES (gen_random_uuid(), $1, $2, $3)', [sessionId, 'assistant', reply]);
+        await query('INSERT INTO dr_chat_messages (id, session_id, role, content) VALUES (gen_random_uuid(), $1, $2, $3)', [sessionId, 'assistant', engineResult.reply]);
         await query('UPDATE dr_chat_sessions SET updated_at = NOW() WHERE id = $1', [sessionId]);
       } catch (e) {
         console.warn('[chat] 保存消息失败:', e.message);
@@ -389,14 +317,15 @@ ${ctx.contextText || '暂无上下文数据'}
     }
 
     res.json({
-      reply,
+      reply: engineResult.reply,
       source: 'llm',
       latencyMs: Date.now() - start,
-      iterations,
-      actions,
-      results,
-      pendingActions,
-      model: chatModel
+      iterations: engineResult.iterations,
+      actions: engineResult.actions,
+      results: engineResult.results,
+      pendingActions: engineResult.pendingActions,
+      model: chatModel,
+      stopped: engineResult.stopped
     });
 
   } catch (e) {
@@ -414,13 +343,57 @@ ${ctx.contextText || '暂无上下文数据'}
 // 聊天辅助端点
 // ============================================================
 
-app.post('/api/chat/authorize', (req, res) => {
-  const { pendingId } = req.body || {};
-  res.json({ ok: true, action: { type: 'authorized' }, result: { message: '操作已授权' } });
+/**
+ * 授权端点 — 真正执行之前需要授权的敏感操作
+ * 前端在用户点击"确认"后调用此接口，携带 pendingActions 中的 action 数据
+ */
+app.post('/api/chat/authorize', async (req, res) => {
+  const { pendingActions, sessionId, projectId, date } = req.body || {};
+
+  if (!pendingActions || !Array.isArray(pendingActions) || pendingActions.length === 0) {
+    return res.status(400).json({ ok: false, error: '缺少 pendingActions' });
+  }
+
+  const pid = projectId || 'baicaoyuan';
+  const d = date || new Date().toISOString().slice(0, 10);
+  const executed = [];
+  const failed = [];
+
+  for (const action of pendingActions) {
+    try {
+      const toolResult = await executeTool(action.type, action.data, {
+        projectId: pid,
+        date: d,
+        permLevel: 'allow'
+      });
+      executed.push({ type: action.type, result: toolResult });
+      console.log(`[authorize] 已执行: ${action.type}`);
+    } catch (e) {
+      failed.push({ type: action.type, error: e.message });
+      console.warn(`[authorize] 执行失败: ${action.type}: ${e.message}`);
+    }
+  }
+
+  // 如果有成功的操作，通知前端刷新页面
+  if (executed.length > 0) {
+    broadcastRefresh(wss, pid);
+  }
+
+  res.json({
+    ok: true,
+    executed,
+    failed,
+    message: `已授权执行 ${executed.length} 个操作${failed.length > 0 ? `，${failed.length} 个失败` : ''}`
+  });
 });
 
+/**
+ * 拒绝端点 — 用户拒绝某个 pending action
+ */
 app.post('/api/chat/reject', (req, res) => {
-  res.json({ ok: true });
+  const { pendingIds } = req.body || {};
+  console.log(`[reject] 用户拒绝操作`, pendingIds);
+  res.json({ ok: true, message: '操作已拒绝' });
 });
 
 app.post('/api/chat/inspect', (req, res) => {

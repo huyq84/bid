@@ -10419,8 +10419,8 @@ async function renameSession(sessionId, name) {
 }
 
 // ------ 会话切换 ------
-async function switchSession(sessionId) {
-  if (_activeSessionId === sessionId) return;
+async function switchSession(sessionId, _forceReload) {
+  if (!_forceReload && _activeSessionId === sessionId) return;
   if (!sessionId) return;
   _activeSessionId = sessionId;
   document.getElementById('aiChatSessionSelect').value = sessionId;
@@ -10578,13 +10578,12 @@ function toggleChat() {
     // 加载会话
     loadSessions(pid).then(() => {
       populateSessionSelect(pid);
-      if (!_activeSessionId || !_sessionsByProject[pid]?.some(s => s.id === _activeSessionId)) {
-        const sessions = _sessionsByProject[pid] || [];
-        if (sessions.length > 0) {
-          switchSession(sessions[0].id);
-        } else {
-          createNewSession(pid, '默认对话');
-        }
+      const sessions = _sessionsByProject[pid] || [];
+      if (sessions.length > 0) {
+        // 总是强制刷新当前会话的消息（确保新消息从 DB 同步过来）
+        switchSession(_activeSessionId || sessions[0].id, true);
+      } else {
+        createNewSession(pid, '默认对话');
       }
     });
     setTimeout(() => { document.getElementById('aiChatInput')?.focus(); }, 400);
@@ -10621,7 +10620,6 @@ async function sendChatMessage() {
       appendChatMessage('user', text, false, null);
       if (!_messageCache[_activeSessionId]) _messageCache[_activeSessionId] = [];
       _messageCache[_activeSessionId].push({ id: null, role: 'user', content: text });
-      saveMsgToDB(_activeSessionId, 'user', text);
       cards.forEach(btn => authorizeAction(btn));
       return;
     }
@@ -10679,22 +10677,18 @@ async function sendChatMessage() {
     if (text) combinedText = text + '\n\n[照片内容]\n' + allTexts;
     else combinedText = '照片记录：\n' + allTexts;
 
-    // 保存用户消息（含照片描述）
-    var savedId = await saveMsgToDB(_activeSessionId, 'user', combinedText);
+    // 用组合文本调用 LLM（后端会统一保存 user + assistant 消息到 DB）
     if (!_messageCache[_activeSessionId]) _messageCache[_activeSessionId] = [];
-    _messageCache[_activeSessionId].push({ id: savedId, role: 'user', content: combinedText });
-
-    // 用组合文本调用 LLM
+    _messageCache[_activeSessionId].push({ id: null, role: 'user', content: combinedText });
     showChatTyping();
     _callChatLLM(combinedText);
     return;
   }
 
-  // 1. 保存并显示用户消息
-  const txtSavedId = await saveMsgToDB(_activeSessionId, 'user', text);
+  // 1. 显示用户消息（后端会统一保存 user + assistant 消息到 DB）
   if (!_messageCache[_activeSessionId]) _messageCache[_activeSessionId] = [];
-  _messageCache[_activeSessionId].push({ id: txtSavedId, role: 'user', content: text });
-  appendChatMessage('user', text, false, txtSavedId);
+  _messageCache[_activeSessionId].push({ id: null, role: 'user', content: text });
+  appendChatMessage('user', text, false, null);
 
   showChatTyping();
   _callChatLLM(text);
@@ -10765,14 +10759,13 @@ async function _callChatLLM(text) {
     hideChatTyping();
 
     if (data.reply) {
-      const savedId = await saveMsgToDB(_activeSessionId, 'assistant', data.reply);
-      _messageCache[_activeSessionId].push({ id: savedId, role: 'assistant', content: data.reply });
+      // 后端已统一保存 assistant 消息到 DB，前端只更新内存 cache + 渲染
+      _messageCache[_activeSessionId].push({ id: null, role: 'assistant', content: data.reply });
       
       // === 流式加载特效 ===
       const container = document.getElementById('aiChatMessages');
       if (container) {
         const div = document.createElement('div');
-        if (savedId) div.setAttribute('data-msg-id', savedId);
         div.setAttribute('data-msg-content', data.reply);
         div.className = 'ai-message ai-message-system';
         div.innerHTML = '<div class="ai-message-avatar"><img src="assets/avatar-construction-girl.png" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></div><div class="ai-message-bubble"></div>' +
@@ -10856,98 +10849,60 @@ function appendPendingActionCard(pa) {
     '  <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;color:#fbbf24;font-weight:600;font-size:13px;">🔒 需要授权</div>' +
     '  <div style="font-size:13px;color:#e2e8f0;margin-bottom:8px;">' + _escapeHtml(pa.summary || '操作') + '</div>' +
     '  <div style="display:flex;gap:6px;">' +
-    '    <button class="ai-auth-btn ai-auth-btn-confirm" data-paid="' + pa.id + '" onclick="authorizeAction(this)">✅ 授权执行</button>' +
-    '    <button class="ai-auth-btn ai-auth-btn-cancel" data-paid="' + pa.id + '" onclick="rejectAction(this)">✕ 取消</button>' +
+    '    <button class="ai-auth-btn ai-auth-btn-confirm" data-pa-type="' + _escapeHtml(pa.type) + '" data-pa-data="' + _escapeHtml(JSON.stringify(pa.data || {})) + '" onclick="authorizeAction(this)">✅ 授权执行</button>' +
+    '    <button class="ai-auth-btn ai-auth-btn-cancel" onclick="rejectAction(this)">✕ 取消</button>' +
     '  </div>' +
     '</div>';
   container.appendChild(div);
   scrollChatToBottom();
 }
 
-// 授权执行
+// 授权执行 — 真正调用后端执行 pending action
 async function authorizeAction(btn) {
-  const paid = btn?.getAttribute('data-paid');
-  if (!paid) return;
+  const type = btn?.getAttribute('data-pa-type');
+  const dataStr = btn?.getAttribute('data-pa-data');
+  if (!type) return;
   btn.disabled = true; btn.textContent = '⏳ 执行中...';
   try {
+    const actionData = dataStr ? JSON.parse(dataStr) : {};
     const res = await fetch('/api/chat/authorize', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pendingId: paid })
+      body: JSON.stringify({
+        pendingActions: [{ type, data: actionData }]
+      })
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     // 替换卡片为结果
     const card = btn.closest('.ai-message');
     if (card) {
-      const msg = data.result?.message || '✅ 已执行';
-      card.querySelector('.ai-message-bubble').innerHTML =
-        '<div style="color:#4ade80;font-weight:600;font-size:13px;">✅ 已授权执行</div>' +
-        '<div style="font-size:13px;color:#e2e8f0;margin-top:4px;">' + _escapeHtml(msg) + '</div>';
+      if (data.executed && data.executed.length > 0) {
+        const exec = data.executed[0];
+        const msg = exec.result?.message || '✅ 已执行';
+        card.querySelector('.ai-message-bubble').innerHTML =
+          '<div style="color:#4ade80;font-weight:600;font-size:13px;">✅ 已授权执行</div>' +
+          '<div style="font-size:13px;color:#e2e8f0;margin-top:4px;">' + _escapeHtml(msg) + '</div>';
+      } else if (data.failed && data.failed.length > 0) {
+        const fail = data.failed[0];
+        card.querySelector('.ai-message-bubble').innerHTML =
+          '<div style="color:#f87171;font-weight:600;font-size:13px;">❌ 执行失败</div>' +
+          '<div style="font-size:13px;color:#e2e8f0;margin-top:4px;">' + _escapeHtml(fail.error) + '</div>';
+      }
     }
     // 刷新数据
-    // 直接从本地 M.EVENTS/M.ISSUES 同步，避免 loadDataFromAPI 的保护逻辑或时序问题
-    const act = data.action || {};
-    if (act.type === 'deleteEvent' && act.data?.eventId) {
-      _ghostEventIds.add(act.data.eventId);
-      _persistGhostIds();
-      const filtered = (M.EVENTS || []).filter(e => e.id !== act.data.eventId);
-      M.EVENTS.length = 0; M.EVENTS.push(...filtered);
-      renderFilteredEvents(); renderStats(); updateCalendar(); renderDailyPlanCard();
-      await _refreshAfterChat(['deleteEvent']);
-    } else if (act.type === 'batchDelete') {
-      // 收集要移除的 ID：先用原 action 的显式 ids，否则用后端返回的 deletedIds，否则用全部条件
-      const idsToRemove = new Set();
-      if (Array.isArray(act.data?.ids)) act.data.ids.forEach(id => idsToRemove.add(id));
-      if (Array.isArray(data.result?.deletedIds)) data.result.deletedIds.forEach(id => idsToRemove.add(id));
-      if (idsToRemove.size > 0) {
-        idsToRemove.forEach(id => _ghostEventIds.add(id));
-        _persistGhostIds();
-        const filtered = (M.EVENTS || []).filter(e => !idsToRemove.has(e.id));
-        M.EVENTS.length = 0; M.EVENTS.push(...filtered);
-        renderFilteredEvents(); renderStats(); updateCalendar(); renderDailyPlanCard();
-      }
-      await _refreshAfterChat(['batchDelete']);
-    } else if ((act.type === 'deleteIssue' || act.type === 'closeIssue') && act.data?.issueId) {
-      M.ISSUES = (M.ISSUES || []).filter(i => i.id !== act.data.issueId);
-      renderIssues();
-      await _refreshAfterChat([act.type]);
-    } else if (act.type === 'updateEvent' && act.data?.eventId) {
-      const ev = (M.EVENTS || []).find(e => e.id === act.data.eventId);
-      if (ev) {
-        if (act.data.taskName) ev.payload.taskName = act.data.taskName;
-        if (act.data.owner) ev.payload.owner = act.data.owner;
-        if (act.data.progress) ev.payload.progress = act.data.progress;
-        if (act.data.headcount) ev.payload.headcount = act.data.headcount;
-        if (act.data.note) ev.payload.description = act.data.note;
-        if (act.data.type) ev.type = act.data.type;
-        if (act.data.status) ev.status = act.data.status;
-      }
-      await _refreshAfterChat([act.type]);
-    } else {
-      await _refreshAfterChat([act.type || 'updateEvent']);
-    }
+    _refreshAfterChat([type]);
   } catch (e) {
     const card = btn.closest('.ai-message');
     if (card) {
-      const bubble = card.querySelector('.ai-message-bubble');
-      if (bubble) bubble.innerHTML += '<div style="color:#ef4444;font-size:12px;margin-top:4px;">❌ 授权失败: ' + _escapeHtml(e.message) + '</div>';
+      card.querySelector('.ai-message-bubble').innerHTML =
+        '<div style="color:#f87171;font-size:13px;">❌ 授权失败: ' + _escapeHtml(e.message) + '</div>';
     }
-    btn.disabled = false; btn.textContent = '✅ 重试';
   }
 }
 
 // 取消
 async function rejectAction(btn) {
-  const paid = btn?.getAttribute('data-paid');
-  if (!paid) return;
-  try {
-    await fetch('/api/chat/reject', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pendingId: paid })
-    });
-  } catch {}
   const card = btn.closest('.ai-message');
   if (card) {
     card.querySelector('.ai-message-bubble').innerHTML =
@@ -10957,11 +10912,10 @@ async function rejectAction(btn) {
 
 // 离线 mock 回复 — 不模拟任何操作，仅提示连接失败
 async function _mockChatReplyLocal(text) {
-  const reply = '⚠️ 无法连接后端服务，请确认后端已启动（）。LLM 功能暂不可用。';
-  const savedId = await saveMsgToDB(_activeSessionId, 'assistant', reply);
+  const reply = '⚠️ 无法连接后端服务，请确认后端已启动。LLM 功能暂不可用。';
   if (!_messageCache[_activeSessionId]) _messageCache[_activeSessionId] = [];
-  _messageCache[_activeSessionId].push({ id: savedId, role: 'assistant', content: reply });
-  appendChatMessage('system', reply, false, savedId);
+  _messageCache[_activeSessionId].push({ id: null, role: 'assistant', content: reply });
+  appendChatMessage('system', reply, false, null);
 }
 
 // ------ 生命周期 ------
@@ -10972,11 +10926,10 @@ async function _mockChatReplyLocal(text) {
   // 预加载会话
   loadSessions(pid).then(function(sessions) {
     if (sessions && sessions.length > 0) {
-      // 先设置 activeSessionId，再加载消息
+      // 强制加载第一个会话的消息（避免 _activeSessionId 已等于 sessionId 导致 switchSession 提前返回）
       _activeSessionId = sessions[0].id;
       document.getElementById('aiChatSessionSelect').value = _activeSessionId;
-      // 加载第一个会话的消息
-      switchSession(_activeSessionId);
+      switchSession(_activeSessionId, true);
     }
   });
   // 聊天输入框粘贴图片支持

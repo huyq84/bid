@@ -71,3 +71,10 @@ export function broadcastInspection(wss) {
     message: '🔔 手动巡检提醒：请查看现场情况。'
   }]);
 }
+
+export function broadcastRefresh(wss, projectId) {
+  broadcast(wss, [{
+    projectId,
+    message: '✅ 数据已更新，请刷新页面。'
+  }]);
+}
