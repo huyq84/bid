@@ -40,7 +40,8 @@ const LLM_CONFIG = {
   model: process.env.MINIMAX_MODEL,
   maxTokens: parseInt(process.env.MINIMAX_MAX_TOKENS) || 4096,
   temperature: parseFloat(process.env.MINIMAX_TEMPERATURE) || 0.5,
-  groupId: process.env.MINIMAX_GROUP_ID
+  groupId: process.env.MINIMAX_GROUP_ID,
+  protocol: process.env.MINIMAX_PROTOCOL || 'anthropic'  // 'anthropic' | 'openai'
 };
 
 console.log('[启动] LLM 配置:');
@@ -106,6 +107,7 @@ app.get('/api/llm/config', (req, res) => {
 // 测试 LLM 连接
 app.post('/api/llm/test', async (req, res) => {
   const start = Date.now();
+  const { model, baseUrl, apiKey, protocol } = req.body;
   try {
     const reply = await llm.chat({
       system: '你是一个有用的助手。',
@@ -114,13 +116,19 @@ app.post('/api/llm/test', async (req, res) => {
         content: '请用一句话简单介绍你自己，控制在 30 字以内。'
       }],
       maxTokens: 100,
-      temperature: 0.5
+      temperature: 0.5,
+      model: model,
+      override: {
+        baseUrl: baseUrl || undefined,
+        apiKey: apiKey || undefined,
+        protocol: protocol || undefined
+      }
     });
     res.json({
       success: true,
       reply: reply,
       latencyMs: Date.now() - start,
-      model: LLM_CONFIG.model
+      model: model || LLM_CONFIG.model
     });
   } catch (e) {
     res.status(500).json({
@@ -220,16 +228,29 @@ const wss = createWsServer(server);
 const MAX_REACT_ITERATIONS = 15;
 
 app.post('/api/chat', async (req, res) => {
-  const { message, history, projectId, date, sessionId, permLevel } = req.body;
+  const { message, history, projectId, date, sessionId, permLevel, model, baseUrl, apiKey, protocol } = req.body;
   if (!message) return res.status(400).json({ error: 'message required' });
 
   const start = Date.now();
   const pid = projectId || 'baicaoyuan';
   const d = date || new Date().toISOString().slice(0, 10);
+  // 客户端可以临时指定 model（来自设置页切换的自定义模型）；不传则用 .env 默认
+  const chatModel = (model && String(model).trim()) || LLM_CONFIG.model;
+  const overrideBaseUrl = (baseUrl && String(baseUrl).trim()) || null;
+  const overrideApiKey = (apiKey && String(apiKey).trim()) || null;
+  const overrideProtocol = (protocol && String(protocol).trim()) || null;
+  if (chatModel !== LLM_CONFIG.model || overrideBaseUrl || overrideProtocol) {
+    console.log(`[chat] 使用临时覆盖: model=${chatModel} baseUrl=${overrideBaseUrl || LLM_CONFIG.baseUrl} protocol=${overrideProtocol || LLM_CONFIG.protocol || 'anthropic'}`);
+  }
 
   try {
-    // 1. 构建上下文
+    // 1. 构建上下文（本地模型上下文窗口小，限制数据量）
     const ctx = await buildChatContext(pid, d);
+    if (overrideProtocol === 'openai') {
+      // 截断事件，只保留最近 5 条，避免本地小模型 context 溢出
+      if (ctx.today?.events?.length > 5) ctx.today.events = ctx.today.events.slice(-5);
+      if (ctx.today?.plans?.length > 5) ctx.today.plans = ctx.today.plans.slice(-5);
+    }
 
     // 2. 构建系统提示
     const toolDescs = getToolDescriptions();
@@ -283,7 +304,13 @@ ${ctx.contextText || '暂无上下文数据'}
         system: systemPrompt,
         messages: currentMessages,
         maxTokens: 4096,
-        temperature: 0.3
+        temperature: 0.3,
+        model: chatModel,
+        override: {
+          baseUrl: overrideBaseUrl || undefined,
+          apiKey: overrideApiKey || undefined,
+          protocol: overrideProtocol || undefined
+        }
       });
 
       // 解析工具调用
@@ -368,7 +395,8 @@ ${ctx.contextText || '暂无上下文数据'}
       iterations,
       actions,
       results,
-      pendingActions
+      pendingActions,
+      model: chatModel
     });
 
   } catch (e) {

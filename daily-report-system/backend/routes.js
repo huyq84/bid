@@ -728,6 +728,80 @@ function getDefaultSettings() {
   };
 }
 
+// ==================== LLM 自定义模型设置 ====================
+// 存到 dr_settings 表的两个 key：
+//   custom_llm_models  →  Array<{id, name, baseUrl, apiKey, modelId, maxTokens, temperature, provider?}>
+//   active_custom_model →  string | ''（当前激活的自定义模型 id，空字符串表示用 .env 默认）
+
+// 读全部 LLM 模型设置（自定义列表 + 当前激活 id）
+router.get('/api/llm/custom-models', async (req, res) => {
+  try {
+    const result = await query(
+      "SELECT key, value FROM dr_settings WHERE key IN ('custom_llm_models', 'active_custom_model')"
+    );
+    console.log('[DEBUG llm/custom-models GET] rows:', JSON.stringify(result.rows));
+    const out = { models: [], activeId: '' };
+    result.rows.forEach(r => {
+      const v = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
+      console.log('[DEBUG] key=', r.key, 'value type=', typeof r.value, 'isArray=', Array.isArray(v), 'v=', JSON.stringify(v).slice(0, 100));
+      if (r.key === 'custom_llm_models') out.models = Array.isArray(v) ? v : [];
+      if (r.key === 'active_custom_model') out.activeId = v || '';
+    });
+    res.json(out);
+  } catch (e) {
+    // DB 不可用时返回空（前端会回退到 localStorage）
+    res.json({ models: [], activeId: '' });
+  }
+});
+
+// 整体覆盖保存自定义模型列表（前端一次提交整个数组，简化同步）
+router.post('/api/llm/custom-models', async (req, res) => {
+  try {
+    const models = Array.isArray(req.body?.models) ? req.body.models : [];
+    // 浅校验：每条必须有 name / baseUrl / modelId
+    for (const m of models) {
+      if (!m || typeof m !== 'object') throw new Error('模型项格式错误');
+      if (!m.name || !m.baseUrl || !m.modelId) {
+        throw new Error(`模型「${m.name || '?'}」缺少必填字段（name/baseUrl/modelId）`);
+      }
+    }
+    await query(
+      `INSERT INTO dr_settings (key, value, updated_at) VALUES ('custom_llm_models', $1::jsonb, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $1::jsonb, updated_at = NOW()`,
+      [JSON.stringify(models)]
+    );
+    res.json({ ok: true, count: models.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 设置/清除当前激活的自定义模型（id 为空字符串或 null 表示回退到 .env 默认）
+router.post('/api/llm/active-model', async (req, res) => {
+  try {
+    const activeId = (req.body?.activeId || '').toString();
+    // 校验：必须是已存在模型的 id（除非是空字符串）
+    if (activeId) {
+      const r = await query(
+        "SELECT value FROM dr_settings WHERE key = 'custom_llm_models'"
+      );
+      const v = r.rows[0] ? (typeof r.rows[0].value === 'string' ? JSON.parse(r.rows[0].value) : r.rows[0].value) : [];
+      const models = Array.isArray(v) ? v : [];
+      if (!models.some(m => String(m.id) === String(activeId))) {
+        return res.status(400).json({ error: `activeId ${activeId} 不在自定义模型列表中` });
+      }
+    }
+    await query(
+      `INSERT INTO dr_settings (key, value, updated_at) VALUES ('active_custom_model', $1::jsonb, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $1::jsonb, updated_at = NOW()`,
+      [JSON.stringify(activeId)]
+    );
+    res.json({ ok: true, activeId });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ==================== 事件类型 CRUD ====================
 router.get('/api/event-types', async (req, res) => {
   try {

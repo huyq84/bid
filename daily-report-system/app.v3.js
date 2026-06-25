@@ -17,7 +17,7 @@ function _persistGhostIds() {
 // 从后端 API 加载真实数据，失败时静默回退到 MockData
 async function loadDataFromAPI() {
   try {
-    const res = await fetch('http://localhost:3010/api/data/all');
+    const res = await fetch('/api/data/all');
     if (!res.ok) return;
     const data = await res.json();
     if (!data || !data.PROJECTS) return;
@@ -171,7 +171,7 @@ async function loadDataFromAPI() {
       // 2. 异步同步到后端 API
       for (const ev of M.EVENTS) {
         try {
-          await fetch('http://localhost:3010/api/events', {
+          await fetch('/api/events', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(ev)
           });
@@ -189,7 +189,7 @@ async function loadDataFromAPI() {
           const extra = {};
           for (const k of Object.keys(p)) { if (!STD_FIELDS.has(k)) extra[k] = p[k]; }
           try {
-            await fetch('http://localhost:3010/api/plans', {
+            await fetch('/api/plans', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 id: p.id,
@@ -219,7 +219,7 @@ async function loadDataFromAPI() {
       try { localStorage.setItem('daily_issues', JSON.stringify(M.ISSUES)); } catch(e) { console.warn('[localStorage] 写协调失败:', e.message); }
       for (const iss of M.ISSUES) {
         try {
-          await fetch('http://localhost:3010/api/issues', {
+          await fetch('/api/issues', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               id: iss.id,
@@ -1017,7 +1017,7 @@ async function deleteEvent(eventId) {
   // 当日事件才走后端；历史事件只走本地 override（API 不一定能删历史）
   if (removed.from === 'today') {
     try {
-      await fetch('http://localhost:3010/api/events/' + eventId, { method: 'DELETE' });
+      await fetch('/api/events/' + eventId, { method: 'DELETE' });
     } catch { /* 后端不可达时只删本地 */ }
   } else {
     // 历史事件：记录到 pendingDeletes，下次拉取时与丢失的 id 比对才彻底清
@@ -1035,7 +1035,7 @@ async function deleteEvent(eventId) {
     if (dd) {
       M.DRAWING_DEEPENINGS = M.DRAWING_DEEPENINGS.filter(d => d.eventId !== eventId);
       try {
-        await fetch('http://localhost:3010/api/drawing-deepenings/' + encodeURIComponent(dd.id), { method: 'DELETE' });
+        await fetch('/api/drawing-deepenings/' + encodeURIComponent(dd.id), { method: 'DELETE' });
       } catch (err) { console.warn('[图纸深化] 删除后端失败:', err); }
     }
   }
@@ -2944,7 +2944,7 @@ function syncTypesToBackend() {
   }));
   // 批量 POST（upsert）
   types.forEach(t => {
-    fetch('http://localhost:3010/api/event-types', {
+    fetch('/api/event-types', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(t),
@@ -3020,7 +3020,7 @@ async function addCustomArea(selectId) {
   saveCustomAreas();
   renderAreaOptions(selectId, newId);
   // 同步到后端
-  fetch('http://localhost:3010/api/areas', {
+  fetch('/api/areas', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ projectId: currentProjectId, id: newId, name: name.trim() })
   }).catch(err => console.warn('[自定义区域] 保存失败:', err));
@@ -3048,7 +3048,7 @@ async function removeArea(areaId) {
   customAreas[currentProjectId] = customAreas[currentProjectId].filter(a => a.id !== areaId);
   saveCustomAreas();
   // 同步删除后端
-  fetch('http://localhost:3010/api/areas/' + encodeURIComponent(currentProjectId) + '/' + encodeURIComponent(areaId), { method: 'DELETE' })
+  fetch('/api/areas/' + encodeURIComponent(currentProjectId) + '/' + encodeURIComponent(areaId), { method: 'DELETE' })
     .catch(err => console.warn('[自定义区域] 删除失败:', err));
   refreshAreaSelectors();
   renderAreasList();  // 刷新区域管理弹窗列表
@@ -3274,7 +3274,7 @@ async function removeType(id) {
   } catch (e) { /* ignore */ }
   saveCustomTypes();
   // 同步到后端 DB
-  fetch('http://localhost:3010/api/event-types/' + encodeURIComponent(id), { method: 'DELETE' })
+  fetch('/api/event-types/' + encodeURIComponent(id), { method: 'DELETE' })
     .then(r => r.json()).then(data => {
       if (data.hidden) {
         showToast(`已隐藏「${t.label}」`, 'info');
@@ -3294,7 +3294,7 @@ async function restoreType(id) {
   const confirmed = await showConfirm(`确定恢复事件类型 "${t.label}"？\n\n恢复后该类型将重新出现在下拉列表中。`, '恢复事件类型', '🔄');
   if (!confirmed) return;
   // 调用后端取消 hidden
-  fetch('http://localhost:3010/api/event-types/' + encodeURIComponent(id), {
+  fetch('/api/event-types/' + encodeURIComponent(id), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ hidden: 0 }),
@@ -5760,7 +5760,7 @@ function saveUnifiedEvent(opts = {}) {
     if (exists) Object.assign(exists, record);
     else M.DRAWING_DEEPENINGS.push(record);
     // 同步到后端
-    fetch('http://localhost:3010/api/drawing-deepenings', {
+    fetch('/api/drawing-deepenings', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(record)
     }).catch(err => console.warn('[图纸深化] 保存失败:', err));
@@ -6529,7 +6529,7 @@ async function saveEccManualSummary() {
   };
   M.ECC_SUMMARIES[currentProjectId] = item;
   try {
-    await fetch('http://localhost:3010/api/ecc-summary', {
+    await fetch('/api/ecc-summary', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ projectId: currentProjectId, ...item })
     });
@@ -6706,7 +6706,7 @@ async function saveEccItem() {
   else M.ECC_ITEMS.unshift(item);
   // 同步到后端
   try {
-    const r = await fetch('http://localhost:3010/api/ecc-items', {
+    const r = await fetch('/api/ecc-items', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(item)
     });
@@ -6725,7 +6725,7 @@ async function deleteEccItem(id) {
   if (!M.ECC_ITEMS) M.ECC_ITEMS = [];
   M.ECC_ITEMS = M.ECC_ITEMS.filter(e => e.id !== id);
   try {
-    await fetch(`http://localhost:3010/api/ecc-items/${currentProjectId}/${id}`, { method: 'DELETE' });
+    await fetch(`/api/ecc-items/${currentProjectId}/${id}`, { method: 'DELETE' });
     showToast('已删除', 'success');
   } catch (e) {
     showToast('已从本地删除，后端同步失败：' + e.message, 'error');
@@ -6753,7 +6753,7 @@ async function openWeeklyReport() {
   
   let report = null;
   try {
-    const r = await fetch('http://localhost:3010/api/aggregate-weekly', {
+    const r = await fetch('/api/aggregate-weekly', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -8058,7 +8058,7 @@ async function renderStandardTradesList() {
   let trades = M.STANDARD_TRADES || [];
   if (trades.length === 0) {
     try {
-      const r = await fetch('http://localhost:3010/api/standard-trades');
+      const r = await fetch('/api/standard-trades');
       trades = await r.json();
       M.STANDARD_TRADES = trades;
     } catch (e) { console.warn('[标准工种] 拉取失败:', e); }
@@ -8219,7 +8219,7 @@ window.saveWeeklyLaborData = async function() {
     return;
   }
   try {
-    await fetch('http://localhost:3010/api/weekly-labor', {
+    await fetch('/api/weekly-labor', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ rows })
     });
@@ -8236,7 +8236,7 @@ window.addStandardTradeRow = async function() {
   const trades = M.STANDARD_TRADES || [];
   const newSort = (trades.length > 0 ? Math.max(...trades.map(t => t.sortOrder || 0)) : 0) + 1;
   try {
-    const r = await fetch('http://localhost:3010/api/standard-trades', {
+    const r = await fetch('/api/standard-trades', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ projectId: null, tradeName: '新工种', mapFrom: '', sortOrder: newSort })
     });
@@ -8254,7 +8254,7 @@ window.saveStandardTrade = async function(id) {
   const sortOrder = parseInt(row.querySelector('[data-field="sortOrder"]').value) || 0;
   if (!tradeName) { showToast('工种名称不能为空', 'error'); return; }
   try {
-    await fetch('http://localhost:3010/api/standard-trades', {
+    await fetch('/api/standard-trades', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, tradeName, mapFrom, sortOrder })
     });
@@ -8270,7 +8270,7 @@ window.deleteStandardTrade = async function(id) {
   const confirmed = await showConfirm('确定删除此工种？', '删除工种', '🗑️');
   if (!confirmed) return;
   try {
-    await fetch(`http://localhost:3010/api/standard-trades/${id}`, { method: 'DELETE' });
+    await fetch(`/api/standard-trades/${id}`, { method: 'DELETE' });
     M.STANDARD_TRADES = (M.STANDARD_TRADES || []).filter(t => t.id !== id);
     await renderStandardTradesList();
     showToast('已删除', 'success');
@@ -8875,7 +8875,8 @@ function showToast(message, type = 'info') {
 // ============================================================
 // LLM 集成（追加 - 不影响原有逻辑）
 // ============================================================
-const API_BASE = 'http://localhost:3010/api' ;
+// 局域网修复：用相对路径，由 frontend-server.js 反向代理到 3010
+const API_BASE = '/api';
 let lastSource = 'mock';
 let lastLatencyMs = 0;
 let backendOnline = false;
@@ -8906,7 +8907,7 @@ async function checkBackendHealth() {
     llmConfigured = false;
     dot.style.background = '#ef4444';
     label.textContent = '❌ 后端离线';
-    dot.title = '后端未启动（localhost:3010）';
+    dot.title = '后端未启动（检查 3010 端口，或前端 /api 代理是否正常）';
   }
 }
 
@@ -8985,6 +8986,66 @@ function hideAddCustomModelForm() {
   document.getElementById('cmTemperature').value = '0.5';
   document.querySelector('#addCustomModelForm .btn-primary').textContent = '添加模型';
 }
+// 把传入的 models 数组同步到 localStorage（cache）和后端（持久化）
+// 接受参数是为了避免「调用方修改了局部变量、_persist 从 localStorage 读到旧值」的不一致
+// 返回 Promise<{ok, error?}>
+async function _persistCustomModels(models) {
+  const list = Array.isArray(models) ? models : [];
+  // 1) 立即写 localStorage（保证离线时也有缓存，且下次 bootstrap 前 UI 能拿到最新值）
+  try { localStorage.setItem('customLLMModels', JSON.stringify(list)); } catch (_) {}
+  // 2) 同步到后端（失败时回退到 localStorage，下次启动从后端拉回）
+  try {
+    const r = await fetch('/api/llm/custom-models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ models: list })
+    });
+    if (!r.ok) {
+      const text = await r.text().catch(() => '');
+      throw new Error('HTTP ' + r.status + (text ? ' ' + text.slice(0, 200) : ''));
+    }
+    return { ok: true };
+  } catch (e) {
+    console.warn('[LLM设置] 同步自定义模型到后端失败:', e.message);
+    return { ok: false, error: e.message };
+  }
+}
+
+// 把当前激活的 customModelId 同步到 localStorage 和后端
+async function _persistActiveCustomModel(activeId) {
+  try { localStorage.setItem('activeCustomModel', activeId || ''); } catch (_) {}
+  try {
+    const r = await fetch('/api/llm/active-model', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ activeId: activeId || '' })
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return { ok: true };
+  } catch (e) {
+    console.warn('[LLM设置] 同步激活模型到后端失败:', e.message);
+    return { ok: false, error: e.message };
+  }
+}
+
+// 页面加载时调用：从后端拉最新的自定义模型列表和激活 id 覆盖 localStorage
+// 如果后端失败，保留 localStorage 不动
+async function _bootstrapCustomModelsFromBackend() {
+  try {
+    const r = await fetch('/api/llm/custom-models');
+    if (!r.ok) return;
+    const data = await r.json();
+    if (Array.isArray(data.models)) {
+      localStorage.setItem('customLLMModels', JSON.stringify(data.models));
+    }
+    if (typeof data.activeId === 'string' || typeof data.activeId === 'number') {
+      localStorage.setItem('activeCustomModel', String(data.activeId || ''));
+    }
+  } catch (e) {
+    console.warn('[LLM设置] 从后端加载自定义模型失败，使用本地缓存:', e.message);
+  }
+}
+
 function addCustomModel() {
   const name = document.getElementById('cmName').value.trim();
   const baseUrl = document.getElementById('cmBaseUrl').value.trim();
@@ -8992,30 +9053,38 @@ function addCustomModel() {
   const modelId = document.getElementById('cmModelId').value.trim();
   const maxTokens = parseInt(document.getElementById('cmMaxTokens').value) || 4096;
   const temperature = parseFloat(document.getElementById('cmTemperature').value) || 0.5;
+  const provider = document.getElementById('cmProvider').value;
+  const protocol = (provider === 'anthropic') ? 'anthropic' : 'openai';
   if (!name || !baseUrl || !modelId) { showToast('请填写模型名称、Base URL 和模型 ID', 'error'); return; }
   const models = JSON.parse(localStorage.getItem('customLLMModels') || '[]');
   const form = document.getElementById('addCustomModelForm');
   if (form._editId) {
     const idx = models.findIndex(x => x.id === form._editId);
-    if (idx !== -1) { models[idx] = { ...models[idx], name, baseUrl, apiKey, modelId, maxTokens, temperature }; }
-    localStorage.setItem('customLLMModels', JSON.stringify(models));
+    if (idx !== -1) { models[idx] = { ...models[idx], name, baseUrl, apiKey, modelId, maxTokens, temperature, provider, protocol }; }
     hideAddCustomModelForm();
-    renderCustomModels();
-    showToast(`✅ 已更新模型：${name}`, 'success');
+    _persistCustomModels(models).then(res => {
+      renderCustomModels();
+      if (res.ok) showToast(`✅ 已更新模型：${name}`, 'success');
+      else showToast(`⚠️ 已保存到本地，但同步到后端失败：${res.error}`, 'error');
+    });
     return;
   }
-  models.push({ name, baseUrl, apiKey, modelId, maxTokens, temperature, id: Date.now() });
-  localStorage.setItem('customLLMModels', JSON.stringify(models));
+  models.push({ name, baseUrl, apiKey, modelId, maxTokens, temperature, provider, protocol, id: Date.now() });
   hideAddCustomModelForm();
-  renderCustomModels();
-  showToast(`✅ 已添加模型：${name}`, 'success');
+  _persistCustomModels(models).then(res => {
+    renderCustomModels();
+    if (res.ok) showToast(`✅ 已添加模型：${name}`, 'success');
+    else showToast(`⚠️ 已保存到本地，但同步到后端失败：${res.error}`, 'error');
+  });
 }
 function deactivateCustomModel() {
-  localStorage.removeItem('activeCustomModel');
   document.getElementById('activeModelName').textContent = 'MiniMax-M3（默认）';
   document.getElementById('resetToDefaultBtn').style.display = 'none';
   renderCustomModels();
-  showToast('已恢复基础模型', 'info');
+  _persistActiveCustomModel('').then(res => {
+    if (res.ok) showToast('已恢复基础模型', 'info');
+    else showToast(`⚠️ 后端同步失败：${res.error}`, 'error');
+  });
 }
 function renderCustomModels() {
   const list = document.getElementById('customModelsList');
@@ -9025,58 +9094,79 @@ function renderCustomModels() {
     list.innerHTML = '<div style="text-align:center;padding:20px;color:#94a3b8;font-size:13px;">暂无自定义模型，点击上方「添加模型」按钮添加</div>';
     return;
   }
-  list.innerHTML = models.map(m => `
-    <div style="display:flex;align-items:center;justify-content:space-between;background:rgba(30,41,59,0.8);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:10px 12px;margin-bottom:8px;">
-      <div>
-        <div style="font-size:13px;font-weight:600;color:#f1f5f9;">${m.name} ${activeId == m.id ? '<span style="color:#86efac;font-size:11px;">✅ 使用中</span>' : ''}</div>
-        <div style="font-size:11px;color:#94a3b8;margin-top:2px;">${m.baseUrl} · ${m.modelId}</div>
-      </div>
-      <div style="display:flex;gap:6px;">
-        <button class="btn btn-sm" onclick="activateCustomModel(${m.id})" style="background:rgba(59,130,246,0.2);color:#93c5fd;border:none;font-size:11px;">使用</button>
-        <button class="btn btn-sm" onclick="showAddCustomModelForm(${m.id})" style="background:rgba(245,158,11,0.2);color:#fbbf24;border:none;font-size:11px;">编辑</button>
-        <button class="btn btn-sm" onclick="removeCustomModel(${m.id})" style="background:rgba(239,68,68,0.2);color:#fca5a5;border:none;font-size:11px;">删除</button>
-      </div>
-    </div>
-  `).join('');
+  list.innerHTML = models.map(m => `\
+      <div style="display:flex;align-items:center;justify-content:space-between;background:rgba(30,41,59,0.8);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:10px 12px;margin-bottom:8px;">\
+        <div>\
+          <div style="font-size:13px;font-weight:600;color:#f1f5f9;">${m.name} ${activeId == m.id ? '<span style="color:#86efac;font-size:11px;">✅ 使用中</span>' : ''}</div>\
+          <div style="font-size:11px;color:#94a3b8;margin-top:2px;">${m.baseUrl} · ${m.modelId} <span style="color:#64748b;">[${m.protocol || 'anthropic'}]</span></div>\
+        </div>\
+        <div style="display:flex;gap:6px;">\
+          <button class="btn btn-sm" onclick="activateCustomModel(${m.id})" style="background:rgba(59,130,246,0.2);color:#93c5fd;border:none;font-size:11px;">使用</button>\
+          <button class="btn btn-sm" onclick="showAddCustomModelForm(${m.id})" style="background:rgba(245,158,11,0.2);color:#fbbf24;border:none;font-size:11px;">编辑</button>\
+          <button class="btn btn-sm" onclick="removeCustomModel(${m.id})" style="background:rgba(239,68,68,0.2);color:#fca5a5;border:none;font-size:11px;">删除</button>\
+        </div>\
+      </div>\
+    `).join('');
 }
 function activateCustomModel(id) {
-  localStorage.setItem('activeCustomModel', id);
   const models = JSON.parse(localStorage.getItem('customLLMModels') || '[]');
   const model = models.find(m => m.id === id);
   if (model) {
     document.getElementById('activeModelName').textContent = model.name;
     document.getElementById('resetToDefaultBtn').style.display = 'inline-block';
   }
+  // 先写 localStorage，再渲染（否则 render 读到旧值）
+  localStorage.setItem('activeCustomModel', String(id));
   renderCustomModels();
-  showToast('✅ 已切换模型', 'success');
+  _persistActiveCustomModel(id).then(res => {
+    if (res.ok) showToast('✅ 已切换模型', 'success');
+    else showToast(`⚠️ 切换已存本地，但后端同步失败：${res.error}`, 'error');
+  });
 }
 function removeCustomModel(id) {
   let models = JSON.parse(localStorage.getItem('customLLMModels') || '[]');
   models = models.filter(m => m.id !== id);
-  localStorage.setItem('customLLMModels', JSON.stringify(models));
   const activeId = localStorage.getItem('activeCustomModel');
   if (activeId == id) {
-    localStorage.removeItem('activeCustomModel');
     document.getElementById('activeModelName').textContent = 'MiniMax-M3（默认）';
     document.getElementById('resetToDefaultBtn').style.display = 'none';
+    // 删除当前激活的模型 → 先清激活，再删模型（保证后端校验通过：activeId 必须存在）
+    _persistActiveCustomModel('').finally(() => {
+      _persistCustomModels(models).then(res => {
+        renderCustomModels();
+        if (res.ok) showToast('已删除模型', 'info');
+        else showToast(`⚠️ 本地已删，后端同步失败：${res.error}`, 'error');
+      });
+    });
+    return;
   }
-  renderCustomModels();
-  showToast('已删除模型', 'info');
+  _persistCustomModels(models).then(res => {
+    renderCustomModels();
+    if (res.ok) showToast('已删除模型', 'info');
+    else showToast(`⚠️ 本地已删，后端同步失败：${res.error}`, 'error');
+  });
 }
 function loadProviderModels() {
   const provider = document.getElementById('cmProvider').value;
   const select = document.getElementById('cmModelSelect');
   const baseUrlInput = document.getElementById('cmBaseUrl');
   const discoverBtn = document.getElementById('cmDiscoverBtn');
+  const hint = document.getElementById('cmProtocolHint');
   if (!provider) {
     select.style.display = 'none';
     discoverBtn.style.display = 'inline-block';
+    if (hint) hint.textContent = '未选择';
     return;
   }
+  // 协议：anthropic / openai 二选一，决定后端走 /messages 还是 /chat/completions
+  const protocol = (provider === 'anthropic') ? 'anthropic' : 'openai';
+  if (hint) hint.textContent = protocol + ' (' + provider + ')';
   // 自动填充推荐 base URL
   const urlMap = {
     openai: 'https://api.openai.com/v1',
     anthropic: 'https://api.anthropic.com/v1',
+    llama: 'http://127.0.0.1:9090/v1',
+    ollama: 'http://127.0.0.1:11434/v1',
     together: 'https://api.together.xyz/v1',
     siliconflow: 'https://api.siliconflow.cn/v1',
     volcengine: 'https://ark.cn-beijing.volces.com/api/v3'
@@ -9087,6 +9177,8 @@ function loadProviderModels() {
   const modelMap = {
     openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
     anthropic: ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'],
+    llama: [],  // 用户手填或点"获取列表"自动发现
+    ollama: ['llama3.2', 'qwen2.5', 'deepseek-r1'],
     together: ['meta-llama/Llama-4-17B', 'mistralai/Mixtral-8x22B', 'deepseek-ai/DeepSeek-V3'],
     siliconflow: ['deepseek-ai/DeepSeek-V3', 'Qwen/Qwen2.5-72B', 'THUDM/glm-4-9b-chat'],
     volcengine: ['doubao-1.5-lite', 'doubao-1.5-pro', 'deepseek-r1']
@@ -9106,18 +9198,36 @@ async function discoverModels() {
   discoverBtn.textContent = '⏳ 获取中...';
   showToast('🔍 正在从 ' + baseUrl + ' 获取模型列表...', 'info');
   try {
-    const modelsUrl = baseUrl.replace(/\/+$/, '') + '/models';
+    const cleanBaseUrl = baseUrl.replace(/\/+$/, '');
+    // 尝试 OpenAI 兼容格式
+    let modelsUrl = cleanBaseUrl + '/models';
     const headers = { 'Content-Type': 'application/json' };
     if (apiKey) headers['Authorization'] = 'Bearer ' + apiKey;
-    const r = await fetch(modelsUrl, { headers, signal: AbortSignal.timeout(15000) });
-    if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + r.statusText);
-    const data = await r.json();
-    let modelList = [];
-    if (data.data && Array.isArray(data.data)) {
-      modelList = data.data.map(m => m.id || m.name).filter(Boolean);
-    } else if (data.models && Array.isArray(data.models)) {
-      modelList = data.models.map(m => m.id || m.name).filter(Boolean);
+    
+    // 先试 OpenAI 格式
+    let data, modelList;
+    try {
+      const r = await fetch(modelsUrl, { headers, signal: AbortSignal.timeout(15000) });
+      if (!r.ok) throw new Error('OpenAI 格式失败: HTTP ' + r.status);
+      data = await r.json();
+      modelList = [];
+      if (data.data && Array.isArray(data.data)) {
+        modelList = data.data.map(m => m.id || m.name).filter(Boolean);
+      } else if (data.models && Array.isArray(data.models)) {
+        modelList = data.models.map(m => m.id || m.name).filter(Boolean);
+      }
+    } catch (e) {
+      // 如果 OpenAI 格式失败，尝试 llama-server 格式
+      modelsUrl = cleanBaseUrl + '/v1/models';
+      const r2 = await fetch(modelsUrl, { headers, signal: AbortSignal.timeout(15000) });
+      if (!r2.ok) throw new Error('llama-server 格式也失败: HTTP ' + r2.status);
+      data = await r2.json();
+      modelList = [];
+      if (data.data && Array.isArray(data.data)) {
+        modelList = data.data.map(m => m.id || m.name).filter(Boolean);
+      }
     }
+    
     if (!modelList.length) throw new Error('响应中未找到模型列表');
     select.innerHTML = '<option value="">请选择模型...</option>' + modelList.map(m => `<option value="${m}">${m}</option>`).join('');
     select.style.display = 'block';
@@ -9183,8 +9293,46 @@ async function testLLMConnection() {
   resultDiv.style.display = 'block';
   resultDiv.innerHTML = '<div style="text-align:center; color:#64748b; padding:14px;">⏳ 正在测试连接...</div>';
 
+  // 读取当前激活的自定义模型配置
+  let testModel = '';
+  let testBaseUrl = '';
+  let testApiKey = '';
+  let testProtocol = '';
+  let testModelName = '';
   try {
-    const r = await fetch(API_BASE + '/llm/test', { method: 'POST' });
+    const activeId = localStorage.getItem('activeCustomModel');
+    if (activeId) {
+      const models = JSON.parse(localStorage.getItem('customLLMModels') || '[]');
+      const m = models.find(x => String(x.id) === String(activeId));
+      if (m) {
+        testModel = m.modelId || '';
+        testBaseUrl = m.baseUrl || '';
+        testApiKey = m.apiKey || '';
+        testProtocol = m.protocol || '';
+        testModelName = m.name || '';
+        if (!testProtocol) {
+          var bl = (m.baseUrl || '').toLowerCase();
+          testProtocol = (bl.includes('minimax') || bl.includes('anthropic')) ? 'anthropic' : 'openai';
+        }
+      }
+    }
+  } catch (_) {}
+
+  // 更新 loading 提示，显示模型名称
+  var modelNameText = testModelName ? '（' + testModelName + '）' : '（MiniMax 默认）';
+  resultDiv.innerHTML = '<div style="text-align:center; color:#64748b; padding:14px;">⏳ 正在测试' + modelNameText + '...</div>';
+
+  try {
+    const r = await fetch(API_BASE + '/llm/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: testModel || undefined,
+        baseUrl: testBaseUrl || undefined,
+        apiKey: testApiKey || undefined,
+        protocol: testProtocol || undefined
+      })
+    });
     const data = await r.json();
     if (!data.success) throw new Error(data.error || '未知错误');
 
@@ -9671,7 +9819,7 @@ async function updateManagementField(id, field, value) {
   if (!m) return;
   m[field] = value;
   try {
-    await fetch('http://localhost:3010/api/management-team', {
+    await fetch('/api/management-team', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, position: m.position, name: m.name, phone: m.phone })
     });
@@ -9689,7 +9837,7 @@ async function addManagementRow() {
   const mgr = { id, position: '', name: '', phone: '' };
   M.MANAGEMENT_TEAM.push(mgr);
   try {
-    await fetch('http://localhost:3010/api/management-team', {
+    await fetch('/api/management-team', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(mgr)
     });
@@ -9714,7 +9862,7 @@ async function removeManagementRow(id) {
     }
   });
   try {
-    await fetch('http://localhost:3010/api/management-team/' + encodeURIComponent(id), { method: 'DELETE' });
+    await fetch('/api/management-team/' + encodeURIComponent(id), { method: 'DELETE' });
   } catch { /* 离线不报错 */ }
   renderAttendanceList();
   showToast('已删除', 'info');
@@ -9774,7 +9922,7 @@ function _saveAttendanceDebounced(date) {
 async function _saveAttendanceToBackend(date) {
   const records = M.getAttendanceForDate(date);
   try {
-    await fetch('http://localhost:3010/api/attendance', {
+    await fetch('/api/attendance', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ date, projectId: currentProjectId, records })
     });
@@ -9819,7 +9967,7 @@ function uploadAttendancePhoto(input) {
     }
     // 持久化到后端（每项目一张）
     try {
-      await fetch('http://localhost:3010/api/page03-photo', {
+      await fetch('/api/page03-photo', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ projectId: currentProjectId, src: _s03Photo, caption: _s03PhotoCaption })
       });
@@ -9838,14 +9986,14 @@ function clearAttendancePhoto() {
     switchMappingTab('03');
   }
   // 同步删除后端
-  fetch('http://localhost:3010/api/page03-photo/' + encodeURIComponent(currentProjectId), { method: 'DELETE' })
+  fetch('/api/page03-photo/' + encodeURIComponent(currentProjectId), { method: 'DELETE' })
     .catch(err => console.warn('[签到照片] 删除失败:', err));
 }
 
 // 加载当前项目的签到合影
 async function loadPage03Photo() {
   try {
-    const r = await fetch('http://localhost:3010/api/page03-photo/' + encodeURIComponent(currentProjectId));
+    const r = await fetch('/api/page03-photo/' + encodeURIComponent(currentProjectId));
     const data = await r.json();
     if (data && data.src) {
       _s03Photo = data.src;
@@ -9885,7 +10033,7 @@ function _genId() { return 'p' + Date.now().toString(36) + Math.random().toStrin
 
 async function loadPage06Photos() {
   try {
-    const r = await fetch(`http://localhost:3010/api/page06-photos/${currentProjectId}`);
+    const r = await fetch(`/api/page06-photos/${currentProjectId}`);
     const photos = await r.json();
     M.PAGE06_PHOTOS = photos.map(p => ({ id: p.id, src: p.src, caption: p.caption || '', tradeId: p.trade_id || '' }));
   } catch (e) { console.warn('[Page06 照片] 加载失败:', e); }
@@ -9906,7 +10054,7 @@ async function uploadPage06Photo(input) {
     renderMappingPage06();
     // 保存到 DB
     try {
-      await fetch('http://localhost:3010/api/page06-photos', {
+      await fetch('/api/page06-photos', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, projectId: currentProjectId, src: e.target.result, caption: '', tradeId: '' })
       });
@@ -9950,7 +10098,7 @@ async function removePage06Photo(id) {
   renderPage06PhotoGrid();
   renderMappingPage06();
   try {
-    await fetch(`http://localhost:3010/api/page06-photos/${currentProjectId}/${id}`, { method: 'DELETE' });
+    await fetch(`/api/page06-photos/${currentProjectId}/${id}`, { method: 'DELETE' });
   } catch (e) { console.warn('[Page06 照片] 删除失败:', e); }
 }
 
@@ -9960,7 +10108,7 @@ function updatePage06Photo(id, field, value) {
   // 保存到 DB
   const p = M.PAGE06_PHOTOS.find(x => x.id === id);
   if (p) {
-    fetch('http://localhost:3010/api/page06-photos', {
+    fetch('/api/page06-photos', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: p.id, projectId: currentProjectId, src: p.src, caption: p.caption || '', tradeId: p.tradeId || '' })
     }).catch(e => console.warn('[Page06 照片] 更新失败:', e));
@@ -10006,7 +10154,7 @@ async function saveAttendance() {
     if (!rec.present) changedRecords[id] = rec;
   });
   try {
-    await fetch('http://localhost:3010/api/attendance', {
+    await fetch('/api/attendance', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ date, projectId: currentProjectId, records: changedRecords })
     });
@@ -10106,6 +10254,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // 初始化 page06 unit 按钮高亮
   const initUnit = localStorage.getItem(`page06_unit_${currentProjectId}`) || 'people';
   if (typeof setPage06Unit === 'function') setPage06Unit(initUnit);
+  // 启动时从后端拉最新的 LLM 自定义模型（覆盖 localStorage 缓存），保证跨设备/清缓存后设置仍在
+  _bootstrapCustomModelsFromBackend();
   setTimeout(() => {
     checkBackendHealth();
     setInterval(checkBackendHealth, 30000);
@@ -10180,7 +10330,7 @@ function updateChatBadge() {
 // ------ 会话加载 ------
 async function loadSessions(pid) {
   try {
-    const res = await fetch('http://localhost:3010/api/chat/sessions?projectId=' + encodeURIComponent(pid));
+    const res = await fetch('/api/chat/sessions?projectId=' + encodeURIComponent(pid));
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const sessions = await res.json();
     _sessionsByProject[pid] = sessions;
@@ -10204,7 +10354,7 @@ async function ensureSession(pid) {
 
 async function createNewSession(pid, name) {
   try {
-    const res = await fetch('http://localhost:3010/api/chat/sessions', {
+    const res = await fetch('/api/chat/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ projectId: pid, name: name || '新对话' })
@@ -10230,7 +10380,7 @@ async function createNewSession(pid, name) {
 
 async function deleteSession(sessionId) {
   try {
-    const res = await fetch('http://localhost:3010/api/chat/sessions/' + encodeURIComponent(sessionId), { method: 'DELETE' });
+    const res = await fetch('/api/chat/sessions/' + encodeURIComponent(sessionId), { method: 'DELETE' });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const pid = typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan';
     _sessionsByProject[pid] = (_sessionsByProject[pid] || []).filter(s => s.id !== sessionId);
@@ -10252,7 +10402,7 @@ async function deleteSession(sessionId) {
 
 async function renameSession(sessionId, name) {
   try {
-    await fetch('http://localhost:3010/api/chat/sessions/' + encodeURIComponent(sessionId), {
+    await fetch('/api/chat/sessions/' + encodeURIComponent(sessionId), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name })
@@ -10278,7 +10428,7 @@ async function switchSession(sessionId) {
   const container = document.getElementById('aiChatMessages');
   container.innerHTML = '';
   try {
-    const res = await fetch('http://localhost:3010/api/chat/sessions/' + encodeURIComponent(sessionId) + '/messages');
+    const res = await fetch('/api/chat/sessions/' + encodeURIComponent(sessionId) + '/messages');
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const messages = await res.json();
     _messageCache[sessionId] = messages.map(m => ({ id: m.id, role: m.role, content: m.content }));
@@ -10356,7 +10506,7 @@ async function clearChatMessages() {
   if (container) container.innerHTML = '';
   _messageCache[_activeSessionId] = [];
   try {
-    await fetch('http://localhost:3010/api/chat/sessions/' + encodeURIComponent(_activeSessionId) + '/messages', { method: 'DELETE' });
+    await fetch('/api/chat/sessions/' + encodeURIComponent(_activeSessionId) + '/messages', { method: 'DELETE' });
   } catch (e) { console.warn('[chat] 清空失败:', e); }
   appendChatMessage('ai-message-system', '🗑️ 当前对话已清空', true, null);
 }
@@ -10372,7 +10522,7 @@ async function deleteChatMessage(btn) {
   }
   msgEl.remove();
   try {
-    await fetch('http://localhost:3010/api/chat/messages/' + encodeURIComponent(msgId), { method: 'DELETE' });
+    await fetch('/api/chat/messages/' + encodeURIComponent(msgId), { method: 'DELETE' });
   } catch (e) { console.warn('[chat] 删除消息失败:', e); }
 }
 
@@ -10457,7 +10607,7 @@ async function sendChatMessage() {
       const oldContent = oldEl.getAttribute('data-msg-content') || '';
       oldEl.remove();
       _messageCache[_activeSessionId] = (_messageCache[_activeSessionId] || []).filter(m => m.id !== editMsgId);
-      fetch('http://localhost:3010/api/chat/messages/' + encodeURIComponent(editMsgId), { method: 'DELETE' }).catch(()=>{});
+      fetch('/api/chat/messages/' + encodeURIComponent(editMsgId), { method: 'DELETE' }).catch(()=>{});
     }
   }
   if (!text && !_chatPhotoQueue.length) return;
@@ -10501,7 +10651,7 @@ async function sendChatMessage() {
       var item = photoQueue[pi];
       try {
         var base64 = item.dataUrl.split(',')[1];
-        var res = await fetch('http://localhost:3010/api/parse-photo', {
+        var res = await fetch('/api/parse-photo', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ imageBase64: base64, caption: item.name, projectId: projectId, areas: areas, plans: plans })
@@ -10552,7 +10702,7 @@ async function sendChatMessage() {
 
 async function saveMsgToDB(sessionId, role, content) {
   try {
-    const res = await fetch('http://localhost:3010/api/chat/messages', {
+    const res = await fetch('/api/chat/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId, role, content })
@@ -10568,18 +10718,48 @@ async function saveMsgToDB(sessionId, role, content) {
 async function _callChatLLM(text) {
   const pid = typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan';
   const history = (_messageCache[_activeSessionId] || []).slice(-10).map(m => ({ role: m.role, content: m.content }));
-  try {
-    const res = await fetch('http://localhost:3010/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: text,
-        history,
-        projectId: pid,
-        date: typeof M !== 'undefined' && M.TODAY ? M.TODAY : '',
-        sessionId: _activeSessionId
-      })
-    });
+
+  // 从 localStorage 读取当前激活的自定义模型（设置页切换的）；为空则后端用 .env 默认 model
+    let chatModel = '';
+    let chatBaseUrl = '';
+    let chatApiKey = '';
+    let chatProtocol = '';
+    try {
+      const activeId = localStorage.getItem('activeCustomModel');
+      if (activeId) {
+        const models = JSON.parse(localStorage.getItem('customLLMModels') || '[]');
+        const m = models.find(x => String(x.id) === String(activeId));
+        if (m) {
+          if (m.modelId) chatModel = m.modelId;
+          if (m.baseUrl) chatBaseUrl = m.baseUrl;
+          if (m.apiKey) chatApiKey = m.apiKey;
+          if (m.protocol) chatProtocol = m.protocol;
+          else {
+            // 旧模型没有 protocol 字段，自动推断
+            var bl = (m.baseUrl || '').toLowerCase();
+            if (bl.includes('minimax') || bl.includes('anthropic')) chatProtocol = 'anthropic';
+            else chatProtocol = 'openai';
+          }
+        }
+      }
+    } catch (_) {}
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: text,
+          history,
+          projectId: pid,
+          date: typeof M !== 'undefined' && M.TODAY ? M.TODAY : '',
+          sessionId: _activeSessionId,
+          model: chatModel || undefined,
+          baseUrl: chatBaseUrl || undefined,
+          apiKey: chatApiKey || undefined,
+          protocol: chatProtocol || undefined
+        })
+      });
     if (!res.ok) throw new Error('Network error');
     const data = await res.json();
     hideChatTyping();
@@ -10690,7 +10870,7 @@ async function authorizeAction(btn) {
   if (!paid) return;
   btn.disabled = true; btn.textContent = '⏳ 执行中...';
   try {
-    const res = await fetch('http://localhost:3010/api/chat/authorize', {
+    const res = await fetch('/api/chat/authorize', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pendingId: paid })
@@ -10762,7 +10942,7 @@ async function rejectAction(btn) {
   const paid = btn?.getAttribute('data-paid');
   if (!paid) return;
   try {
-    await fetch('http://localhost:3010/api/chat/reject', {
+    await fetch('/api/chat/reject', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pendingId: paid })
@@ -10777,7 +10957,7 @@ async function rejectAction(btn) {
 
 // 离线 mock 回复 — 不模拟任何操作，仅提示连接失败
 async function _mockChatReplyLocal(text) {
-  const reply = '⚠️ 无法连接后端服务，请确认后端已启动（http://localhost:3010）。LLM 功能暂不可用。';
+  const reply = '⚠️ 无法连接后端服务，请确认后端已启动（）。LLM 功能暂不可用。';
   const savedId = await saveMsgToDB(_activeSessionId, 'assistant', reply);
   if (!_messageCache[_activeSessionId]) _messageCache[_activeSessionId] = [];
   _messageCache[_activeSessionId].push({ id: savedId, role: 'assistant', content: reply });
@@ -10790,7 +10970,15 @@ async function _mockChatReplyLocal(text) {
   initChatWebSocket();
   updateChatProjectLabel();
   // 预加载会话
-  loadSessions(pid);
+  loadSessions(pid).then(function(sessions) {
+    if (sessions && sessions.length > 0) {
+      // 先设置 activeSessionId，再加载消息
+      _activeSessionId = sessions[0].id;
+      document.getElementById('aiChatSessionSelect').value = _activeSessionId;
+      // 加载第一个会话的消息
+      switchSession(_activeSessionId);
+    }
+  });
   // 聊天输入框粘贴图片支持
   const input = document.getElementById('aiChatInput');
   if (input) {
@@ -10831,7 +11019,7 @@ function updateChatProjectLabel() {
 async function triggerInspection() {
   try {
     appendChatMessage('ai-proactive', '🔔 正在巡检...');
-    const res = await fetch('http://localhost:3010/api/chat/inspect', { method: 'POST' });
+    const res = await fetch('/api/chat/inspect', { method: 'POST' });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     appendChatMessage('ai-proactive', '✅ 巡检完成，结果已通过徽章通知');
   } catch (e) {
@@ -11154,7 +11342,6 @@ function _renderStaticBubble(bubbleEl, text) {
 
 function renderMarkdownInline(text) {
   if (!text) return '';
-  console.log('[br-input] text length:', text.length, 'has|:', text.includes('|'), 'newlines:', (text.match(/\n/g)||[]).length, 'sample:', JSON.stringify(text.slice(0,100)));
   let html = _escapeHtml(text);
 
   // 1. 提取代码块 / mermaid
@@ -11338,7 +11525,7 @@ function createEventFromChat(data) {
   const photoLine = data.photos && data.photos.length ? '• 照片：' + data.photos.length + ' 张\n' : '';
   appendChatMessage('system', '✅ 日报事件已保存！\n' + (data.taskName ? '• 任务：' + data.taskName + '\n' : '') + (data.owner ? '• 负责人：' + data.owner + '\n' : '') + (data.progress ? '• 进度：' + data.progress + '\n' : '') + (data.headcount ? '• 人数：' + data.headcount + '人\n' : '') + photoLine);
   // 同步到后端 DB（静默，不阻塞 UI）
-  fetch('http://localhost:3010/api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ev) }).catch(function(){});
+  fetch('/api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ev) }).catch(function(){});
 }
 
 var _chatPhotoQueue = [];
@@ -11466,7 +11653,7 @@ async function sendChatPhotos() {
     const item = queue[i];
     try {
       const base64 = item.dataUrl.split(',')[1];
-      const res = await fetch('http://localhost:3010/api/parse-photo', {
+      const res = await fetch('/api/parse-photo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imageBase64: base64, caption: item.name, projectId, areas, plans })
@@ -11571,7 +11758,7 @@ let _settingsCache = { llm_permission: { level: 'confirm' }, inspection_times: {
 
 async function loadSettings() {
   try {
-    const res = await fetch('http://localhost:3010/api/settings');
+    const res = await fetch('/api/settings');
     if (res.ok) _settingsCache = await res.json();
   } catch {}
   return _settingsCache;
@@ -11641,13 +11828,13 @@ async function saveSettings() {
     inspection_times: { times: list?._times || ['08:30', '13:00', '17:30'], interval }
   };
   try {
-    const res = await fetch('http://localhost:3010/api/settings', {
+    const res = await fetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    await fetch('http://localhost:3010/api/settings/inspection', {
+    await fetch('/api/settings/inspection', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ times: list?._times || ['08:30', '13:00', '17:30'], interval })

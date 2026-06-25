@@ -1507,21 +1507,30 @@
                 <input type="text" id="cmName" placeholder="例如：GPT-4o" style="width:100%;padding:6px 8px;background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.2);border-radius:4px;color:#f1f5f9;font-size:12px;">
               </div>
               <div>
-                <label style="font-size:11px;color:#94a3b8;">API 提供商</label>
-                <select id="cmProvider" onchange="loadProviderModels()" style="width:100%;padding:6px 8px;background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.2);border-radius:4px;color:#f1f5f9;font-size:12px;">
-                  <option value="">请选择</option>
-                  <option value="openai">OpenAI</option>
-                  <option value="anthropic">Anthropic</option>
-                  <option value="together">Together AI</option>
-                  <option value="siliconflow">SiliconFlow</option>
-                  <option value="volcengine">火山引擎</option>
-                  <option value="other">其他</option>
-                </select>
-              </div>
+                              <label style="font-size:11px;color:#94a3b8;">API 提供商 <span style="color:#94a3b8;font-weight:400;font-size:10px;">（决定协议：Anthropic vs OpenAI）</span></label>
+                              <select id="cmProvider" onchange="loadProviderModels()" style="width:100%;padding:6px 8px;background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.2);border-radius:4px;color:#f1f5f9;font-size:12px;">
+                                <option value="">请选择</option>
+                                <option value="anthropic">Anthropic（含 MiniMax 等 Anthropic 兼容）</option>
+                                <option value="openai">OpenAI 官方</option>
+                                <option value="llama">Llama.cpp / 本地 GGUF（OpenAI 协议）</option>
+                                <option value="ollama">Ollama（OpenAI 协议）</option>
+                                <option value="together">Together AI（OpenAI 协议）</option>
+                                <option value="siliconflow">SiliconFlow（OpenAI 协议）</option>
+                                <option value="volcengine">火山引擎豆包（OpenAI 协议）</option>
+                                <option value="other">其他</option>
+                              </select>
+                            </div>
               <div style="grid-column:1/-1;">
-                <label style="font-size:11px;color:#94a3b8;">Base URL</label>
-                <input type="text" id="cmBaseUrl" placeholder="https://api.openai.com/v1" style="width:100%;padding:6px 8px;background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.2);border-radius:4px;color:#f1f5f9;font-size:12px;">
-              </div>
+                              <div style="font-size:11px;color:#94a3b8;display:flex;align-items:center;gap:8px;">
+                                <span>当前协议：</span>
+                                <code id="cmProtocolHint" style="background:rgba(59,130,246,0.2);color:#93c5fd;padding:2px 8px;border-radius:4px;font-size:11px;">未选择</code>
+                                <span style="color:#64748b;font-size:10px;">（Anthropic 走 /messages + x-api-key；OpenAI 走 /chat/completions + Bearer）</span>
+                              </div>
+                            </div>
+                            <div style="grid-column:1/-1;">
+                              <label style="font-size:11px;color:#94a3b8;">Base URL</label>
+                              <input type="text" id="cmBaseUrl" placeholder="https://api.openai.com/v1" style="width:100%;padding:6px 8px;background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.2);border-radius:4px;color:#f1f5f9;font-size:12px;">
+                            </div>
               <div style="grid-column:1/-1;">
                 <label style="font-size:11px;color:#94a3b8;">API Key</label>
                 <input type="password" id="cmApiKey" placeholder="sk-..." style="width:100%;padding:6px 8px;background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.2);border-radius:4px;color:#f1f5f9;font-size:12px;">

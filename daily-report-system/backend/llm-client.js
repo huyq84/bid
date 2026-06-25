@@ -15,18 +15,32 @@ export class MinMaxClient {
     this.maxTokens = config.maxTokens || 4096;
     this.temperature = config.temperature ?? 0.5;
     this.groupId = config.groupId;
+    this.protocol = config.protocol || 'anthropic'; // 'anthropic' | 'openai'
     this.timeoutMs = 30000; // 30 秒超时
   }
 
   // 核心：调用 chat
-  // params: { system, messages, maxTokens, temperature }
+  // params: { system, messages, maxTokens, temperature, model, override }
+  //   - model 可选：不传则用启动时 .env 的 MINIMAX_MODEL；传入则本次请求用传入的 model
+  //   - override 可选：{ baseUrl, apiKey, protocol, model }
+  //       用于"切到自定义模型"——临时覆盖客户端默认配置，支持跨协议（anthropic/openai）
   // 自动处理：网络错误重试 2 次 + 空响应重试 2 次
-  async chat({ system, messages, maxTokens, temperature }) {
-    if (!this.apiKey) {
-      throw new Error('MINIMAX_API_KEY 未设置');
+  async chat({ system, messages, maxTokens, temperature, model, override }) {
+    // 计算本次请求的实际配置（override 优先）
+    const ov = override || {};
+    const effectiveBaseUrl = (ov.baseUrl || this.baseUrl || '').replace(/\/+$/, '');
+    const effectiveApiKey = ov.apiKey || this.apiKey;
+    const effectiveProtocol = ov.protocol || this.protocol;
+    const effectiveModel = (model || ov.model || this.model || '').toString().trim();
+
+    if (!effectiveApiKey) {
+      throw new Error('API Key 未设置（override.apiKey 或 .env MINIMAX_API_KEY）');
     }
-    if (!this.baseUrl) {
-      throw new Error('MINIMAX_BASE_URL 未设置');
+    if (!effectiveBaseUrl) {
+      throw new Error('Base URL 未设置（override.baseUrl 或 .env MINIMAX_BASE_URL）');
+    }
+    if (!effectiveModel) {
+      throw new Error('Model 未设置（override.model 或 .env MINIMAX_MODEL）');
     }
 
     const maxAttempts = 3;
@@ -34,7 +48,16 @@ export class MinMaxClient {
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        const reply = await this._chatOnce({ system, messages, maxTokens, temperature });
+        const reply = await this._chatOnce({
+          system, messages, maxTokens, temperature,
+          model: effectiveModel, baseUrl: effectiveBaseUrl,
+          apiKey: effectiveApiKey, protocol: effectiveProtocol
+        });
+        if (reply === '[thinking]') {
+          // 模型在思考，content 为空但有 reasoning，不重试直接返回
+          console.log('[LLM] 模型正在思考，跳过重试');
+          return '';
+        }
         if (reply) return reply;  // 成功拿到内容
 
         // 空响应，重试（加随机扰动打破缓存）
@@ -62,47 +85,74 @@ export class MinMaxClient {
   }
 
   // 单次请求
-  async _chatOnce({ system, messages, maxTokens, temperature }) {
-    const url = this.baseUrl.endsWith('/v1')
-      ? `${this.baseUrl}/messages`
-      : `${this.baseUrl}/v1/messages`;
+    // protocol: 'anthropic'（默认）走 /messages + x-api-key + anthropic-version
+    //           'openai' 走 /chat/completions + Authorization: Bearer
+    async _chatOnce({ system, messages, maxTokens, temperature, model, baseUrl, apiKey, protocol }) {
+      const proto = protocol || 'anthropic';
 
-    const body = {
-      model: this.model,
-      max_tokens: maxTokens || this.maxTokens,
-      temperature: temperature ?? this.temperature,
-      messages: messages
-    };
-    if (system) body.system = system;
+      let url, body, headers;
 
-    const headers = {
-      'Content-Type': 'application/json',
-      'x-api-key': this.apiKey,
-      'anthropic-version': '2023-06-01'
-    };
-    if (this.groupId) {
-      headers['X-Group-Id'] = this.groupId;
-    }
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
-
-    let response;
-    try {
-      response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-        signal: controller.signal
-      });
-    } catch (e) {
-      clearTimeout(timeoutId);
-      if (e.name === 'AbortError') {
-        throw new Error(`LLM 请求超时（${this.timeoutMs / 1000}秒）`);
+      if (proto === 'openai') {
+        // OpenAI 协议（llama-server / vLLM / OpenAI 官方等都兼容）
+        url = baseUrl.endsWith('/v1')
+          ? `${baseUrl}/chat/completions`
+          : `${baseUrl}/v1/chat/completions`;
+        // OpenAI 协议 system 是 messages 里 role=system 的消息，不是顶层字段
+        const oaMessages = [];
+        if (system) oaMessages.push({ role: 'system', content: system });
+        for (const m of (messages || [])) {
+          oaMessages.push({ role: m.role, content: m.content });
+        }
+        body = {
+          model: model,
+          messages: oaMessages,
+          max_tokens: maxTokens || this.maxTokens,
+          temperature: temperature ?? this.temperature,
+          stream: false
+        };
+        headers = { 'Content-Type': 'application/json' };
+        if (apiKey) headers['Authorization'] = 'Bearer ' + apiKey;
+      } else {
+        // Anthropic 协议（MiniMax / Anthropic 官方）
+        url = baseUrl.endsWith('/v1')
+          ? `${baseUrl}/messages`
+          : `${baseUrl}/v1/messages`;
+        body = {
+          model: model,
+          max_tokens: maxTokens || this.maxTokens,
+          temperature: temperature ?? this.temperature,
+          messages: messages
+        };
+        if (system) body.system = system;
+        headers = {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01'
+        };
+        if (this.groupId) headers['X-Group-Id'] = this.groupId;
       }
-      throw new Error(`LLM 网络错误: ${e.message}`);
-    }
-    clearTimeout(timeoutId);
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+
+      console.log('[LLM→上游] protocol:', proto, 'URL:', url, 'model:', model);
+
+      let response;
+      try {
+        response = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+          signal: controller.signal
+        });
+      } catch (e) {
+        clearTimeout(timeoutId);
+        if (e.name === 'AbortError') {
+          throw new Error(`LLM 请求超时（${this.timeoutMs / 1000}秒）`);
+        }
+        throw new Error(`LLM 网络错误: ${e.message}`);
+      }
+      clearTimeout(timeoutId);
 
     const text = await response.text();
     if (!response.ok) {
@@ -116,13 +166,35 @@ export class MinMaxClient {
       throw new Error(`LLM 响应不是 JSON: ${text.slice(0, 200)}`);
     }
 
-    // 提取文本
-    const content = data.content || [];
-    const reply = content
-      .filter(b => b.type === 'text')
-      .map(b => b.text)
-      .join('\n')
-      .trim();
+    // 提取文本（按协议分支）
+    let reply = '';
+    if (proto === 'openai') {
+      // OpenAI: data.choices[0].message.content
+      const choices = data.choices || [];
+      for (const c of choices) {
+        if (c.message) {
+          // 优先使用 content
+          if (c.message.content && c.message.content.trim()) {
+            reply = c.message.content.trim();
+            break;
+          }
+          // 如果 content 为空但有 reasoning，说明模型在"思考"，不重试
+          if (c.message.reasoning) {
+            console.log('[LLM] 收到 reasoning 但 content 为空，跳过重试');
+            reply = '[thinking]';  // 特殊标记，让 chat() 不重试
+            break;
+          }
+        }
+      }
+    } else {
+      // Anthropic: data.content[].text
+      const content = data.content || [];
+      reply = content
+        .filter(b => b.type === 'text')
+        .map(b => b.text)
+        .join('\n')
+        .trim();
+    }
 
     if (!reply) {
       // 调试用：把整个响应吐出来

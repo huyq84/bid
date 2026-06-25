@@ -1179,7 +1179,7 @@
 // 从后端API加载周报数据
 async function loadWeeklyReportData() {
     try {
-        const response = await fetch('http://localhost:3010/api/data/all');
+        const response = await fetch('/api/data/all');
         const data = await response.json();
         console.log('周报数据加载成功:', data);
         
