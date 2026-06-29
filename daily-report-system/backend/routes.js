@@ -97,7 +97,8 @@ router.get('/api/data/all', async (req, res) => {
         totalManDays: p.total_man_days || 0,
         createdAt: p.created_at, updatedAt: p.updated_at,
         // spread extra AFTER explicit fields so legacy laborRequirements in extra doesn't override
-        ...Object.fromEntries(Object.entries(p.extra || {}).filter(([k]) => !['laborRequirements','laborSchedule'].includes(k))),
+                // P8 修复: 也过滤掉 owner/process/areaId/buildingNo/floorNo,防止 DB extra 字段里的旧数据覆盖
+                ...Object.fromEntries(Object.entries(p.extra || {}).filter(([k]) => !['laborRequirements','laborSchedule','owner','process','areaId','buildingNo','floorNo'].includes(k))),
       });
     }
 

@@ -4,6 +4,8 @@
 
 M = window.MockData;
 
+// P0-2 修复：跟踪 loadDataFromAPI 是否失败，offline 时才注入 mock 数据
+let _lastAPIFailed = false;
 // 记录已知在 DB 中不存在的事件 ID（幽灵事件），持久化到 localStorage 避免跨页面加载复活
 const _ghostEventIds = new Set();
 try {
@@ -35,17 +37,20 @@ async function loadDataFromAPI() {
     collectPhotos(M.EVENTS);
     collectPhotos(M.HISTORY_EVENTS);
 
-    // 覆盖 MockData 的各属性
-    M.PROJECTS = data.PROJECTS;
-    M.AREAS = data.AREAS;
-    M.WORKERS = data.WORKERS;
-    M.MANAGEMENT_TEAM = data.MANAGEMENT_TEAM;
+    // R5 修复：就地修改避免替换 module-level 引用（mock-data.js 内部函数依赖 module-level 常量）
+    M.PROJECTS.length = 0; M.PROJECTS.push(...(data.PROJECTS || []));
+    // AREAS 是对象 { [projectId]: [...] }，逐桶就地更新
+    for (const k of Object.keys(M.AREAS)) delete M.AREAS[k];
+    if (data.AREAS) Object.assign(M.AREAS, data.AREAS);
+    M.WORKERS.length = 0; M.WORKERS.push(...(data.WORKERS || []));
+    M.MANAGEMENT_TEAM.length = 0; M.MANAGEMENT_TEAM.push(...(data.MANAGEMENT_TEAM || []));
     // 就地替换而非赋值, 保持 mock-data.js 内 module-level EVENTS 引用同步
     // 保留本地未确认（draft）的事件：后端不会返回本地刚填的（因为没等异步同步完成）
     const localEventIds = new Set(M.EVENTS.map(e => e.id));
     const apiEventIds = new Set(data.EVENTS.map(e => e.id));
     // 本地有但后端没有的（通常是本地刚 saveUnifiedEvent 后，异步 fetch 还没完成前刷新）
-    const localOnlyEvents = M.EVENTS.filter(e => !apiEventIds.has(e.id) && !_ghostEventIds.has(e.id));
+    // P0-2 修复：排除 mock-data.js 注入的 7 条假事件（_fromMock=true），它们没有 DB 对应
+    const localOnlyEvents = M.EVENTS.filter(e => !apiEventIds.has(e.id) && !_ghostEventIds.has(e.id) && !e._fromMock);
     M.EVENTS.length = 0;
     M.EVENTS.push(...data.EVENTS, ...localOnlyEvents);
     M.HISTORY_EVENTS.length = 0; M.HISTORY_EVENTS.push(...data.HISTORY_EVENTS);
@@ -73,7 +78,8 @@ async function loadDataFromAPI() {
         }
       }
     } catch(err) { console.warn('[historyOverrides] 合并失败:', err.message); }
-    M.ISSUES = data.ISSUES;
+    // R5 修复：就地修改避免替换 module-level ISSUES 引用
+    M.ISSUES.length = 0; M.ISSUES.push(...(data.ISSUES || []));
 
     // 合并：API 事件无照片但本地有 → 恢复本地照片
     const mergePhotos = (events) => {
@@ -91,47 +97,37 @@ async function loadDataFromAPI() {
       try { M.saveEventsToStorage(); } catch {}
     }
     
-    // 确保所有数据都同步到 localStorage
-    try { 
-      localStorage.setItem('daily_events', JSON.stringify(M.EVENTS)); 
+    // 同步 localStorage (events/issues 保留; plans 删除 - 避免 quota exceeded)
+    //   - daily_events: 保留(本地临时事件需要 localStorage 持久化)
+    //   - daily_plans:  删除(mock-data.js getPlansForProject 优先读 window.MockData.PLANS,无需 localStorage)
+    //   - daily_issues: 保留(本地临时协调需要 localStorage 持久化)
+    try {
+      localStorage.setItem('daily_events', JSON.stringify(M.EVENTS));
     } catch(e) { console.warn('[localStorage] 写事件失败:', e.message); }
-    try { 
-      localStorage.setItem('daily_plans', JSON.stringify(M.PLANS)); 
-    } catch(e) { console.warn('[localStorage] 写计划失败:', e.message); }
-    try { 
-      localStorage.setItem('daily_issues', JSON.stringify(M.ISSUES || [])); 
+    // P7 修复: 删除 daily_plans 同步(会超 5MB 配额); getPlansForProject 改读 window.MockData.PLANS
+    try {
+      localStorage.setItem('daily_issues', JSON.stringify(M.ISSUES || []));
     } catch(e) { console.warn('[localStorage] 写协调失败:', e.message); }
 
-    // 深度合并 PLANS（API + 本地，按 id 去重，API 版本优先）
+    // R1 修复：PLANS 整体替换（length=0 + push API 数据），不再 merge 本地项
+    // 原因：merge 逻辑会让 localStorage 旧 plan 残留（DB 已删的也显示），且 module-level DEFAULT_PLANS 也会被注入
     if (data.PLANS && Object.keys(data.PLANS).length > 0) {
       for (const pid of Object.keys(data.PLANS)) {
-        if (!M.PLANS[pid]) M.PLANS[pid] = [];
-        const existingIds = new Set(M.PLANS[pid].map(p => p.id));
-        // 先把 API 计划按 id 索引，本地已有同 id 的用 API 版本覆盖（以远端为准）
-        for (const apiPlan of data.PLANS[pid]) {
-          const idx = M.PLANS[pid].findIndex(p => p.id === apiPlan.id);
-          if (idx > -1) M.PLANS[pid][idx] = apiPlan;
-          else M.PLANS[pid].push(apiPlan);
-          existingIds.add(apiPlan.id);
-        }
-        // 保留本地独有的计划（API 没返回的，但本地有）
-        //（M.PLANS[pid] 中未被覆盖的本地项保持不变）
+        M.PLANS[pid] = [...data.PLANS[pid]];
       }
     }
-    // 同步 PLANS 到 localStorage（让 getPlansForProject 等 mock-data.js 函数能读到最新数据）—— 仅首次加载
-    if (M._initialLoadDone !== true) {
-      try { localStorage.setItem('daily_plans', JSON.stringify(M.PLANS)); } catch(e) { console.warn('[localStorage] 写计划失败:', e.message); }
-    }
+    // R5 修复：数组/对象字段改为就地修改，避免替换 module-level 引用
+    // （否则 mock-data.js 内部函数 getPage0XData/getMilestoneData 等会读到旧的 module-level mock 数据）
+    M.ECC_ITEMS.length = 0; M.ECC_ITEMS.push(...(data.ECC_ITEMS || []));
+    M.DRAWING_DEEPENINGS.length = 0; M.DRAWING_DEEPENINGS.push(...(data.DRAWING_DEEPENINGS || []));
+    M.WEEKLY_GANTT_ITEMS.length = 0; M.WEEKLY_GANTT_ITEMS.push(...(data.WEEKLY_GANTT_ITEMS || []));
+    M.CONSTRUCTION_ZONE_SCHEDULES.length = 0; M.CONSTRUCTION_ZONE_SCHEDULES.push(...(data.CONSTRUCTION_ZONE_SCHEDULES || []));
 
-    // ECC / 图纸深化 / 甘特 / 施工段
-    M.ECC_ITEMS = data.ECC_ITEMS || [];
-    M.DRAWING_DEEPENINGS = data.DRAWING_DEEPENINGS || [];
-    M.WEEKLY_GANTT_ITEMS = data.WEEKLY_GANTT_ITEMS || [];
-    M.CONSTRUCTION_ZONE_SCHEDULES = data.CONSTRUCTION_ZONE_SCHEDULES || [];
-
-    // 里程碑
-    M.MILESTONES = data.MILESTONES || {};
-    M.MILESTONE_PLANS = data.MILESTONE_PLANS || {};
+    // 对象字段：清空键再合并（保持引用）
+    for (const k of Object.keys(M.MILESTONES)) delete M.MILESTONES[k];
+    if (data.MILESTONES) Object.assign(M.MILESTONES, data.MILESTONES);
+    for (const k of Object.keys(M.MILESTONE_PLANS)) delete M.MILESTONE_PLANS[k];
+    if (data.MILESTONE_PLANS) Object.assign(M.MILESTONE_PLANS, data.MILESTONE_PLANS);
 
     // 签到：API 返回的是项目分桶格式 { [projectId]: { [date]: { [mgrId]: { present, reason } } } }
     // 合并到 mock-data.js 的 module-level DAILY_ATTENDANCE（get/setAttendanceForDate 都按这个对象读写）
@@ -145,14 +141,19 @@ async function loadDataFromAPI() {
       });
     }
 
-    // 标准工种模板（周报 07 表头，DB 管理）
-    M.STANDARD_TRADES = data.STANDARD_TRADES || [];
+    // R5 修复：就地修改数组
+    // STANDARD_TRADES 是独立 API 端点 /api/standard-trades 管理的(DB 真实数据),
+    // 不在 loadDataFromAPI 的 data 返回中,也不在 window.MockData 暴露范围。
+    // renderStandardTradesList() 会异步从 /api/standard-trades 拉取并赋值给 M.STANDARD_TRADES。
+    // 此处跳过,不做任何处理。
 
-    // 固定模板模式下录入的本周/下周人数（按 project/week/trade 存）
-    M.WEEKLY_LABOR_DATA = data.WEEKLY_LABOR_DATA || [];
+    // WEEKLY_LABOR_DATA 是后端 API 管理的真实数据(/api/weekly-labor-data),
+    // 不在 /api/data/all 返回中。renderWeeklyLaborData() 会异步从 /api/weekly-labor-data 加载。
+    // 此处不做任何处理,不清空已有数据。
 
-    // ECC 手动汇总（按项目一条）
-    M.ECC_SUMMARIES = data.ECC_SUMMARIES || {};
+    // 对象字段就地更新
+    for (const k of Object.keys(M.ECC_SUMMARIES)) delete M.ECC_SUMMARIES[k];
+    if (data.ECC_SUMMARIES) Object.assign(M.ECC_SUMMARIES, data.ECC_SUMMARIES);
 
     // 标记首次加载完成，切换项目时不再写 localStorage
     M._initialLoadDone = true;
@@ -245,9 +246,42 @@ async function loadDataFromAPI() {
     };
 
     console.log('[数据] 已从 PostgreSQL 加载', data.PROJECTS.map(p => p.name).join(', '));
+    _lastAPIFailed = false;
+    // R4 修复：API 加载完成（成功），触发 body 淡入
+    document.body.setAttribute('data-loaded', 'true');
   } catch (e) {
     console.log('[数据] 后端 API 不可达，使用 MockData');
+    _lastAPIFailed = true;
+    // R2 修复：API 失败时（offline 模式）所有字段都从 window.MockData 注入，
+    // 不只 EVENTS。保留 module-level 引用（含 _fromMock 标记），offline 模式不区分真假数据。
+    _injectMockFallback();
+    // R4 修复：API 失败也触发淡入（offline 演示模式）
+    document.body.setAttribute('data-loaded', 'true');
   }
+}
+
+function _injectMockFallback() {
+  if (!window.MockData) return;
+  const md = window.MockData;
+  M.PROJECTS = md.PROJECTS || [];
+  M.AREAS = md.AREAS || {};
+  M.WORKERS = md.WORKERS || [];
+  M.MANAGEMENT_TEAM = md.MANAGEMENT_TEAM || [];
+  M.PLANS = md.PLANS || {};
+  M.EVENTS = [...md.EVENTS];
+  M.HISTORY_EVENTS = [...md.HISTORY_EVENTS];
+  M.ISSUES = [...md.ISSUES];
+  M.ECC_ITEMS = [...md.ECC_ITEMS];
+  M.DRAWING_DEEPENINGS = [...md.DRAWING_DEEPENINGS];
+  M.WEEKLY_GANTT_ITEMS = [...md.WEEKLY_GANTT_ITEMS];
+  M.CONSTRUCTION_ZONE_SCHEDULES = [...md.CONSTRUCTION_ZONE_SCHEDULES];
+  // STANDARD_TRADES 和 WEEKLY_LABOR_DATA 是后端 API 管理的真实数据(/api/standard-trades, /api/weekly-labor-data),
+  // 不在 mock-data.js 中定义,也不在 window.MockData 暴露,无需 _injectMockFallback 兜底。
+  // 它们在 renderStandardTradesList() / renderWeeklyLaborData() 中异步从各自 API 加载。
+  M.ECC_SUMMARIES = md.ECC_SUMMARIES || {};
+  M.MILESTONES = md.MILESTONES || {};
+  M.MILESTONE_PLANS = md.MILESTONE_PLANS || {};
+  M.DAILY_ATTENDANCE = md.DAILY_ATTENDANCE || {};
 }
 function fixProgress(v) { if (!v) return v; v = String(v); return v.includes('%') ? v : v + '%'; }
 let currentProjectId = localStorage.getItem('current_project_id') || 'baicaoyuan';
@@ -337,9 +371,11 @@ document.addEventListener('DOMContentLoaded', () => {
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', async () => {
   try {
+    // 1) 从后端拉取真实数据（覆盖 mock）
     await loadDataFromAPI();
-    
-    // 合并 localStorage 本地独有事件
+    // 2) R2 修复：API 失败时（offline 模式）已在 loadDataFromAPI catch 块统一注入 mock，无需再处理
+
+    // 合并 localStorage 本地独有事件（offline 编辑暂存,联网后自动同步）
     try {
       const stored = localStorage.getItem('daily_events');
       if (stored && stored.length < 500000) { // 避免解析超大 localStorage
@@ -970,7 +1006,7 @@ M.loadHistoryOverrides = function() {
   }
 };
 
-function confirmEvent(eventId) {
+async function confirmEvent(eventId) {
   const event = _findEvent(eventId);
   if (event) {
     event.status = event.status === 'draft' ? 'confirmed' : 'draft';
@@ -980,29 +1016,43 @@ function confirmEvent(eventId) {
     renderFilteredEvents();
     renderStats();
     if (typeof updateCalendar === 'function') updateCalendar();
+    // P14 修复: 同步状态到后端 DB,保证 LLM/前端/DB 三方一致
+    try {
+      const r = await fetch('/api/events/' + encodeURIComponent(eventId), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: event.status })
+      });
+      if (!r.ok) console.warn('[confirmEvent] 后端 PUT 失败:', r.status);
+    } catch (e) { console.warn('[confirmEvent] 后端同步失败:', e.message); }
     showToast(event.status === 'confirmed' ? '已确认事件' : '已撤回确认', 'success');
   }
 }
 
-function confirmTodayReport() {
+async function confirmTodayReport() {
   // 只确认当前选中日期范围内的草稿（而不是所有项目的草稿）
   const dates = selectedDates.length > 0 ? selectedDates : [M.TODAY];
-  const beforeDrafts = M.EVENTS.filter(e =>
+  const drafts = M.EVENTS.filter(e =>
     e.projectId === currentProjectId &&
     dates.includes(e.date) &&
     e.status === 'draft'
-  ).length;
-  M.EVENTS.filter(e =>
-    e.projectId === currentProjectId &&
-    dates.includes(e.date) &&
-    e.status === 'draft'
-  ).forEach(e => {
-    e.status = 'confirmed';
-  });
+  );
+  const beforeDrafts = drafts.length;
+  drafts.forEach(e => { e.status = 'confirmed'; });
   if (M.saveEventsToStorage) M.saveEventsToStorage();
   renderFilteredEvents();
   renderStats();
   if (typeof updateCalendar === 'function') updateCalendar();
+  // P14 修复: 批量同步到后端 DB
+  for (const e of drafts) {
+    try {
+      await fetch('/api/events/' + encodeURIComponent(e.id), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'confirmed' })
+      });
+    } catch (err) { console.warn('[confirmTodayReport] PUT 失败:', e.id, err.message); }
+  }
   showToast(beforeDrafts > 0
     ? `已确认 ${beforeDrafts} 个草稿事件`
     : '当前日期没有草稿事件', 'success');
@@ -1058,7 +1108,7 @@ function openEventDetail(eventId) {
   const planName = plan ? (plan.taskName || plan.process) : (event.payload?.taskName || '');
   const p = event.payload || {};
   const rowKV = (label, val) => val ? `<div><div style="font-size:11px;color:#64748b;">${label}</div><div style="font-weight:500;font-size:13px;">${val}</div></div>` : '';
-
+  // 自动执行结果（安全操作）
   let typeFields = '';
   switch (event.type) {
     case 'progress':
@@ -6747,28 +6797,56 @@ async function openWeeklyReport() {
   monday.setDate(today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
   const sunday = new Date(monday);
   sunday.setDate(monday.getDate() + 6);
-  
+
   const weekStart = formatDateObj(monday);
   const weekEnd = formatDateObj(sunday);
-  
+
   let report = null;
+  // P1-2 修复:优先调 GET /api/aggregate/weekly（后端自己读 7 天 DB 数据,前端不用自己拼）
   try {
-    const r = await fetch('/api/aggregate-weekly', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        projectId: currentProjectId,
-        projectName: M.PROJECTS.find(p => p.id === currentProjectId)?.name || currentProjectId,
-        client: M.PROJECTS.find(p => p.id === currentProjectId)?.client || '',
-        weekStart, weekEnd,
-        events: M.EVENTS,
-        issues: M.ISSUES,
-        areas: M.AREAS[currentProjectId] || []
-      })
-    });
-    if (r.ok) report = await r.json();
+    const r = await fetch(`/api/aggregate/weekly?projectId=${encodeURIComponent(currentProjectId)}&weekStart=${weekStart}&weekEnd=${weekEnd}`, { method: 'GET' });
+    if (r.ok) {
+      const j = await r.json();
+      // 兼容后端 V2 返回结构 (source/latencyMs/eventsCount/issuesCount) + V1 返回 (overview/...)
+      if (j.overview || j.progressByArea || j.eventsCount !== undefined) report = j;
+    }
   } catch (e) {
-    console.warn('周报聚合 LLM 失败:', e.message);
+    console.warn('[周报] GET /api/aggregate/weekly 失败,回退 POST:', e.message);
+  }
+  // Fallback: 老 POST 端点(传前端拼的 events/issues/areas)
+  if (!report) {
+    // P4 修复: 空数据时不调 LLM(避免空 events 传给 LLM 返回空周报)
+    const allEvents = [...M.EVENTS, ...M.HISTORY_EVENTS];
+    if (allEvents.length === 0 && M.ISSUES.length === 0) {
+      console.warn('[周报] 本周无 events/issues 数据,跳过 LLM 聚合');
+      report = {
+        overview: `本周（${weekStart} ~ ${weekEnd}）${currentProjectId} 无施工事件记录。`,
+        progressByArea: {},
+        eventsCount: 0,
+        issuesCount: 0,
+        source: 'empty'
+      };
+    } else {
+      try {
+        const r = await fetch('/api/aggregate-weekly', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: currentProjectId,
+            projectName: M.PROJECTS.find(p => p.id === currentProjectId)?.name || currentProjectId,
+            client: M.PROJECTS.find(p => p.id === currentProjectId)?.client || '',
+            weekStart, weekEnd,
+            // P1-2 修复:合并今日 + 历史事件传给 LLM(原本只传今日)
+            events: allEvents,
+            issues: M.ISSUES,
+            areas: M.AREAS[currentProjectId] || []
+          })
+        });
+        if (r.ok) report = await r.json();
+      } catch (e) {
+        console.warn('周报聚合 LLM 失败:', e.message);
+      }
+    }
   }
 
   if (!report) {
@@ -9086,6 +9164,29 @@ function deactivateCustomModel() {
     else showToast(`⚠️ 后端同步失败：${res.error}`, 'error');
   });
 }
+
+// P15 修复: 从 localStorage 恢复 activeModel 显示（供 openSettings 调用）
+function _initActiveModelDisplay() {
+  try {
+    const activeId = localStorage.getItem('activeCustomModel');
+    const el = document.getElementById('activeModelName');
+    const resetBtn = document.getElementById('resetToDefaultBtn');
+    if (!el) return;
+    if (activeId) {
+      const models = JSON.parse(localStorage.getItem('customLLMModels') || '[]');
+      const model = models.find(m => String(m.id) === String(activeId));
+      if (model) {
+        el.textContent = model.name;
+        if (resetBtn) resetBtn.style.display = 'inline-block';
+        return;
+      }
+    }
+    // 默认
+    el.textContent = 'MiniMax-M3（默认）';
+    if (resetBtn) resetBtn.style.display = 'none';
+  } catch (_) {}
+}
+
 function renderCustomModels() {
   const list = document.getElementById('customModelsList');
   const activeId = localStorage.getItem('activeCustomModel');
@@ -10685,7 +10786,7 @@ async function sendChatMessage() {
     return;
   }
 
-  // 1. 显示用户消息（后端会统一保存 user + assistant 消息到 DB）
+  // 1. 显示用户消息（后端会统一保存 user + assistant 消息到 DB，P0-3：后端会返回真 userMsgId/assistantMsgId）
   if (!_messageCache[_activeSessionId]) _messageCache[_activeSessionId] = [];
   _messageCache[_activeSessionId].push({ id: null, role: 'user', content: text });
   appendChatMessage('user', text, false, null);
@@ -10694,19 +10795,11 @@ async function sendChatMessage() {
   _callChatLLM(text);
 }
 
+// saveMsgToDB 已废弃（P0-3 修复）：/api/chat 现在统一返回 userMsgId/assistantMsgId，
+// 前端不再需要独立 POST /api/chat/messages。保留函数以免外部代码引用，标记为 no-op。
 async function saveMsgToDB(sessionId, role, content) {
-  try {
-    const res = await fetch('/api/chat/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId, role, content })
-    });
-    const data = await res.json();
-    return data.id || null;
-  } catch (e) {
-    console.warn('[chat] 保存消息失败:', e.message);
-    return null;
-  }
+  console.warn('[chat] saveMsgToDB 已废弃，请改用 /api/chat 返回的 msgId');
+  return null;
 }
 
 async function _callChatLLM(text) {
@@ -10758,14 +10851,45 @@ async function _callChatLLM(text) {
     const data = await res.json();
     hideChatTyping();
 
+    // P0-3 修复：用后端返回的真 userMsgId 回填 cache + DOM
+    if (data.userMsgId) {
+      const cache = _messageCache[_activeSessionId] || [];
+      // 找到最近一条 role=user 且 id=null 的 entry，回填真 id
+      for (let i = cache.length - 1; i >= 0; i--) {
+        if (cache[i].role === 'user' && (cache[i].id === null || cache[i].id === undefined)) {
+          cache[i].id = data.userMsgId;
+          break;
+        }
+      }
+      // 同步给 DOM（找最新一条 user 消息的 div）
+      const userDivs = document.querySelectorAll('#aiChatMessages .ai-message.user:not([data-msg-id])');
+      if (userDivs.length > 0) {
+        const last = userDivs[userDivs.length - 1];
+        last.setAttribute('data-msg-id', data.userMsgId);
+        // 渲染 action buttons（让编辑/删除可用）
+        const bubble = last.querySelector('.ai-message-bubble');
+        if (bubble && !bubble.querySelector('.ai-message-actions')) {
+          const actionsHtml = '<div class="ai-message-actions">' +
+            '<button class="ai-message-action-btn" onclick="copyChatMessage(this)" title="复制">📋</button>' +
+            '<button class="ai-message-action-btn" onclick="editChatMessage(this)" title="编辑">✏️</button>' +
+            '<button class="ai-message-action-btn ai-msg-del" onclick="deleteChatMessage(this)" title="删除">✕</button>' +
+          '</div>';
+          bubble.insertAdjacentHTML('beforeend', actionsHtml);
+        }
+      }
+    }
+
     if (data.reply) {
-      // 后端已统一保存 assistant 消息到 DB，前端只更新内存 cache + 渲染
-      _messageCache[_activeSessionId].push({ id: null, role: 'assistant', content: data.reply });
-      
+      // P0-3 修复：用后端返回的真 id 写 cache，DOM 同步加 data-msg-id
+      // （之前用 id: null 会导致切会话/刷新后"新消息"对不上 DB、删除/编辑失效）
+      const assistantId = data.assistantMsgId || null;
+      _messageCache[_activeSessionId].push({ id: assistantId, role: 'assistant', content: data.reply });
+
       // === 流式加载特效 ===
       const container = document.getElementById('aiChatMessages');
       if (container) {
         const div = document.createElement('div');
+        if (assistantId) div.setAttribute('data-msg-id', assistantId);
         div.setAttribute('data-msg-content', data.reply);
         div.className = 'ai-message ai-message-system';
         div.innerHTML = '<div class="ai-message-avatar"><img src="assets/avatar-construction-girl.png" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></div><div class="ai-message-bubble"></div>' +
@@ -10774,14 +10898,40 @@ async function _callChatLLM(text) {
             '<button class="ai-message-action-btn ai-msg-del" onclick="deleteChatMessage(this)" title="删除">✕</button>' +
           '</div>';
         container.appendChild(div);
-        
+
         const bubble = div.querySelector('.ai-message-bubble');
         const rendered = renderMarkdownInline(data.reply);
-        _streamTextToBubble(bubble, rendered);
+        // P9 修复: 直接渲染完整 HTML,跳过逐字流式动画
+        bubble.innerHTML = rendered;
+        scrollChatToBottom();
+        renderMermaidDiagrams();
+
+        // P11 修复: 渲染工具调用卡片(替代裸露的 [TOOL_USE:...] 代码)
+        if (data.toolCalls && data.toolCalls.length > 0) {
+          const toolCardsHtml = data.toolCalls.map(tc => {
+            const name = tc.name || 'unknown';
+            const paramsStr = JSON.stringify(tc.params || {}, null, 2);
+            const resultMsg = tc.result?.message || '';
+            const ok = tc.result?.ok !== false;
+            return '<div class="ai-tool-card" style="margin-top:10px;border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:rgba(255,255,255,0.04);overflow:hidden;">' +
+              '<div style="padding:8px 12px;background:rgba(59,130,246,0.12);display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#93c5fd;">' +
+              '<span style="font-size:14px;">⚡</span>' +
+              '<span>调用工具: ' + _escapeHtml(name) + '</span>' +
+              (ok ? '<span style="margin-left:auto;color:#86efac;font-size:11px;">✓ 成功</span>' : '<span style="margin-left:auto;color:#fca5a5;font-size:11px;">✗ 失败</span>') +
+              '</div>' +
+              (resultMsg ? '<div style="padding:6px 12px;font-size:11px;color:#cbd5e1;border-bottom:1px solid rgba(255,255,255,0.06);">' + _escapeHtml(resultMsg.slice(0, 200)) + '</div>' : '') +
+              '<details style="padding:6px 12px;">' +
+              '<summary style="cursor:pointer;font-size:11px;color:#94a3b8;user-select:none;">查看参数</summary>' +
+              '<pre style="margin:6px 0 0;font-size:11px;color:#cbd5e1;background:rgba(0,0,0,0.3);padding:8px;border-radius:4px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;">' + _escapeHtml(paramsStr) + '</pre>' +
+              '</details>' +
+              '</div>';
+          }).join('');
+          bubble.insertAdjacentHTML('beforeend', toolCardsHtml);
+          scrollChatToBottom();
+        }
       }
     }
-
-    // 自动执行结果（安全操作）
+  // 自动执行结果（安全操作）
     if (data.results && data.results.length > 0) {
       data.results.forEach(r => {
         appendChatMessage('system', (r.ok ? '✅ ' : '❌ ') + (r.message || r.error || '执行'), false, null);
@@ -11379,6 +11529,11 @@ function renderMarkdownInline(text) {
   });
 
   // 5. 换行，再去除块级元素旁的冗余 <br>
+  // P10 修复: 先去掉 <table>...</table> 内部的换行,避免表格行间产生 <br> 占用空间
+  html = html.replace(/<table[\s\S]*?<\/table>/g, function(tableBlock) {
+  // 把表内换行(含 <tbody> 与 <tr> 之间)替换成空字符串
+  return tableBlock.replace(/\n/g, '');
+  });
   html = html.replace(/\n/g, '<br>');
   html = html.replace(/<\/div>\s*<br>/g, '</div>');
   html = html.replace(/<\/li>\s*<br>/g, '</li>');
@@ -11387,8 +11542,8 @@ function renderMarkdownInline(text) {
   html = html.replace(/<br>\s*<div /g, '<div ');
   html = html.replace(/<br>\s*<hr /g, '<hr ');
   html = html.replace(/(?:<br>\s*)+<table/g, function(m) {
-    console.log('[br-regex] matched ' + (m.match(/<br>/g)||[]).length + ' br: ' + JSON.stringify(m.slice(-30)));
-    return '<table';
+  console.log('[br-regex] matched ' + (m.match(/<br>/g)||[]).length + ' br: ' + JSON.stringify(m.slice(-30)));
+  return '<table';
   });
   html = html.replace(/(<br\s*\/?>\s*){2,}/g, '<br>');
 
@@ -11442,6 +11597,110 @@ function scrollChatToBottom() {
 function quickChatAction(text) {
   const input = document.getElementById('aiChatInput');
   if (input) { input.value = text; if (!_activeSessionId) { const pid = typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan'; createNewSession(pid, '快捷对话'); } sendChatMessage(); }
+}
+
+// P12 修复: 录进度按钮 → 动态表单（数据从 M.AREAS/M.WORKERS/dr_standard_trades 实时获取）
+// 替换之前的硬编码 "1号楼木工3人完成龙骨安装80%"
+async function openQuickProgressForm() {
+  const pid = typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan';
+  const areas = (window.MockData && window.MockData.AREAS && window.MockData.AREAS[pid]) || [];
+  const workers = (window.MockData && window.MockData.WORKERS) || [];
+
+  // 从 dr_standard_trades 取工种列表（11 个标准工种）
+  let trades = [];
+  try {
+    const r = await fetch('/api/standard-trades');
+    if (r.ok) trades = await r.json();
+  } catch (e) { console.warn('[openQuickProgressForm] 取工种失败:', e.message); }
+
+  // 楼栋：从当前项目 areas 提取（假设 buildingNo 在 area 里）
+  const buildings = [...new Set(areas.map(a => a.buildingNo || a.building_no || '').filter(Boolean))];
+  const buildingOptions = buildings.length > 0
+    ? buildings.map(b => `<option value="${_escapeHtml(b)}">${_escapeHtml(b)}</option>`).join('')
+    : '<option value="">（暂无楼栋数据）</option>';
+
+  // 区域下拉（按楼栋联动）
+  const areaOptions = areas.length > 0
+    ? areas.map(a => {
+        const label = `${a.name}${a.floor ? '（' + a.floor + '）' : ''}${a.buildingNo ? ' - ' + a.buildingNo : ''}`;
+        return `<option value="${_escapeHtml(a.id)}" data-building="${_escapeHtml(a.buildingNo || '')}">${_escapeHtml(label)}</option>`;
+      }).join('')
+    : '<option value="">（暂无区域数据）</option>';
+
+  // 工种下拉（从 dr_standard_trades；fallback 到 workers.role）
+  const tradeSet = new Set();
+  trades.forEach(t => tradeSet.add(t.tradeName || t.trade || t.name));
+  if (tradeSet.size === 0) workers.forEach(w => tradeSet.add(w.role));
+  const tradeOptions = [...tradeSet].filter(Boolean).map(t => `<option value="${_escapeHtml(t)}">${_escapeHtml(t)}</option>`).join('');
+
+  const html = `
+    <div id="quickProgressModal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;">
+      <div style="background:#fff;border-radius:12px;padding:20px;width:90%;max-width:420px;box-shadow:0 10px 40px rgba(0,0,0,0.3);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+          <div style="font-size:16px;font-weight:700;color:#0f172a;">🔨 快速录进度</div>
+          <div onclick="closeQuickProgressForm()" style="cursor:pointer;color:#94a3b8;font-size:20px;padding:4px;">✕</div>
+        </div>
+        <div style="display:grid;gap:10px;font-size:13px;color:#0f172a;">
+          <label>楼栋<select id="qpBuilding" style="width:100%;padding:6px;border:1px solid #cbd5e1;border-radius:4px;margin-top:4px;" onchange="qpBuildingChanged()">${buildingOptions}</select></label>
+          <label>区域<select id="qpArea" style="width:100%;padding:6px;border:1px solid #cbd5e1;border-radius:4px;margin-top:4px;">${areaOptions}</select></label>
+          <label>工种<select id="qpTrade" style="width:100%;padding:6px;border:1px solid #cbd5e1;border-radius:4px;margin-top:4px;">${tradeOptions || '<option value="">（暂无工种）</option>'}</select></label>
+          <label>人数<input id="qpHeadcount" type="number" min="1" value="3" style="width:100%;padding:6px;border:1px solid #cbd5e1;border-radius:4px;margin-top:4px;"></label>
+          <label>进度 %<input id="qpProgress" type="number" min="0" max="100" value="80" style="width:100%;padding:6px;border:1px solid #cbd5e1;border-radius:4px;margin-top:4px;"></label>
+          <label>任务描述<input id="qpTask" type="text" placeholder="如：龙骨安装" style="width:100%;padding:6px;border:1px solid #cbd5e1;border-radius:4px;margin-top:4px;"></label>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">
+          <button onclick="closeQuickProgressForm()" style="padding:6px 14px;border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:6px;cursor:pointer;">取消</button>
+          <button onclick="submitQuickProgress()" style="padding:6px 14px;border:none;background:#00adef;color:#fff;border-radius:6px;cursor:pointer;font-weight:600;">填入对话框</button>
+        </div>
+      </div>
+    </div>
+  `;
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  document.body.appendChild(div.firstElementChild);
+}
+
+function closeQuickProgressForm() {
+  const m = document.getElementById('quickProgressModal');
+  if (m) m.remove();
+}
+
+function qpBuildingChanged() {
+  const b = document.getElementById('qpBuilding').value;
+  const sel = document.getElementById('qpArea');
+  if (!sel) return;
+  for (const opt of sel.options) {
+    const ob = opt.getAttribute('data-building') || '';
+    opt.hidden = b && ob && ob !== b;
+  }
+  // 选中第一个可见
+  const firstVisible = [...sel.options].find(o => !o.hidden);
+  if (firstVisible) sel.value = firstVisible.value;
+}
+
+function submitQuickProgress() {
+  const building = document.getElementById('qpBuilding')?.value || '';
+  const areaSel = document.getElementById('qpArea');
+  const areaId = areaSel?.value || '';
+  const areaName = areaSel?.options[areaSel.selectedIndex]?.text || '';
+  const trade = document.getElementById('qpTrade')?.value || '';
+  const headcount = parseInt(document.getElementById('qpHeadcount')?.value) || 0;
+  const progress = parseInt(document.getElementById('qpProgress')?.value) || 0;
+  const task = document.getElementById('qpTask')?.value?.trim() || '';
+
+  if (!areaId || !trade || !headcount || !progress) {
+    alert('请填写完整：区域、工种、人数、进度');
+    return;
+  }
+
+  // 拼装成自然语言文本（让 LLM 解析成 createEvent）
+  const text = `${building} ${areaName} ${trade} ${headcount}人 完成 ${task || '施工'} ${progress}%`.replace(/\s+/g, ' ').trim();
+  const input = document.getElementById('aiChatInput');
+  if (input) {
+    input.value = text;
+    input.focus();
+  }
+  closeQuickProgressForm();
 }
 
 function executeChatAction(action) {
@@ -11725,6 +11984,8 @@ function openSettings() {
     renderInspectionTimes(s.inspection_times?.times || ['08:30', '13:00', '17:30']);
     const intervalSel = document.getElementById('inspectionInterval');
     if (intervalSel) intervalSel.value = String(s.inspection_times?.interval || 60);
+    // P15 修复: 打开设置面板时初始化 activeModel 显示（从 localStorage 恢复）
+    _initActiveModelDisplay();
     showModal('modalSettings');
   });
 }

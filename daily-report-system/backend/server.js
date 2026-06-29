@@ -121,7 +121,7 @@ app.post('/api/llm/test', async (req, res) => {
       model: model,
       override: {
         baseUrl: baseUrl || undefined,
-        apiKey: LLM_CONFIG.apiKey || undefined,
+        apiKey: apiKey || undefined,
         protocol: protocol || undefined
       }
     });
@@ -212,6 +212,84 @@ app.post('/api/aggregate-weekly', async (req, res) => {
   }
 });
 
+// 周报聚合 V2: GET 端点 + 后端自己读 DB（修复 CLAUDE.md 中"尚未实现"项）
+// 前端只传 projectId + weekStart + weekEnd,后端从 dr_events / dr_issues 读 7 天数据调 LLM
+app.get('/api/aggregate/weekly', async (req, res) => {
+  const { projectId, weekStart, weekEnd } = req.query;
+  if (!projectId || !weekStart || !weekEnd) {
+    return res.status(400).json({ error: 'projectId, weekStart, weekEnd required' });
+  }
+  const start = Date.now();
+  try {
+    // 1. 查项目基本信息
+    const projRes = await query('SELECT id, name, client, location FROM dr_projects WHERE id=$1', [projectId]);
+    if (projRes.rows.length === 0) return res.status(404).json({ error: `项目 ${projectId} 不存在` });
+    const project = projRes.rows[0];
+
+    // 2. 查 7 天 events
+    const evRes = await query(
+      `SELECT id, project_id, date, time, type, area_id, plan_id, payload, submitter, source, status, voice_text, note, completion_type, building_no, floor_no, owner, task_name
+       FROM dr_events
+       WHERE project_id=$1 AND date BETWEEN $2 AND $3
+       ORDER BY date, time`,
+      [projectId, weekStart, weekEnd]
+    );
+    const events = evRes.rows;
+
+    // 3. 查 7 天 issues
+    const isRes = await query(
+      `SELECT id, project_id, type, title, area_id, priority, status, created_date, deadline, owner, description, resolution, photos, propose_dept, cooperate_dept
+       FROM dr_issues
+       WHERE project_id=$1 AND (
+         (created_date BETWEEN $2 AND $3) OR
+         (status != 'closed' AND deadline BETWEEN $2 AND $3)
+       )
+       ORDER BY priority DESC, created_date`,
+      [projectId, weekStart, weekEnd]
+    );
+    const issues = isRes.rows;
+
+    // 4. 查项目区域
+    const arRes = await query(
+      'SELECT id, name, floor, manager FROM dr_areas WHERE project_id=$1 ORDER BY id',
+      [projectId]
+    );
+    const areas = arRes.rows;
+
+    // 5. 调 LLM 聚合（失败降级 mock）
+    try {
+      const result = await llm.aggregateWeekly({
+        projectId, projectName: project.name, client: project.client,
+        weekStart, weekEnd, events, issues, areas
+      });
+      return res.json({
+        source: 'llm',
+        latencyMs: Date.now() - start,
+        eventsCount: events.length,
+        issuesCount: issues.length,
+        ...result
+      });
+    } catch (e) {
+      console.warn('[降级] /api/aggregate/weekly LLM 失败,回退 mock:', e.message);
+      const result = mockAggregateWeekly({
+        projectId, projectName: project.name, client: project.client,
+        weekStart, weekEnd, events, issues, areas
+      });
+      return res.json({
+        source: 'mock',
+        latencyMs: Date.now() - start,
+        eventsCount: events.length,
+        issuesCount: issues.length,
+        fallbackReason: e.message,
+        ...result
+      });
+    }
+  } catch (e) {
+    console.error('[aggregate/weekly] error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ============================================================
 // 挂载 DB 路由（会话、设置等 CRUD）
 // ============================================================
@@ -286,56 +364,88 @@ ${ctx.contextText || '暂无上下文数据'}
     }
     messages.push({ role: 'user', content: message });
 
-    // 4. 使用增强版 ReAct 引擎（支持嵌套 JSON / 多工具 / 上下文压缩 / 死循环检测）
-    const engineResult = await runReactLoop({
-      llm,
-      systemPrompt,
-      messages,
-      maxIterations: MAX_REACT_ITERATIONS,
-      chatModel,
-      override: {
-        baseUrl: overrideBaseUrl || undefined,
-        apiKey: overrideApiKey || undefined,
-        protocol: overrideProtocol || undefined
-      },
-      ctx: {
-        projectId: pid,
-        date: d,
-        permLevel: permLevel || 'allow'
-      }
-    });
-
-    // 5. 保存对话到数据库
-    if (sessionId) {
+    // P0-1 修复：把"保存 user 消息"提到 runReactLoop 之前，确保 LLM 失败时 user 也不丢
+    // P0-4 修复：ID 统一为 cm_${Date.now()}_${rand}，与 routes.js POST /api/chat/messages 一致
+    let userMsgId = null;
+    const persistMessage = async (role, content) => {
+      if (!sessionId) return null;
       try {
-        await query('INSERT INTO dr_chat_messages (id, session_id, role, content) VALUES (gen_random_uuid(), $1, $2, $3)', [sessionId, 'user', message]);
-        await query('INSERT INTO dr_chat_messages (id, session_id, role, content) VALUES (gen_random_uuid(), $1, $2, $3)', [sessionId, 'assistant', engineResult.reply]);
+        const id = 'cm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        await query('INSERT INTO dr_chat_messages (id, session_id, role, content) VALUES ($1, $2, $3, $4)', [id, sessionId, role, content]);
         await query('UPDATE dr_chat_sessions SET updated_at = NOW() WHERE id = $1', [sessionId]);
+        return id;
       } catch (e) {
         console.warn('[chat] 保存消息失败:', e.message);
+        return null;
       }
+    };
+    userMsgId = await persistMessage('user', message);
+
+    let engineResult;
+    let isMock = false;
+    try {
+      // 4. 使用增强版 ReAct 引擎（支持嵌套 JSON / 多工具 / 上下文压缩 / 死循环检测）
+      engineResult = await runReactLoop({
+        llm,
+        systemPrompt,
+        messages,
+        maxIterations: MAX_REACT_ITERATIONS,
+        chatModel,
+        override: {
+          baseUrl: overrideBaseUrl || undefined,
+          apiKey: overrideApiKey || undefined,
+          protocol: overrideProtocol || undefined
+        },
+        ctx: {
+          projectId: pid,
+          date: d,
+          permLevel: permLevel || 'allow'
+        }
+      });
+    } catch (e) {
+      // P0-1 修复：LLM 失败时也把"降级 mock 回复"作为 assistant 落库，保持 user+assistant 配对
+      isMock = true;
+      const fallbackReply = `抱歉，LLM 暂时不可用：${e.message}`;
+      const assistantMsgId = await persistMessage('assistant', fallbackReply);
+      console.warn('[降级] LLM 聊天失败，回退 mock:', e.message);
+      return res.json({
+        reply: fallbackReply,
+        source: 'mock',
+        latencyMs: Date.now() - start,
+        fallbackReason: e.message,
+        userMsgId,
+        assistantMsgId
+      });
     }
 
-    res.json({
-      reply: engineResult.reply,
-      source: 'llm',
-      latencyMs: Date.now() - start,
-      iterations: engineResult.iterations,
-      actions: engineResult.actions,
-      results: engineResult.results,
-      pendingActions: engineResult.pendingActions,
-      model: chatModel,
-      stopped: engineResult.stopped
-    });
-
+  // 5. 写 assistant 消息（LLM 成功路径）- P11 修复: 存清理后的 reply（去除 [TOOL_USE] 块）
+  const assistantMsgId = await persistMessage('assistant', engineResult.reply);
+  
+  res.json({
+    reply: engineResult.reply,
+    toolCalls: engineResult.toolCalls || [],  // P11: 新增结构化工具调用列表
+    source: 'llm',
+    latencyMs: Date.now() - start,
+    iterations: engineResult.iterations,
+    actions: engineResult.actions,
+    results: engineResult.results,
+    pendingActions: engineResult.pendingActions,
+    model: chatModel,
+    stopped: engineResult.stopped,
+    userMsgId,
+    assistantMsgId
+  });
   } catch (e) {
-    console.warn('[降级] LLM 聊天失败，回退 mock:', e.message);
-    res.json({
-      reply: `抱歉，LLM 暂时不可用：${e.message}`,
-      source: 'mock',
-      latencyMs: Date.now() - start,
-      fallbackReason: e.message
-    });
+      // 外层兜底：覆盖 build context / persistMessage 等前置阶段失败
+    console.warn('[降级] /api/chat 前置失败:', e.message);
+    if (!res.headersSent) {
+      res.json({
+        reply: `抱歉，会话处理失败：${e.message}`,
+        source: 'mock',
+        latencyMs: Date.now() - start,
+        fallbackReason: e.message
+      });
+    }
   }
 });
 

@@ -17,6 +17,15 @@ body {
   display: flex; flex-direction: column;
 }
 
+/* R4 修复：数据加载前隐藏主体，避免 mock 闪现 */
+body[data-loaded="false"] {
+  opacity: 0;
+}
+body[data-loaded="true"] {
+  opacity: 1;
+  transition: opacity 200ms ease-in;
+}
+
 /* ---------- 顶部导航 ---------- */
 .topbar {
   background: linear-gradient(135deg, #00adef 0%, #0081cc 100%);

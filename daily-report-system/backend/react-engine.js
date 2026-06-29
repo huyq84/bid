@@ -25,17 +25,23 @@ const STALE_WINDOW = 5;              // 连续多少轮无新进展判定为停�
  */
 function parseAllToolCalls(reply) {
   const calls = [];
-  const regex = /\[TOOL_USE:name=(\w+),params=(\{[\s\S]*?\})\]/g;
+  // P16 修复: 支持三种 LLM 格式
+  // 格式1: [TOOL_USE:name=xxx,params={JSON}] (系统 prompt 标准格式, name= 后面是工具名)
+  // 格式2: [TOOL_USE:toolName,key=val] (LLM 简写,无 params= 关键字)
+  // 格式3: [TOOL_USE:toolName,params={JSON}] (混合,无 name= 前缀)
+  // 注意: [^\\]] 匹配除 ] 外的字符(JS 正则中 [^]] 不合法)
+
+  // 先尝试格式1和格式3 (params=JSON) — name= 可有可无
+  const paramsRegex = /\[TOOL_USE:(?:name=)?(\w+),params=(\{[\s\S]*?\})\]/g;
   let match;
 
-  while ((match = regex.exec(reply)) !== null) {
+  while ((match = paramsRegex.exec(reply)) !== null) {
     const toolName = match[1];
     const rawParams = match[2];
 
     // 用栈匹配大括号深度，找到真正的 params 结尾
     let depth = 0;
     let paramEnd = match.index + match[0].length;
-    // 从 match[2] 的开头开始，逐个字符数大括号
     const paramsStart = match.index + match[0].indexOf('{');
     for (let i = paramsStart; i < reply.length; i++) {
       const ch = reply[i];
@@ -52,16 +58,49 @@ function parseAllToolCalls(reply) {
     // 提取完整 params 字符串（含嵌套大括号）
     const fullParams = reply.slice(paramsStart, paramEnd);
 
-    // 尝试 JSON 解析
+    // 尝试 JSON 解析，失败时尝试修复常见 LLM 输出问题（键无引号、尾随逗号等）
     let toolParams;
     try {
       toolParams = JSON.parse(fullParams);
     } catch (e) {
-      console.warn(`[react] JSON 解析失败: ${e.message}, 原始: ${fullParams.slice(0, 100)}`);
-      continue; // 跳过这个调用，继续找下一个
+      console.warn(`[react] JSON 解析失败: ${e.message}, 尝试修复...`);
+      // 修复1: 给无引号的键加引号，保留 { 或 , 前缀 ($1)
+      let fixed = fullParams;
+      fixed = fixed.replace(/([{,])\s*([a-zA-Z_]\w*)\s*:/g, '$1"$2":');
+      // 修复2: 去掉尾随逗号
+      fixed = fixed.replace(/,\s*([}\]])/g, '$1');
+      try {
+        toolParams = JSON.parse(fixed);
+        console.warn(`[react] 修复后解析成功`);
+      } catch (e2) {
+        console.warn(`[react] 修复后仍失败: ${e2.message}`);
+        continue;
+      }
     }
 
     calls.push({ toolName, toolParams, rawReply: reply });
+  }
+
+  // 再尝试格式2 (简写 key=val) — 排除已被格式1/3匹配的位置
+  const simpleRegex = /\[TOOL_USE:(\w+),([^\]]+)\]/g;
+  while ((match = simpleRegex.exec(reply)) !== null) {
+    // 跳过 params= 格式（已被上面处理）
+    if (match[0].includes('params=')) continue;
+
+    const toolName = match[1];
+    const fullMatch = match[0];
+    const inner = fullMatch.slice('[TOOL_USE:'.length, -1); // 去掉 [TOOL_USE: 和 ]
+    const params = {};
+    // 解析 key=value 或 key="value" — [^\s,]+ 匹配到空格或逗号为止
+    const kvRegex = /(\w+)=(?:"([^"]*)"|([^\s,]+))/g;
+    let kv;
+    while ((kv = kvRegex.exec(inner)) !== null) {
+      const key = kv[1];
+      const val = kv[2] !== undefined ? kv[2] : kv[3];
+      // 尝试转数字
+      params[key] = isNaN(val) ? val : Number(val);
+    }
+    calls.push({ toolName, toolParams: params, rawReply: reply });
   }
 
   return calls;
@@ -306,9 +345,19 @@ export async function runReactLoop(options) {
 
           if (!isQuery) {
             actions.push({ type: toolName, data: toolParams });
+            // P13 修复: 优先提取 result.message(人类可读),而非整个 JSON.stringify
+            let humanMsg;
+            if (toolResult && typeof toolResult === 'object' && toolResult.message) {
+              humanMsg = String(toolResult.message).slice(0, 200);
+            } else if (typeof toolResult === 'string') {
+              // 工具直接返回字符串(非对象),直接用,不 JSON.stringify
+              humanMsg = toolResult.slice(0, 200);
+            } else {
+              humanMsg = truncatedResult.slice(0, 200);
+            }
             results.push({
-              ok: true,
-              message: truncatedResult.slice(0, 200),
+              ok: toolResult?.ok !== false,
+              message: humanMsg,
               action: { type: toolName, data: toolParams }
             });
           }
@@ -362,8 +411,20 @@ export async function runReactLoop(options) {
     reply = '抱歉，我暂时无法回答这个问题。';
   }
 
+  // P11/P16 修复: 从 reply 中移除 [TOOL_USE:...] 块（支持 name=xxx,params={} 和 简写 key=val 格式）
+  // (?:name=)? 匹配可选的 name= 前缀
+  const cleanReply = reply.replace(/\[TOOL_USE:(?:name=)?\w+(?:,params=\{[\s\S]*?\}|,[^\]]+)?\]/g, '').trim();
+
+  // P11 修复: 收集所有 toolCalls（从 actions 中提取）
+  const toolCalls = actions.map((a, i) => ({
+    name: a.type,
+    params: a.data,
+    result: results[i] || null
+  }));
+
   return {
-    reply,
+    reply: cleanReply || reply,  // 如果清理后为空,保留原文(防止空回复)
+    toolCalls,  // P11: 新增结构化工具调用列表
     source: 'llm',
     iterations,
     actions,

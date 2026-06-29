@@ -9,7 +9,7 @@
   <script src="assets/mermaid.min.js"></script>
   <script>mermaid.initialize({ startOnLoad: false, theme: 'dark', fontFamily: 'sans-serif', flowchart: { useMaxWidth: true } });</script>
 </head>
-<body>
+<body data-loaded="false">
 
   <!-- ============== 顶部导航 ============== -->
   <header class="topbar">
@@ -1642,7 +1642,8 @@
         <span class="ai-chip" onclick="quickChatAction('帮我记录一个协调事宜')">📋 记录协调</span>
         <span class="ai-chip" onclick="quickChatAction('显示今日进度计划')">📅 今日计划</span>
         <span class="ai-chip" onclick="quickChatAction('生成周报')">📊 生成周报</span>
-        <span class="ai-chip" onclick="quickChatAction('1号楼木工3人完成龙骨安装80%')">🔨 录进度</span>
+        <!-- P12 修复: 录进度按钮改为打开动态表单（不再硬编码"1号楼木工3人..."） -->
+        <span class="ai-chip" onclick="openQuickProgressForm()">🔨 录进度</span>
       </div>
       <div id="chatPhotoStrip" style="display:none;padding:4px 8px;border-top:1px solid rgba(255,255,255,0.08);background:rgba(15,23,42,0.5);flex-wrap:wrap;gap:4px;"></div>
       <div class="ai-chat-input-area">

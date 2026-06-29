@@ -460,6 +460,13 @@ const EVENTS = [
   }
 ];
 
+// P0-2 修复：给 mock 的所有 module-level 数组打 _fromMock=true 标记
+// 标记后,loadDataFromAPI 在 API 成功时可以过滤;同时任何意外走 module-level fallback 的代码也有迹可循
+// （防御性编程：之前只标记 EVENTS 7 条;现在扩展到所有 13 个 mock 数据源）
+// 注意：批量标记循环放在文件最末尾（所有 const 定义之后、window.MockData 暴露之前），
+// 避免 const 引用未声明的 ReferenceError（HISTORY_EVENTS/ISSUES 等定义在后）
+for (const e of EVENTS) e._fromMock = true;
+
 // 历史事件（用于日历展示）
 const HISTORY_EVENTS = [
   // 6月4日
@@ -1181,8 +1188,9 @@ function getPage03Data() {
 
 // --- 页面 0301：重要节点 ---
 function getPage0301Data(projectId) {
-  // 优先读 window.MockData.MILESTONE_PLANS（运行时更新的），回退到模块级 MILESTONE_PLANS
-  var plans = (window && window.MockData && window.MockData.MILESTONE_PLANS && window.MockData.MILESTONE_PLANS[projectId]) || MILESTONE_PLANS[projectId] || [];
+  // R3 修复：只读 window.MockData.MILESTONE_PLANS（运行时由 app.v3.js 覆盖为 API 数据）
+  // 删除 module-level MILESTONE_PLANS fallback，避免引用脱钩时显示 8 条 mock 而非 API 22 条
+  var plans = (window && window.MockData && window.MockData.MILESTONE_PLANS && window.MockData.MILESTONE_PLANS[projectId]) || [];
   if (plans.length === 0) return { year: 2026, months: [], categories: {} };
   var year = plans[0].year || 2026;
   // 收集所有有效月份（targetMonth 为数字的）
@@ -1233,8 +1241,8 @@ function getMilestoneData() {
   var projectId = (typeof window !== 'undefined' && window.MOCK_CURRENT_PROJECT) 
                || (typeof CURRENT_PROJECT_ID !== 'undefined' ? CURRENT_PROJECT_ID : null)
                || 'baicaoyuan';
-  // 优先读 window.MockData.MILESTONE_PLANS（运行时更新的），回退到模块级 MILESTONE_PLANS
-  var plans = (window && window.MockData && window.MockData.MILESTONE_PLANS && window.MockData.MILESTONE_PLANS[projectId]) || MILESTONE_PLANS[projectId] || [];
+  // R3 修复：只读 window.MockData.MILESTONE_PLANS（运行时由 app.v3.js 覆盖为 API 数据）
+  var plans = (window && window.MockData && window.MockData.MILESTONE_PLANS && window.MockData.MILESTONE_PLANS[projectId]) || [];
   // 收集所有月份 key
   var monthSet = {};
   plans.forEach(function (p) {
@@ -1452,6 +1460,7 @@ function getPage06Data(projectId, weekStart, weekEnd) {
       }
     });
   });
+  // 标准工种模板(与 app.v3.js renderStandardTradesList 同步的默认值)
   const STANDARD_TRADES = [
     { trade: '5S小队', mapFrom: '普工' },
     { trade: '电工', mapFrom: '电工' },
@@ -1552,6 +1561,14 @@ function getWeekRangeForDate(dateStr) {
 }
 
 function getPlansForProject(projectId) {
+  // R5/P6 修复: 优先读 window.MockData.PLANS (API 真实数据,通过 module-level 引用同步)
+  //   -> localStorage (offline 兜底)
+  //   -> DEFAULT_PLANS (纯 mock 兜底)
+  // (之前只读 localStorage,导致 R1 修复时同步整个 PLANS 到 localStorage 超过浏览器 5MB 配额)
+  if (typeof window !== 'undefined' && window.MockData && window.MockData.PLANS) {
+    const livePlans = window.MockData.PLANS[projectId];
+    if (Array.isArray(livePlans)) return livePlans;
+  }
   const stored = localStorage.getItem('daily_plans');
   if (stored) {
     try {
@@ -1581,8 +1598,9 @@ function getPageSectionsData(projectId) {
 }
 
 function getWeekAttendanceStats(weekStart, weekEnd, projectId) {
-  // 优先用 window.MockData.MANAGEMENT_TEAM（包含运行时新建的人员），fallback 到模块级 const
-  var team = (typeof window !== 'undefined' && window.MockData && window.MockData.MANAGEMENT_TEAM) || MANAGEMENT_TEAM || [];
+  // P2 修复：统一走 window.MockData，不再 fallback 到 module-level const
+  // （R5 已将 MANAGEMENT_TEAM 改为就地 push，window.MockData 和 module-level 是同一引用，但为防御性编程统一走 window.MockData）
+  var team = (typeof window !== 'undefined' && window.MockData && window.MockData.MANAGEMENT_TEAM) || [];
   if (team.length === 0) {
     return [{ name: '张三', position: '项目经理', phone: '13800138000', fullAttendance: true, totalDays: 5, presentDays: 5, absentReasons: [] }];
   }
@@ -1669,6 +1687,29 @@ function setAttendanceForDate(date, records, projectId) {
     localStorage.setItem('daily_attendance', JSON.stringify(DAILY_ATTENDANCE));
   } catch (e) {}
 }
+
+// P0-2 完整修复：给 13 个 mock 数据源打 _isMockData=true 标记（标记整个数组/对象，不是给每条加 _fromMock）
+// 原因：之前给每条 EVENTS/HISTORY_EVENTS 加 _fromMock 是因为这些数据会通过 M.EVENTS 暴露给 UI，需要单条过滤。
+// 其它数据源（PROJECTS/AREAS/WORKERS/MANAGEMENT_TEAM/MILESTONES/ISSUES/ECC_ITEMS/DRAWING_DEEPENINGS/WEEKLY_GANTT_ITEMS/CONSTRUCTION_ZONE_SCHEDULES）
+// 只通过 M.XXX 在内部使用，不会被前端 UI 单条渲染，不需要单条 _fromMock。
+// 但为了运行时校验"module-level 数组是否还包含 mock 数据"（R5 修复保证 module-level 引用不变，但万一脱钩可以快速检测），
+// 我们给整个 module-level 数组/对象打一个 _isMockData 标记（在数据被 API 覆盖后，window.MockData.X 是真实 API 数据，标记会被 R5 就地修改 push 进去的新数据覆盖）
+// 这里只在 module-level 数组上打 _isMockData 标记，window.MockData 暴露给前端的引用本身没这个标记
+EVENTS._isMockData = true;
+HISTORY_EVENTS._isMockData = true;
+ISSUES._isMockData = true;
+ECC_ITEMS._isMockData = true;
+DRAWING_DEEPENINGS._isMockData = true;
+WEEKLY_GANTT_ITEMS._isMockData = true;
+CONSTRUCTION_ZONE_SCHEDULES._isMockData = true;
+WORKERS._isMockData = true;
+MANAGEMENT_TEAM._isMockData = true;
+PROJECTS._isMockData = true;
+AREAS._isMockData = true;
+MILESTONES._isMockData = true;
+MILESTONE_PLANS._isMockData = true;
+// 同时 EVENTS 7 条仍打 _fromMock=true（loadDataFromAPI 51 行 filter 依赖这个）
+for (const e of EVENTS) e._fromMock = true;
 
 // 暴露到全局
 window.MockData = {
