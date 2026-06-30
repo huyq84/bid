@@ -2144,6 +2144,15 @@ aside .card { margin-bottom: 0; }
 }
 .ai-message-action-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
 .ai-message-action-btn.ai-msg-del:hover { color: #ef4444; }
+.ai-message-time {
+  font-size: 10px;
+  color: rgba(255,255,255,0.35);
+  text-align: right;
+  margin-top: 4px;
+  line-height: 1;
+  user-select: none;
+  pointer-events: none;
+}
 .ai-message-bubble br { display: block; content: ''; margin: 2px 0; }
 .ai-message-bubble p { margin: 4px 0; }
 .ai-message-system .ai-message-bubble {

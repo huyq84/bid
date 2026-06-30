@@ -10767,9 +10767,9 @@ async function switchSession(sessionId, _forceReload) {
     const res = await fetch('/api/chat/sessions/' + encodeURIComponent(sessionId) + '/messages');
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const messages = await res.json();
-    _messageCache[sessionId] = messages.map(m => ({ id: m.id, role: m.role, content: m.content }));
+    _messageCache[sessionId] = messages.map(m => ({ id: m.id, role: m.role, content: m.content, createdAt: m.created_at }));
     for (const m of messages) {
-      appendChatMessage(m.role === 'user' ? 'user' : 'system', m.content, true, m.id);
+      appendChatMessage(m.role === 'user' ? 'user' : 'system', m.content, true, m.id, m.created_at);
     }
     scrollChatToBottom();
   } catch (e) {
@@ -10950,12 +10950,13 @@ async function sendChatMessage() {
   document.getElementById('aiChatSendBtn').disabled = true;
 
   // 自然语言授权：用户说"确认/继续/执行/好/可以/是"时自动触发所有待授权卡片
+  const now = new Date().toISOString();
   if (/^(确认|继续|执行|好的|可以|是|嗯|对|授权|同意|批准|好|行|干|做|来吧)/i.test(text)) {
     const cards = document.querySelectorAll('.ai-auth-btn-confirm:not(:disabled)');
     if (cards.length > 0) {
-      appendChatMessage('user', text, false, null);
+      appendChatMessage('user', text, false, null, now);
       if (!_messageCache[_activeSessionId]) _messageCache[_activeSessionId] = [];
-      _messageCache[_activeSessionId].push({ id: null, role: 'user', content: text });
+      _messageCache[_activeSessionId].push({ id: null, role: 'user', content: text, createdAt: now });
       cards.forEach(btn => authorizeAction(btn));
       return;
     }
@@ -10977,7 +10978,7 @@ async function sendChatMessage() {
     var plans = typeof M !== 'undefined' && M.PLANS ? M.PLANS[projectId] || [] : [];
 
     // 显示用户消息：文字+照片合并为一条气泡
-    _appendChatPhotosWithText(text, photoQueue);
+    _appendChatPhotosWithText(text, photoQueue, now);
 
     // 解析每张照片
     var parsedResults = [];
@@ -11015,7 +11016,7 @@ async function sendChatMessage() {
 
     // 用组合文本调用 LLM（后端会统一保存 user + assistant 消息到 DB）
     if (!_messageCache[_activeSessionId]) _messageCache[_activeSessionId] = [];
-    _messageCache[_activeSessionId].push({ id: null, role: 'user', content: combinedText });
+    _messageCache[_activeSessionId].push({ id: null, role: 'user', content: combinedText, createdAt: now });
     showChatTyping();
     _callChatLLM(combinedText);
     return;
@@ -11023,8 +11024,8 @@ async function sendChatMessage() {
 
   // 1. 显示用户消息（后端会统一保存 user + assistant 消息到 DB，P0-3：后端会返回真 userMsgId/assistantMsgId）
   if (!_messageCache[_activeSessionId]) _messageCache[_activeSessionId] = [];
-  _messageCache[_activeSessionId].push({ id: null, role: 'user', content: text });
-  appendChatMessage('user', text, false, null);
+  _messageCache[_activeSessionId].push({ id: null, role: 'user', content: text, createdAt: now });
+  appendChatMessage('user', text, false, null, now);
 
   showChatTyping();
   _callChatLLM(text);
@@ -11121,8 +11122,9 @@ async function _callChatLLM(text) {
     if (data.reply) {
       // P0-3 修复：用后端返回的真 id 写 cache，DOM 同步加 data-msg-id
       // （之前用 id: null 会导致切会话/刷新后"新消息"对不上 DB、删除/编辑失效）
+      const now2 = new Date().toISOString();
       const assistantId = data.assistantMsgId || null;
-      _messageCache[_activeSessionId].push({ id: assistantId, role: 'assistant', content: data.reply });
+      _messageCache[_activeSessionId].push({ id: assistantId, role: 'assistant', content: data.reply, createdAt: now2 });
 
       // === 流式加载特效 ===
       const container = document.getElementById('aiChatMessages');
@@ -11141,7 +11143,10 @@ async function _callChatLLM(text) {
         const bubble = div.querySelector('.ai-message-bubble');
         const rendered = renderMarkdownInline(data.reply);
         // P9 修复: 直接渲染完整 HTML,跳过逐字流式动画
-        bubble.innerHTML = rendered;
+        const d = new Date(now2);
+        const isToday = d.toDateString() === new Date().toDateString();
+        const timeStr2 = (isToday ? '' : (d.getMonth()+1).toString().padStart(2,'0') + '-' + d.getDate().toString().padStart(2,'0') + ' ') + d.toTimeString().slice(0, 8);
+        bubble.innerHTML = rendered + '<div class="ai-message-time">' + timeStr2 + '</div>';
         scrollChatToBottom();
         renderMermaidDiagrams();
 
@@ -11178,8 +11183,9 @@ async function _callChatLLM(text) {
 
   // 自动执行结果（安全操作）
     if (data.results && data.results.length > 0) {
+      const now3 = new Date().toISOString();
       data.results.forEach(r => {
-        appendChatMessage('system', (r.ok ? '✅ ' : '❌ ') + (r.message || r.error || '执行'), false, null);
+        appendChatMessage('system', (r.ok ? '✅ ' : '❌ ') + (r.message || r.error || '执行'), false, null, now3);
       });
       // 预删除本地事件，避免 loadDataFromAPI 的 localOnlyEvents 把已删事件加回来
       // 即使删除失败（DB 中不存在，幽灵事件）也清理本地
@@ -11308,9 +11314,10 @@ async function rejectAction(btn) {
 // 离线 mock 回复 — 不模拟任何操作，仅提示连接失败
 async function _mockChatReplyLocal(text) {
   const reply = '⚠️ 无法连接后端服务，请确认后端已启动。LLM 功能暂不可用。';
+  const now = new Date().toISOString();
   if (!_messageCache[_activeSessionId]) _messageCache[_activeSessionId] = [];
-  _messageCache[_activeSessionId].push({ id: null, role: 'assistant', content: reply });
-  appendChatMessage('system', reply, false, null);
+  _messageCache[_activeSessionId].push({ id: null, role: 'assistant', content: reply, createdAt: now });
+  appendChatMessage('system', reply, false, null, now);
 }
 
 // ------ 生命周期 ------
@@ -11618,13 +11625,25 @@ async function _refreshAfterChat(actionTypes) {
 }
 
 // ------ Markdown 渲染 + 消息显示 ------
-function appendChatMessage(role, content, skipCache, msgId) {
+function appendChatMessage(role, content, skipCache, msgId, createdAt) {
   const container = document.getElementById('aiChatMessages');
   if (!container) return;
   const div = document.createElement('div');
   if (msgId) div.setAttribute('data-msg-id', msgId);
   if (content) div.setAttribute('data-msg-content', content);
   const rendered = renderMarkdownInline(content);
+  let timeStr = '';
+  if (createdAt) {
+    try {
+      const d = new Date(createdAt);
+      if (!isNaN(d.getTime())) {
+        const now = new Date();
+        const isToday = d.toDateString() === now.toDateString();
+        timeStr = (isToday ? '' : (d.getMonth()+1).toString().padStart(2,'0') + '-' + d.getDate().toString().padStart(2,'0') + ' ') + d.toTimeString().slice(0, 8);
+      }
+    } catch(e) {}
+  }
+  const timeHtml = timeStr ? '<div class="ai-message-time">' + timeStr + '</div>' : '';
   const actionsHtml = msgId ? '<div class="ai-message-actions">' +
     '<button class="ai-message-action-btn" onclick="copyChatMessage(this)" title="复制">📋</button>' +
     (role === 'user' ? '<button class="ai-message-action-btn" onclick="editChatMessage(this)" title="编辑">✏️</button>' : '') +
@@ -11632,13 +11651,13 @@ function appendChatMessage(role, content, skipCache, msgId) {
   '</div>' : '';
   if (role === 'user') {
     div.className = 'ai-message user';
-    div.innerHTML = '<div class="ai-message-avatar">👤</div><div class="ai-message-bubble">' + rendered + actionsHtml + '</div>';
+    div.innerHTML = '<div class="ai-message-avatar">👤</div><div class="ai-message-bubble">' + rendered + timeHtml + actionsHtml + '</div>';
   } else if (role === 'ai-proactive') {
     div.className = 'ai-message ai-proactive';
     div.innerHTML = '<div class="ai-message-bubble" style="background:transparent;padding:0;">' + rendered + '</div>';
   } else {
     div.className = 'ai-message ai-message-system';
-    div.innerHTML = '<div class="ai-message-avatar"><img src="assets/avatar-construction-girl.png" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></div><div class="ai-message-bubble">' + rendered + actionsHtml + '</div>';
+    div.innerHTML = '<div class="ai-message-avatar"><img src="assets/avatar-construction-girl.png" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></div><div class="ai-message-bubble">' + rendered + timeHtml + actionsHtml + '</div>';
   }
   container.appendChild(div);
   // 保险：元素入 DOM 后检查 <table> 前是否有 <br>，有则清理（防御外部修改）
@@ -12135,11 +12154,22 @@ function handleChatPhoto(input) {
   showToast('📷 ' + _chatPhotoQueue.length + ' 张照片待发送，输入文字后点击发送', 'info');
 }
 
-function _appendSystemPhotoGrid(events) {
+function _appendSystemPhotoGrid(events, createdAt) {
   const container = document.getElementById('aiChatMessages');
   if (!container || !events.length) return;
   const div = document.createElement('div');
   div.className = 'ai-message ai-message-system';
+  let timeStr = '';
+  if (createdAt) {
+    try {
+      const dd = new Date(createdAt);
+      if (!isNaN(dd.getTime())) {
+        const isToday = dd.toDateString() === new Date().toDateString();
+        timeStr = (isToday ? '' : (dd.getMonth()+1).toString().padStart(2,'0') + '-' + dd.getDate().toString().padStart(2,'0') + ' ') + dd.toTimeString().slice(0, 8);
+      }
+    } catch(e) {}
+  }
+  const timeHtml = timeStr ? '<div class="ai-message-time">' + timeStr + '</div>' : '';
   let html = '<div class="ai-message-avatar"><img src="assets/avatar-construction-girl.png" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></div><div class="ai-message-bubble">';
   for (const ev of events) {
     if (!ev.photos || !ev.photos.length) continue;
@@ -12150,30 +12180,44 @@ function _appendSystemPhotoGrid(events) {
     }
     html += '</div>';
   }
-  html += '</div>';
+  html += timeHtml + '</div>';
   div.innerHTML = html;
   container.appendChild(div);
   scrollChatToBottom();
 }
 
-function _appendChatPhotos(photos) {
+function _appendChatPhotos(photos, createdAt) {
   const container = document.getElementById('aiChatMessages');
   if (!container || !photos.length) return;
   const div = document.createElement('div');
   div.className = 'ai-message user';
+  let timeStr = '';
+  if (createdAt) {
+    try {
+      const dd = new Date(createdAt);
+      if (!isNaN(dd.getTime())) {
+        const isToday = dd.toDateString() === new Date().toDateString();
+        timeStr = (isToday ? '' : (dd.getMonth()+1).toString().padStart(2,'0') + '-' + dd.getDate().toString().padStart(2,'0') + ' ') + dd.toTimeString().slice(0, 8);
+      }
+    } catch(e) {}
+  }
+  const timeHtml = timeStr ? '<div class="ai-message-time">' + timeStr + '</div>' : '';
   div.innerHTML = '<div class="ai-message-avatar">👤</div><div class="ai-message-bubble"><div style="display:flex;flex-wrap:wrap;gap:4px;">' +
     photos.map(p => '<div style="width:72px;height:72px;border-radius:6px;overflow:hidden;cursor:zoom-in;border:1px solid rgba(255,255,255,0.15);flex-shrink:0;" onclick="openPhotoLightboxSrc(\'' + p.dataUrl.replace(/'/g, "\\'") + '\',\'' + (p.caption || '现场照片').replace(/'/g, "\\'") + '\')"><img src="' + p.dataUrl + '" style="width:100%;height:100%;object-fit:cover;display:block;"></div>'
-    ).join('') + '</div></div>';
+    ).join('') + '</div>' + timeHtml + '</div>';
   container.appendChild(div);
   scrollChatToBottom();
 }
 
-function _appendChatPhotosWithText(text, photos) {
+function _appendChatPhotosWithText(text, photos, createdAt) {
   var container = document.getElementById('aiChatMessages');
-  if (!container || !photos.length) { if (text) appendChatMessage('user', text); return; }
+  if (!container || !photos.length) { if (text) appendChatMessage('user', text, false, null, createdAt || new Date().toISOString()); return; }
   var photoItems = photos.map(function(p) { return { dataUrl: p.dataUrl, caption: p.name }; });
   var div = document.createElement('div');
   div.className = 'ai-message user';
+  var d = new Date();
+  var isToday = d.toDateString() === new Date().toDateString();
+  var timeStr = (isToday ? '' : (d.getMonth()+1).toString().padStart(2,'0') + '-' + d.getDate().toString().padStart(2,'0') + ' ') + d.toTimeString().slice(0, 8);
   var bc = '';
   if (text) bc += '<div style="margin-bottom:6px;white-space:pre-wrap;">' + text.replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>';
   bc += '<div style="display:flex;flex-wrap:wrap;gap:4px;">';
@@ -12181,7 +12225,7 @@ function _appendChatPhotosWithText(text, photos) {
     var pp = photoItems[i];
     bc += '<div style="width:80px;height:80px;border-radius:6px;overflow:hidden;cursor:zoom-in;border:1px solid rgba(255,255,255,0.15);flex-shrink:0;" onclick="openPhotoLightboxSrc(\'' + pp.dataUrl.replace(/'/g, "\'") + '\',\'' + (pp.caption||'现场照片').replace(/'/g, "\'") + '\')"><img src="' + pp.dataUrl + '" style="width:100%;height:100%;object-fit:cover;display:block;"></div>';
   }
-  bc += '</div>';
+  bc += '</div><div class="ai-message-time">' + timeStr + '</div>';
   div.innerHTML = '<div class="ai-message-avatar">👤</div><div class="ai-message-bubble">' + bc + '</div>';
   container.appendChild(div);
   scrollChatToBottom();
@@ -12204,8 +12248,9 @@ async function sendChatPhotos() {
   const areas = typeof M !== 'undefined' && M.AREAS ? M.AREAS[projectId] || [] : [];
   const plans = typeof M !== 'undefined' && M.PLANS ? M.PLANS[projectId] || [] : [];
   // 用户消息显示文本 + 照片缩略图（替换待发送消息）
-  if (text) appendChatMessage('user', text);
-  _appendChatPhotos(queue.map(function(p) { return { dataUrl: p.dataUrl, caption: p.name }; }));
+  var nowPhoto = new Date().toISOString();
+  if (text) appendChatMessage('user', text, false, null, nowPhoto);
+  _appendChatPhotos(queue.map(function(p) { return { dataUrl: p.dataUrl, caption: p.name }; }), nowPhoto);
   showChatTyping();
   const parsedResults = [];
   let successCount = 0;
@@ -12271,9 +12316,9 @@ async function sendChatPhotos() {
   for (const ev of events) {
     summary += '\n**' + (ev.taskName || '拍照记录') + '**' + (ev.areaId ? ' `' + ev.areaId + '`' : '') + (ev.progress ? ' 进度:' + ev.progress : '') + (ev.headcount ? ' ' + ev.headcount + '人' : '');
   }
-  appendChatMessage('system', summary);
+  appendChatMessage('system', summary, false, null, nowPhoto);
   // 追加缩略图网格（不经过 markdown 转义）
-  _appendSystemPhotoGrid(events);
+  _appendSystemPhotoGrid(events, nowPhoto);
 }
 
 let _chatRecognition = null;
