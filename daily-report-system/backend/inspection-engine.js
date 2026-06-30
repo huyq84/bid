@@ -2,6 +2,7 @@
 // 检查今日/本周数据，发现问题返回提醒
 import { query } from './db.js';
 import { buildChatContext } from './chat-context.js';
+import { getBeijingDate, dateToBeijingString } from './timezone.js';
 
 function daysBetween(a, b) {
   const d1 = new Date(a);
@@ -10,7 +11,7 @@ function daysBetween(a, b) {
 }
 
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  return getBeijingDate();
 }
 
 /**
@@ -186,7 +187,7 @@ export async function dailyInspection(projectId, date) {
 function daysAgoStr(days) {
   const d = new Date();
   d.setDate(d.getDate() - days);
-  return d.toISOString().slice(0, 10);
+  return dateToBeijingString(d);
 }
 
 /**

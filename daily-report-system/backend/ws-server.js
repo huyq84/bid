@@ -19,10 +19,11 @@ function startInspectionScheduler(wss) {
     try {
       const settings = await getInspectionSettings();
       const now = new Date();
+      // 使用 UTC 时间比较（巡检时间是固定的本地时间点，JS Date 的 getHours/getMinutes 已经是本地时间）
       const currentMinutes = now.getHours() * 60 + now.getMinutes();
       const times = settings.times || ['08:30', '13:00', '17:30'];
       const interval = settings.interval || 60;
-      const halfInterval = Math.floor(interval / 2);
+      const halfInterval = 2; // 触发窗口：目标时间前后 2 分钟，避免每次刷新页面就立即触发
 
       for (const t of times) {
         const [h, m] = t.split(':').map(Number);
@@ -73,8 +74,8 @@ export function broadcastInspection(wss) {
 }
 
 export function broadcastRefresh(wss, projectId) {
-  broadcast(wss, [{
-    projectId,
-    message: '✅ 数据已更新，请刷新页面。'
-  }]);
+  const msg = JSON.stringify({ type: 'data-refresh', projectId });
+  wss.clients.forEach(client => {
+    if (client.readyState === 1) client.send(msg);
+  });
 }

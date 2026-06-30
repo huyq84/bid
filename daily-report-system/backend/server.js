@@ -16,13 +16,14 @@ import { fileURLToPath } from 'url';
 import { MinMaxClient } from './llm-client.js';
 import { query } from './db.js';
 import { mockParseVoice, mockParsePhoto, mockAggregateWeekly, mockOptimizeText } from './mock-fallback.js';
-import router from './routes.js';
+import router, { setWss } from './routes.js';
+import { getBeijingDate } from './timezone.js';
 import { createWsServer, broadcastInspection, broadcastRefresh } from './ws-server.js';
 import os from 'os';
 import { buildChatContext } from './chat-context.js';
 import { TOOLS, executeTool, getToolDescriptions } from './llm-tools.js';
 import { createMemory, recordQuery, recordAction, recordPreference } from './chat-memory.js';
-import { runReactLoop } from './react-engine.js';
+import { runReactLoop, runAgentLoop, abortFlags } from './react-engine.js';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 
@@ -301,18 +302,21 @@ app.use(router);
 const server = http.createServer(app);
 const wss = createWsServer(server);
 
+// Inject wss into routes for broadcast
+setWss(wss);
+
 // ============================================================
 // 聊天主端点 — 增强版 ReAct 引擎
 // ============================================================
 const MAX_REACT_ITERATIONS = 15;
 
 app.post('/api/chat', async (req, res) => {
-  const { message, history, projectId, date, sessionId, permLevel, model, baseUrl, apiKey, protocol } = req.body;
+  const { message, history, projectId, date, sessionId, permLevel, model, baseUrl, apiKey, protocol, mode } = req.body;
   if (!message) return res.status(400).json({ error: 'message required' });
 
   const start = Date.now();
   const pid = projectId || 'baicaoyuan';
-  const d = date || new Date().toISOString().slice(0, 10);
+  const d = date || getBeijingDate();
   const chatModel = (model && String(model).trim()) || LLM_CONFIG.model;
   const overrideBaseUrl = (baseUrl && String(baseUrl).trim()) || null;
   const overrideApiKey = (apiKey && String(apiKey).trim()) || null;
@@ -355,7 +359,12 @@ ${ctx.contextText || '暂无上下文数据'}
 - 查询事件时默认查今日（${d}），除非用户指定日期
 - 创建事件时 type 用：progress/material/safety/coordination/attendance/drawing
 - 更新事件时必须先用 queryEvents 找到正确的事件 ID
-- 写入操作完成后简要告知用户结果`;
+- 写入操作完成后简要告知用户结果
+- ⚠️ **数据以工具执行结果为准，不要依赖对话历史中的旧状态**。当工具结果与之前对话矛盾时，以工具结果为准，不要编造或沿用之前的结论
+- 🚫 **禁止空口回复**：当用户要求执行操作（如"取消确认"、"删除"、"修改"等）时，**必须调用对应的工具**（如 unconfirmEvent），绝不能用自然语言假装已完成。未调用工具就等于未执行
+- 🚫 **禁止编造 ID**：事件 ID 必须从 queryEvents 查询结果中获取（格式如 E00593035），绝不凭空编造
+- 🚫 **禁止"重试"空话**：当用户要求执行操作时，**立即调用工具**，不要说"让我重试"、"换一种方式"等废话，不要解释过程，直接执行
+- ⚠️ **完成计划必须先创建事件**：当用户要求"完成计划"、"标记完成"时，必须先调用 createEvent 创建一条 type=progress 的完成事件（记录当天施工内容），再调用 updatePlan 更新进度为 100%。绝不要跳过 createEvent 直接 updatePlan`;
 
     // 3. 构建消息历史
     const messages = [];
@@ -367,8 +376,19 @@ ${ctx.contextText || '暂无上下文数据'}
     // P0-1 修复：把"保存 user 消息"提到 runReactLoop 之前，确保 LLM 失败时 user 也不丢
     // P0-4 修复：ID 统一为 cm_${Date.now()}_${rand}，与 routes.js POST /api/chat/messages 一致
     let userMsgId = null;
+    let sessionValid = true; // 标记 session 是否还存在（删除后外键会失败）
+
+    // 检查 session 是否存在（避免每次插入都触发外键错误）
+    if (sessionId) {
+      const sessCheck = await query('SELECT id FROM dr_chat_sessions WHERE id=$1', [sessionId]);
+      if (sessCheck.rows.length === 0) {
+        sessionValid = false;
+        console.warn(`[chat] session ${sessionId} 不存在，跳过消息持久化（可能已被删除）`);
+      }
+    }
+
     const persistMessage = async (role, content) => {
-      if (!sessionId) return null;
+      if (!sessionId || !sessionValid) return null;
       try {
         const id = 'cm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
         await query('INSERT INTO dr_chat_messages (id, session_id, role, content) VALUES ($1, $2, $3, $4)', [id, sessionId, role, content]);
@@ -376,6 +396,7 @@ ${ctx.contextText || '暂无上下文数据'}
         return id;
       } catch (e) {
         console.warn('[chat] 保存消息失败:', e.message);
+        sessionValid = false; // 避免后续重复尝试
         return null;
       }
     };
@@ -383,25 +404,61 @@ ${ctx.contextText || '暂无上下文数据'}
 
     let engineResult;
     let isMock = false;
+    let isAgent = false;
     try {
-      // 4. 使用增强版 ReAct 引擎（支持嵌套 JSON / 多工具 / 上下文压缩 / 死循环检测）
-      engineResult = await runReactLoop({
-        llm,
-        systemPrompt,
-        messages,
-        maxIterations: MAX_REACT_ITERATIONS,
-        chatModel,
-        override: {
-          baseUrl: overrideBaseUrl || undefined,
-          apiKey: overrideApiKey || undefined,
-          protocol: overrideProtocol || undefined
-        },
-        ctx: {
-          projectId: pid,
-          date: d,
-          permLevel: permLevel || 'allow'
+      // 4. Agent 模式自动判断（mode=auto 或未指定时启用）
+      if (mode !== 'chat') {
+        console.log(`[chat] 尝试 Agent 模式自动判断...`);
+        const agentResult = await runAgentLoop({
+          llm,
+          systemPrompt,
+          userMessage: message,
+          messages,
+          maxIterations: MAX_REACT_ITERATIONS,
+          chatModel,
+          override: {
+            baseUrl: overrideBaseUrl || undefined,
+            apiKey: overrideApiKey || undefined,
+            protocol: overrideProtocol || undefined
+          },
+          ctx: {
+            projectId: pid,
+            date: d,
+            permLevel: permLevel || 'allow'
+          },
+          wss
+        });
+
+        if (agentResult) {
+          // Agent 模式已处理
+          isAgent = true;
+          engineResult = agentResult;
+          console.log(`[chat] Agent 模式完成: taskId=${agentResult.taskId}, tasks=${agentResult.tasks?.length || 0}`);
+        } else {
+          console.log(`[chat] Agent 判断为简单请求，走普通 chat 模式`);
         }
-      });
+      }
+
+      // 5. 普通 ReAct 聊天（非 Agent 或 Agent 降级时）
+      if (!isAgent) {
+        engineResult = await runReactLoop({
+          llm,
+          systemPrompt,
+          messages,
+          maxIterations: MAX_REACT_ITERATIONS,
+          chatModel,
+          override: {
+            baseUrl: overrideBaseUrl || undefined,
+            apiKey: overrideApiKey || undefined,
+            protocol: overrideProtocol || undefined
+          },
+          ctx: {
+            projectId: pid,
+            date: d,
+            permLevel: permLevel || 'allow'
+          }
+        });
+      }
     } catch (e) {
       // P0-1 修复：LLM 失败时也把"降级 mock 回复"作为 assistant 落库，保持 user+assistant 配对
       isMock = true;
@@ -420,7 +477,27 @@ ${ctx.contextText || '暂无上下文数据'}
 
   // 5. 写 assistant 消息（LLM 成功路径）- P11 修复: 存清理后的 reply（去除 [TOOL_USE] 块）
   const assistantMsgId = await persistMessage('assistant', engineResult.reply);
-  
+
+  // P17: LLM 执行了写操作 → 广播 WebSocket 刷新，通知前端自动重载数据
+  const MUTATE_ACTIONS = new Set([
+    'createEvent','confirmEvent','updateEvent','deleteEvent','batchDelete',
+    'createIssue','updateIssue','closeIssue','deleteIssue',
+    'createPlan','updatePlan','deletePlan',
+    'createAttendance','deleteEventsByQuery','deletePlansByQuery',
+    'createECC','updateECC','deleteECC',
+    'createDrawingDeepening','deleteDrawingDeepening',
+    'createStandardTrade','deleteStandardTrade',
+    'upsertWeeklyLabor','deleteWeeklyLabor',
+    'savePage06Photo','deletePage06Photo',
+    'saveManagementTeam','deleteManagementTeam',
+    'createAttendance','saveMilestonePlan','deleteMilestonePlan',
+    'createArea','deleteArea',
+  ]);
+  const hasMutateAction = (engineResult.actions || []).some(a => MUTATE_ACTIONS.has(a.type));
+  if (hasMutateAction) {
+    try { broadcastRefresh(wss, pid); } catch (_) {}
+  }
+
   res.json({
     reply: engineResult.reply,
     toolCalls: engineResult.toolCalls || [],  // P11: 新增结构化工具调用列表
@@ -433,7 +510,11 @@ ${ctx.contextText || '暂无上下文数据'}
     model: chatModel,
     stopped: engineResult.stopped,
     userMsgId,
-    assistantMsgId
+    assistantMsgId,
+    // Agent 模式新增字段
+    isAgent,
+    tasks: engineResult.tasks || null,
+    taskId: engineResult.taskId || null
   });
   } catch (e) {
       // 外层兜底：覆盖 build context / persistMessage 等前置阶段失败
@@ -447,6 +528,16 @@ ${ctx.contextText || '暂无上下文数据'}
       });
     }
   }
+});
+
+// ============================================================
+// Agent 任务中止端点
+// ============================================================
+app.post('/api/chat/tasks/:taskId/abort', async (req, res) => {
+  const { taskId } = req.params;
+  abortFlags.set(taskId, true);
+  console.log(`[agent] 用户请求中止任务: ${taskId}`);
+  res.json({ ok: true, message: '任务中止请求已发送' });
 });
 
 // ============================================================
@@ -465,7 +556,7 @@ app.post('/api/chat/authorize', async (req, res) => {
   }
 
   const pid = projectId || 'baicaoyuan';
-  const d = date || new Date().toISOString().slice(0, 10);
+  const d = date || getBeijingDate();
   const executed = [];
   const failed = [];
 

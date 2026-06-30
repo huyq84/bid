@@ -1,10 +1,10 @@
 // chat-actions.js - LLM 返回的 action 的执行器
 import { query } from './db.js';
 import { validateEventData, validatePlanData, validateIssueId } from './llm-validator.js';
+import { getBeijingDate, getBeijingHHMM } from './timezone.js';
 
 function nowHHMM() {
-  const d = new Date();
-  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  return getBeijingHHMM();
 }
 
 function newId(prefix) {
@@ -562,10 +562,38 @@ const handlers = {
   async confirmEvent(data, ctx) {
     const { eventId } = data;
     if (!eventId) throw new Error('eventId 必填');
-    await query(
-      `UPDATE dr_events SET status='confirmed' WHERE id=$1`,
-      [eventId]
-    );
+
+    // 先读取事件信息，获取关联的 planId 和进度
+    const evRes = await query('SELECT plan_id, payload, status FROM dr_events WHERE id=$1', [eventId]);
+    if (evRes.rows.length === 0) throw new Error(`事件 ${eventId} 不存在`);
+    const ev = evRes.rows[0];
+    if (ev.status === 'confirmed') throw new Error(`事件 ${eventId} 已经是确认状态`);
+
+    // 更新事件状态
+    await query('UPDATE dr_events SET status=\'confirmed\' WHERE id=$1', [eventId]);
+
+    // 如果事件关联了计划，且包含进度值，同步更新计划进度（取最大值）
+    if (ev.plan_id && ev.payload?.progress != null) {
+      const eventProgress = typeof ev.payload.progress === 'string'
+        ? parseInt(ev.payload.progress, 10)
+        : Number(ev.payload.progress);
+
+      if (!isNaN(eventProgress)) {
+        // 读取当前计划进度
+        const planRes = await query('SELECT progress FROM dr_daily_plans WHERE id=$1', [ev.plan_id]);
+        if (planRes.rows.length > 0) {
+          const currentProgress = typeof planRes.rows[0].progress === 'string'
+            ? parseInt(planRes.rows[0].progress, 10)
+            : Number(planRes.rows[0].progress);
+
+          // 事件进度 > 计划进度时才更新（累计进度只增不减）
+          if (!isNaN(currentProgress) && eventProgress > currentProgress) {
+            await query('UPDATE dr_daily_plans SET progress=$1 WHERE id=$2', [eventProgress, ev.plan_id]);
+          }
+        }
+      }
+    }
+
     return { message: `已确认事件 ${eventId}` };
   },
 
@@ -598,7 +626,18 @@ const handlers = {
 
     // 顶层列：description / progress / status / type / process / owner / building_no / floor_no / total_man_days / area_id
     if (data.description != null && data.description !== '') { sets.push(`description=$${idx++}`); params.push(data.description); }
-    if (data.progress != null && data.progress !== '') { sets.push(`progress=$${idx++}`); params.push(String(data.progress)); }
+    if (data.progress != null && data.progress !== '') {
+      sets.push(`progress=$${idx++}`); params.push(String(data.progress));
+      // 根据进度自动推导状态
+      const progNum = parseFloat(String(data.progress).replace('%', ''));
+      if (progNum >= 100) {
+        sets.push(`status=$${idx++}`); params.push('completed');
+      } else if (progNum < 0) {
+        sets.push(`status=$${idx++}`); params.push('cancelled');
+      } else {
+        sets.push(`status=$${idx++}`); params.push('active');
+      }
+    }
     if (data.status) { sets.push(`status=$${idx++}`); params.push(data.status); }
     if (data.type) { sets.push(`type=$${idx++}`); params.push(data.type); }
     if (data.process) { sets.push(`process=$${idx++}`); params.push(data.process); }
@@ -629,7 +668,9 @@ const handlers = {
     params.push(planId);
 
     await query(`UPDATE dr_daily_plans SET ${sets.join(', ')} WHERE id=$${idx}`, params);
-    return { planId, updatedFields: [...extraChanged, ...(data.progress ? ['progress'] : []), ...(data.areaId ? ['areaId'] : []), ...(data.status ? ['status'] : []), ...(data.type ? ['type'] : []), ...(data.process ? ['process'] : []), ...(data.owner ? ['owner'] : []), ...(data.buildingNo ? ['buildingNo'] : []), ...(data.floorNo ? ['floorNo'] : []), ...(data.materials ? ['materials'] : []), ...(data.machinery ? ['machinery'] : []), ...(data.safetyNotes ? ['safetyNotes'] : [])], message: `已完善计划 ${planId}` };
+    // 自动状态推导：修改进度时 status 也被写了，但没有 data.status 传入
+    const autoStatus = data.progress && !data.status;
+    return { planId, updatedFields: [...extraChanged, ...(data.progress ? ['progress'] : []), ...(autoStatus ? ['status'] : []), ...(data.areaId ? ['areaId'] : []), ...(data.status ? ['status'] : []), ...(data.type ? ['type'] : []), ...(data.process ? ['process'] : []), ...(data.owner ? ['owner'] : []), ...(data.buildingNo ? ['buildingNo'] : []), ...(data.floorNo ? ['floorNo'] : []), ...(data.materials ? ['materials'] : []), ...(data.machinery ? ['machinery'] : []), ...(data.safetyNotes ? ['safetyNotes'] : [])], message: `已完善计划 ${planId}` };
   },
 
   /**

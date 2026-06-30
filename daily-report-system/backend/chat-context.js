@@ -256,6 +256,7 @@ export function contextToText(ctx) {
   lines.push(`  - createIssue: [必填] title | [可选] type, areaId, priority, proposeDept, cooperateDept, owner, description`);
   lines.push(`  - createAttendance: [必填] records: { managerId, present, reason }`);
   lines.push(`  - confirmEvent: [必填] eventId（将"今日完成"标记为已确认）`);
+  lines.push(`  - unconfirmEvent: [必填] eventId（将"已确认"标记回草稿）`);
   lines.push(`敏感操作（需要用户授权后执行）：`);
   lines.push(`  - updateEvent: [必填] eventId | [可选] taskName, owner, progress, headcount, laborRequirements, type, status, areaId, completionType, buildingNo, floorNo`);
   lines.push(`  - deleteEvent: [必填] eventId（仅删 1 条）`);

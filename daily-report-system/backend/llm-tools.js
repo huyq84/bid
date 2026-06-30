@@ -1,6 +1,7 @@
 // llm-tools.js - ReAct 循环用的查询工具集
 import { query } from './db.js';
 import { executeAction } from './chat-actions.js';
+import { getBeijingDate } from './timezone.js';
 
 export const TOOLS = [
   {
@@ -18,6 +19,8 @@ export const TOOLS = [
       if (params.taskNameContains) { conds.push(`payload->>'taskName' ILIKE $${i++}`); vals.push(`%${params.taskNameContains}%`); }
       const limit = params.limit || 50;
       const r = await query(`SELECT * FROM dr_events WHERE ${conds.join(' AND ')} ORDER BY time LIMIT ${limit}`, vals);
+      // DEBUG: 打印 DB 原始 status 字段
+      console.log(`[queryEvents] projectId=${ctx.projectId} date=${date} statusFilter=${params.status || 'none'} rows=${r.rows.length} statuses=[${r.rows.map(e => e.id + ':' + e.status).join(',')}]`);
       return r.rows.map(e => ({
         id: e.id, time: e.time, type: e.type, areaId: e.area_id,
         planId: e.plan_id || '',
@@ -547,6 +550,75 @@ export const TOOLS = [
     }
     const result = await executeAction({ type: 'confirmEvent', data: { eventId } }, ctx);
     return { ...result, eventId };
+  }
+  },
+
+  {
+  name: 'unconfirmEvent',
+  description: '取消确认事件（将 status 从 confirmed 改回 draft）。eventId 必填——必须先调 queryEvents 拿到真实 ID。',
+  isMutate: true,
+  requiresConfirm: false,
+  params: { dryRun: 'true=只返回将取消的事件', eventId: '事件ID（必填）' },
+  handler: async (params, ctx) => {
+    const { dryRun, eventId } = params;
+    if (!eventId) throw new Error('eventId 必填');
+    if (dryRun) {
+      const cur = await query('SELECT * FROM dr_events WHERE id=$1', [eventId]);
+      if (cur.rows.length === 0) throw new Error(`事件 ${eventId} 不存在`);
+      return { dryRun: true, eventId, current: cur.rows[0], warning: 'dry-run，未实际取消' };
+    }
+
+    // 读取事件信息
+    const evRes = await query('SELECT plan_id, payload, status FROM dr_events WHERE id=$1', [eventId]);
+    if (evRes.rows.length === 0) throw new Error(`事件 ${eventId} 不存在`);
+    const ev = evRes.rows[0];
+    if (ev.status !== 'confirmed') throw new Error(`事件 ${eventId} 不是已确认状态，当前状态: ${ev.status}`);
+
+    // 更新状态为草稿
+    await query('UPDATE dr_events SET status=\'draft\' WHERE id=$1', [eventId]);
+
+    // 如果事件关联了计划进度，需要重新计算：取该计划其他已确认事件的最大进度
+    if (ev.plan_id) {
+      const maxRes = await query(
+        `SELECT COALESCE(MAX((payload->>'progress')::integer), 0) as max_progress
+         FROM dr_events WHERE plan_id=$1 AND status='confirmed'`,
+        [ev.plan_id]
+      );
+      const maxProgress = maxRes.rows[0]?.max_progress || 0;
+      await query('UPDATE dr_daily_plans SET progress=$1 WHERE id=$2', [maxProgress, ev.plan_id]);
+    }
+
+    return { ok: true, eventId, message: `已取消确认事件 ${eventId}（状态改为 draft）` };
+  }
+  },
+
+  {
+  name: 'confirmAllDrafts',
+  description: '批量确认指定日期所有草稿事件（将 status 改为 confirmed）。date 可选，默认今天。适合"确认今日完成"场景。',
+  isMutate: true,
+  requiresConfirm: false,
+  params: { dryRun: 'true=只返回将确认的事件列表', date: '日期 YYYY-MM-DD，默认今天' },
+  handler: async (params, ctx) => {
+    const { dryRun, date } = params;
+    const targetDate = date || ctx.date || getBeijingDate();
+    const r = await query(
+      `SELECT id, status FROM dr_events WHERE date=$1 AND status='draft'`,
+      [targetDate]
+    );
+    const drafts = r.rows;
+    if (dryRun) {
+      return { dryRun: true, count: drafts.length, events: drafts.map(d => ({ id: d.id, status: d.status })), warning: 'dry-run，未实际确认' };
+    }
+    if (drafts.length === 0) {
+      return { ok: true, confirmed: 0, message: `今日（${targetDate}）没有草稿事件需要确认` };
+    }
+    const ids = drafts.map(d => d.id);
+    const placeholders = ids.map((_, i) => `$${i + 1}`).join(',');
+    await query(
+      `UPDATE dr_events SET status='confirmed' WHERE id IN (${placeholders})`,
+      ids
+    );
+    return { ok: true, confirmed: drafts.length, message: `已确认 ${drafts.length} 条草稿事件` };
   }
   },
 
@@ -1084,7 +1156,7 @@ export const TOOLS = [
   handler: async (params, ctx) => {
     const { projectId, date, scope } = params;
     const pid = projectId || ctx.projectId || 'baicaoyuan';
-    const d = date || new Date().toISOString().slice(0, 10);
+    const d = date || getBeijingDate();
     
     // 动态导入inspection-engine
     const { dailyInspection } = await import('./inspection-engine.js');
@@ -1109,7 +1181,7 @@ export const TOOLS = [
 export async function executeTool(name, params, ctx) {
   const tool = TOOLS.find(t => t.name === name);
   if (!tool) throw new Error(`未知工具: ${name}`);
-  const ctxSafe = { projectId: ctx?.projectId || 'baicaoyuan', date: ctx?.date || new Date().toISOString().slice(0, 10) };
+  const ctxSafe = { projectId: ctx?.projectId || 'baicaoyuan', date: ctx?.date || getBeijingDate() };
   if (ctx?.permLevel) ctxSafe.permLevel = ctx.permLevel;
   return await tool.handler(params || {}, ctxSafe);
 }

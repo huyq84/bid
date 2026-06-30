@@ -3,6 +3,20 @@ import { query, initDatabase, getDbStats } from './db.js';
 
 const router = Router();
 
+// WSS will be injected by server.js after creation
+let _wss = null;
+export function setWss(wss) { _wss = wss; }
+
+function broadcastRefresh(projectId) {
+  if (!_wss) return;
+  try {
+    const msg = JSON.stringify({ type: 'data-refresh', projectId: projectId || 'baicaoyuan' });
+    _wss.clients.forEach(client => {
+      if (client.readyState === 1) client.send(msg);
+    });
+  } catch (_) {}
+}
+
 // ==================== 启动 ====================
 let initialized = false;
 
@@ -238,6 +252,7 @@ router.put('/api/events/:id', async (req, res) => {
     const { payload, status, note } = req.body;
     await query('UPDATE dr_events SET payload=$1::jsonb, status=$2, note=$3 WHERE id=$4',
       [JSON.stringify(payload || {}), status, note || '', req.params.id]);
+    broadcastRefresh('baicaoyuan');
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -245,6 +260,7 @@ router.put('/api/events/:id', async (req, res) => {
 router.delete('/api/events/:id', async (req, res) => {
   try {
     await query('DELETE FROM dr_events WHERE id=$1', [req.params.id]);
+    broadcastRefresh('baicaoyuan');
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -259,6 +275,7 @@ router.post('/api/areas', async (req, res) => {
        ON CONFLICT (project_id, id) DO UPDATE SET name=$3, floor=$4, manager=$5`,
       [projectId, id, name || '', floor || '', manager || '']
     );
+    broadcastRefresh(projectId);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -266,6 +283,7 @@ router.post('/api/areas', async (req, res) => {
 router.delete('/api/areas/:projectId/:id', async (req, res) => {
   try {
     await query('DELETE FROM dr_areas WHERE project_id=$1 AND id=$2', [req.params.projectId, req.params.id]);
+    broadcastRefresh(req.params.projectId);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -280,6 +298,7 @@ router.post('/api/plans', async (req, res) => {
        SET project_id=$2, date=$3, start_date=$4, end_date=$5, description=$6, task_name=$7, progress=$8, status=$9, type=$10, process=$11, owner=$12, building_no=$13, floor_no=$14, materials=$15::jsonb, machinery=$16::jsonb, safety_notes=$17, zone_images=$18::jsonb, area_id=$19, labor_schedule=$20::jsonb, area_targets=$21::jsonb, total_man_days=$22, extra=$23::jsonb, updated_at=$25`,
       [id, projectId, date || null, startDate, endDate, description, taskName, progress || '0%', status || 'active', type || null, process || null, owner || null, buildingNo || null, floorNo || null, JSON.stringify(materials || []), JSON.stringify(machinery || []), safetyNotes || null, JSON.stringify(zoneImages || []), areaId || null, JSON.stringify(laborSchedule || []), JSON.stringify(areaTargets || []), totalManDays || 0, JSON.stringify(extra || {}), createdAt || new Date().toISOString(), updatedAt || new Date().toISOString()]
     );
+    broadcastRefresh(projectId || 'baicaoyuan');
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -287,6 +306,7 @@ router.post('/api/plans', async (req, res) => {
 router.delete('/api/plans/:id', async (req, res) => {
   try {
     await query('DELETE FROM dr_daily_plans WHERE id=$1', [req.params.id]);
+    broadcastRefresh('baicaoyuan');
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -301,6 +321,7 @@ router.post('/api/drawing-deepenings', async (req, res) => {
        SET project_id=$2, task=$3, owner=$4, status=$5, progress=$6, plan_id=$7, event_id=$8, area_id=$9, created_date=$10`,
       [id, projectId, task, owner, status || '进行中', progress || '', planId || null, eventId || null, areaId || null, createdDate || null]
     );
+    broadcastRefresh(projectId || 'baicaoyuan');
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -308,6 +329,7 @@ router.post('/api/drawing-deepenings', async (req, res) => {
 router.delete('/api/drawing-deepenings/:id', async (req, res) => {
   try {
     await query('DELETE FROM dr_drawing_deepenings WHERE id=$1', [req.params.id]);
+    broadcastRefresh('baicaoyuan');
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -345,6 +367,7 @@ router.post('/api/standard-trades', async (req, res) => {
         `UPDATE dr_standard_trades SET trade_name=$1, map_from=$2, sort_order=$3 WHERE id=$4`,
         [tradeName, mapFrom || null, sortOrder || 0, id]
       );
+      broadcastRefresh(projectId || 'baicaoyuan');
       res.json({ ok: true, id });
     } else {
       // 新增
@@ -352,6 +375,7 @@ router.post('/api/standard-trades', async (req, res) => {
         `INSERT INTO dr_standard_trades (project_id, trade_name, map_from, sort_order) VALUES ($1, $2, $3, $4) RETURNING id`,
         [projectId || null, tradeName, mapFrom || null, sortOrder || 0]
       );
+      broadcastRefresh(projectId || 'baicaoyuan');
       res.json({ ok: true, id: r.rows[0].id });
     }
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -360,6 +384,7 @@ router.post('/api/standard-trades', async (req, res) => {
 router.delete('/api/standard-trades/:id', async (req, res) => {
   try {
     await query('DELETE FROM dr_standard_trades WHERE id=$1', [req.params.id]);
+    broadcastRefresh('baicaoyuan');
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -397,6 +422,7 @@ router.post('/api/weekly-labor', async (req, res) => {
         [r.projectId, r.weekStart, parseInt(r.tradeId), parseInt(r.thisWeekCount)||0, parseInt(r.nextWeekCount)||0]
       );
     }
+    broadcastRefresh(rows[0]?.projectId || 'baicaoyuan');
     res.json({ ok: true, count: rows.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -407,6 +433,7 @@ router.delete('/api/weekly-labor/:projectId/:weekStart/:tradeId', async (req, re
       'DELETE FROM dr_weekly_labor_data WHERE project_id=$1 AND week_start=$2 AND trade_id=$3',
       [req.params.projectId, req.params.weekStart, req.params.tradeId]
     );
+    broadcastRefresh(req.params.projectId);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -421,6 +448,7 @@ router.post('/api/issues', async (req, res) => {
        SET type=$3, title=$4, priority=$6, status=$7, owner=$10, description=$11, resolution=$12, photos=$13::jsonb, closed_date=$14, propose_dept=$15, cooperate_dept=$16`,
       [id, projectId, type, title, areaId, priority || 'medium', status || 'open', createdDate, deadline, owner, description, resolution || '', JSON.stringify(photos || []), closedDate || null, proposeDept || null, cooperateDept || null]
     );
+    broadcastRefresh(projectId || 'baicaoyuan');
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -428,6 +456,7 @@ router.post('/api/issues', async (req, res) => {
 router.delete('/api/issues/:id', async (req, res) => {
   try {
     await query('DELETE FROM dr_issues WHERE id=$1', [req.params.id]);
+    broadcastRefresh('baicaoyuan');
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -441,6 +470,7 @@ router.post('/api/management-team', async (req, res) => {
        ON CONFLICT (id) DO UPDATE SET position=$2, name=$3, phone=$4`,
       [id, position || '', name || '', phone || '']
     );
+    broadcastRefresh('baicaoyuan');
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -449,11 +479,11 @@ router.delete('/api/management-team/:id', async (req, res) => {
   try {
     await query('DELETE FROM dr_daily_attendance WHERE manager_id=$1', [req.params.id]);
     await query('DELETE FROM dr_management_team WHERE id=$1', [req.params.id]);
+    broadcastRefresh('baicaoyuan');
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ==================== ATTENDANCE CRUD ====================
 router.post('/api/attendance', async (req, res) => {
   try {
     const { date, projectId, records } = req.body; // records = { managerId: { present, reason } }
@@ -464,6 +494,7 @@ router.post('/api/attendance', async (req, res) => {
         [date, projectId || 'baicaoyuan', managerId, rec.present, rec.reason || '']
       );
     }
+    broadcastRefresh(projectId || 'baicaoyuan');
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -485,6 +516,7 @@ router.post('/api/milestone-plans', async (req, res) => {
        SET category=$3, node_type=$4, area_label=$5, description=$6, target_month=$7, year=$8, sub_items=$9::jsonb`,
       [projectId, id, category, nodeType, areaLabel, description, targetMonth, year || 2026, JSON.stringify(subItems || [])]
     );
+    broadcastRefresh(projectId);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -492,6 +524,7 @@ router.post('/api/milestone-plans', async (req, res) => {
 router.delete('/api/milestone-plans/:projectId/:id', async (req, res) => {
   try {
     await query('DELETE FROM dr_milestone_plans WHERE project_id=$1 AND id=$2', [req.params.projectId, req.params.id]);
+    broadcastRefresh(req.params.projectId);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -499,6 +532,7 @@ router.delete('/api/milestone-plans/:projectId/:id', async (req, res) => {
 router.post('/api/milestone-plans/clear/:projectId', async (req, res) => {
   try {
     await query('DELETE FROM dr_milestone_plans WHERE project_id=$1', [req.params.projectId]);
+    broadcastRefresh(req.params.projectId);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -522,6 +556,7 @@ router.post('/api/page06-photos', async (req, res) => {
       'INSERT INTO dr_page06_photos (id, project_id, src, caption, trade_id) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO UPDATE SET src=$3, caption=$4, trade_id=$5, created_at=now()',
       [id, projectId, src, caption || '', tradeId || null]
     );
+    broadcastRefresh(projectId);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -532,6 +567,7 @@ router.delete('/api/page06-photos/:projectId/:id', async (req, res) => {
       'DELETE FROM dr_page06_photos WHERE project_id=$1 AND id=$2',
       [req.params.projectId, req.params.id]
     );
+    broadcastRefresh(req.params.projectId);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

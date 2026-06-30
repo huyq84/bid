@@ -4,8 +4,43 @@
 
 M = window.MockData;
 
+// P19: 北京时间工具函数（替代 new Date().toISOString().slice(0,10)）
+function getBeijingDateStr() {
+  const now = new Date();
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+  const bjMs = utcMs + 8 * 3600000;
+  const bj = new Date(bjMs);
+  return `${bj.getFullYear()}-${String(bj.getMonth()+1).padStart(2,'0')}-${String(bj.getDate()).padStart(2,'0')}`;
+}
+
+function getBeijingHHMM() {
+  const now = new Date();
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+  const bjMs = utcMs + 8 * 3600000;
+  const bj = new Date(bjMs);
+  return `${String(bj.getHours()).padStart(2,'0')}:${String(bj.getMinutes()).padStart(2,'0')}`;
+}
+
 // P0-2 修复：跟踪 loadDataFromAPI 是否失败，offline 时才注入 mock 数据
 let _lastAPIFailed = false;
+// localStorage 数据版本（用于 schema 迁移和 stale data 清理）
+const DATA_SCHEMA_VERSION = 1;
+function _getSchemaVersion() {
+  try { return parseInt(localStorage.getItem('daily_schema_version') || '0', 10); } catch { return 0; }
+}
+function _setSchemaVersion() {
+  try { localStorage.setItem('daily_schema_version', String(DATA_SCHEMA_VERSION)); } catch {}
+}
+// 检查并迁移 localStorage schema
+(function _migrateSchema() {
+  const cur = _getSchemaVersion();
+  if (cur < DATA_SCHEMA_VERSION) {
+    // v0 → v1: 清理旧版残留的超大 localStorage key
+    const LEGACY_KEYS = ['daily_drafts', 'daily_settings', 'daily_history'];
+    LEGACY_KEYS.forEach(k => { try { localStorage.removeItem(k); } catch {} });
+    _setSchemaVersion();
+  }
+})();
 // 记录已知在 DB 中不存在的事件 ID（幽灵事件），持久化到 localStorage 避免跨页面加载复活
 const _ghostEventIds = new Set();
 try {
@@ -166,6 +201,31 @@ async function loadDataFromAPI() {
     }
 
     // 重写保存方法：先同步写 localStorage（防刷新丢）→ 再异步同步到后端
+    // 待同步到后端的失败队列（savePlansToStorage/saveEventsToStorage 中 POST 失败时累积，下次自动重试）
+    let _pendingPlanSyncs = [];
+    let _pendingEventSyncs = [];
+    let _pendingIssueSyncs = [];
+    let _syncInProgress = false;
+
+    // 批量执行 pending sync 队列（节流，避免并发过多请求）
+    async function _flushPending(queue, apiPath, batchSize) {
+      if (queue.length === 0 || _syncInProgress) return;
+      _syncInProgress = true;
+      const batch = queue.splice(0, batchSize || 10);
+      for (const item of batch) {
+        try {
+          await fetch(apiPath, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(item)
+          });
+        } catch {
+          // 失败放回队列尾部
+          queue.push(item);
+        }
+      }
+      _syncInProgress = false;
+    }
+
     M.saveEventsToStorage = async function() {
       // 1. 立即写 localStorage（同步操作，瞬间完成）
       try { localStorage.setItem('daily_events', JSON.stringify(M.EVENTS)); } catch(e) { console.warn('[localStorage] 写事件失败:', e.message); }
@@ -176,11 +236,19 @@ async function loadDataFromAPI() {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(ev)
           });
-        } catch {}
+        } catch {
+          _pendingEventSyncs.push(ev);
+        }
+      }
+      // 3. 重试之前失败的同步
+      if (_pendingEventSyncs.length > 0) {
+        console.log('[同步] 重试事件同步:', _pendingEventSyncs.length, '条');
+        _flushPending(_pendingEventSyncs, '/api/events', 10);
       }
     };
 
     M.savePlansToStorage = async function() {
+      console.log('[同步] savePlansToStorage 开始，项目数:', Object.keys(M.PLANS).length);
       // 1. 立即写 localStorage
       try { localStorage.setItem('daily_plans', JSON.stringify(M.PLANS)); } catch(e) { console.warn('[localStorage] 写计划失败:', e.message); }
       // 2. 异步同步到后端
@@ -189,30 +257,45 @@ async function loadDataFromAPI() {
         for (const p of M.PLANS[projectId]) {
           const extra = {};
           for (const k of Object.keys(p)) { if (!STD_FIELDS.has(k)) extra[k] = p[k]; }
+          const payload = {
+            id: p.id,
+            projectId: p.projectId || projectId,
+            date: p.date || p.startDate || null,
+            startDate: p.startDate,
+            endDate: p.endDate,
+            description: p.description || p.taskName || '',
+            taskName: p.taskName,
+            progress: p.progress || '0%',
+            status: p.status || 'active',
+            laborSchedule: p.laborRequirements || p.laborSchedule || [],
+            areaTargets: p.areaTargets || [],
+            totalManDays: p.totalManDays || 0,
+            extra,
+            createdAt: p.createdAt,
+            updatedAt: new Date().toISOString()
+          };
+          console.log('[同步] POST /api/plans:', payload.id, 'progress=', payload.progress, 'status=', payload.status);
           try {
-            await fetch('/api/plans', {
+            const resp = await fetch('/api/plans', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                id: p.id,
-                projectId: p.projectId || projectId,
-                date: p.date || p.startDate || null,
-                startDate: p.startDate,
-                endDate: p.endDate,
-                description: p.description || p.taskName || '',
-                taskName: p.taskName,
-                progress: p.progress || '0%',
-                status: p.status || 'active',
-                laborSchedule: p.laborRequirements || p.laborSchedule || [],
-                areaTargets: p.areaTargets || [],
-                totalManDays: p.totalManDays || 0,
-                extra,
-                createdAt: p.createdAt,
-                updatedAt: new Date().toISOString()
-              })
+              body: JSON.stringify(payload)
             });
-          } catch {}
+            if (!resp.ok) {
+              console.warn('[同步] POST /api/plans 失败:', resp.status, payload.id, payload.progress, payload.status);
+              _pendingPlanSyncs.push(payload);
+            }
+          } catch (e) {
+            console.warn('[同步] POST /api/plans 异常:', e.message, payload.id);
+            _pendingPlanSyncs.push(payload);
+          }
         }
       }
+      // 3. 重试之前失败的同步
+      if (_pendingPlanSyncs.length > 0) {
+        console.log('[同步] 重试计划同步:', _pendingPlanSyncs.length, '条');
+        _flushPending(_pendingPlanSyncs, '/api/plans', 10);
+      }
+      console.log('[同步] savePlansToStorage 完成');
     };
 
     // 协调事宜：先同步写 localStorage → 异步同步到后端 dr_issues 表
@@ -241,9 +324,26 @@ async function loadDataFromAPI() {
               cooperateDept: iss.cooperateDept || null
             })
           });
-        } catch {}
+        } catch {
+          _pendingIssueSyncs.push(iss);
+        }
+      }
+      if (_pendingIssueSyncs.length > 0) {
+        console.log('[同步] 重试协调事宜同步:', _pendingIssueSyncs.length, '条');
+        _flushPending(_pendingIssueSyncs, '/api/issues', 10);
       }
     };
+
+    // 页面可见性变化时触发 pending sync 重试（从后台切回前台时自动同步）
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        setTimeout(() => {
+          if (_pendingPlanSyncs.length > 0) _flushPending(_pendingPlanSyncs, '/api/plans', 10);
+          if (_pendingEventSyncs.length > 0) _flushPending(_pendingEventSyncs, '/api/events', 10);
+          if (_pendingIssueSyncs.length > 0) _flushPending(_pendingIssueSyncs, '/api/issues', 10);
+        }, 2000);
+      }
+    });
 
     console.log('[数据] 已从 PostgreSQL 加载', data.PROJECTS.map(p => p.name).join(', '));
     _lastAPIFailed = false;
@@ -375,20 +475,64 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadDataFromAPI();
     // 2) R2 修复：API 失败时（offline 模式）已在 loadDataFromAPI catch 块统一注入 mock，无需再处理
 
-    // 合并 localStorage 本地独有事件（offline 编辑暂存,联网后自动同步）
+    // 合并 localStorage 本地独有数据（offline 编辑暂存,联网后自动同步）
+    // —— 事件
     try {
       const stored = localStorage.getItem('daily_events');
-      if (stored && stored.length < 500000) { // 避免解析超大 localStorage
+      if (stored && stored.length < 500000) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) {
           const backendIds = new Set(M.EVENTS.map(e => e.id));
           const localOnly = parsed.filter(e => !backendIds.has(e.id));
           if (localOnly.length > 0) {
+            console.log('[启动] 发现', localOnly.length, '条本地独有事件，合并到内存');
             M.EVENTS.push(...localOnly);
           }
         }
       }
     } catch(e) { /* ignore */ }
+    // —— 计划
+    try {
+      const stored = localStorage.getItem('daily_plans');
+      if (stored && stored.length < 500000) {
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed === 'object') {
+          for (const pid of Object.keys(parsed)) {
+            const plans = parsed[pid];
+            if (!Array.isArray(plans)) continue;
+            const backendIds = new Set((M.PLANS[pid] || []).map(p => p.id));
+            const localOnly = plans.filter(p => !backendIds.has(p.id));
+            if (localOnly.length > 0) {
+              console.log('[启动] 发现', localOnly.length, '条本地独有计划，合并到内存');
+              if (!M.PLANS[pid]) M.PLANS[pid] = [];
+              M.PLANS[pid].push(...localOnly);
+            }
+          }
+        }
+      }
+    } catch(e) { /* ignore */ }
+    // —— 协调事宜
+    try {
+      const stored = localStorage.getItem('daily_issues');
+      if (stored && stored.length < 500000) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const backendRes = await fetch('/api/data/all'); // 已有 issues 数据
+          const backendIds = new Set(M.ISSUES.map(i => i.id));
+          const localOnly = parsed.filter(i => !backendIds.has(i.id));
+          if (localOnly.length > 0) {
+            console.log('[启动] 发现', localOnly.length, '条本地独有协调事宜，合并到内存');
+            M.ISSUES.push(...localOnly);
+          }
+        }
+      }
+    } catch(e) { /* ignore */ }
+    // 合并后将本地独有数据异步同步到后端（不阻塞 UI）
+    setTimeout(() => {
+      if (M.savePlansToStorage) M.savePlansToStorage();
+      if (M.saveEventsToStorage) M.saveEventsToStorage();
+      if (M.saveIssuesToStorage) M.saveIssuesToStorage();
+    }, 3000);
     
     initCustomAreas();
     initCustomTypes();
@@ -2389,6 +2533,30 @@ function openDailyPlanForm() {
   
   showModal('modalDailyPlan');
   filterPlanFormByType();
+  // 进度变化时自动更新状态下拉
+  _bindProgressAutoStatus();
+}
+
+// 根据进度值自动更新状态选择器（编辑界面实时反馈）
+function _bindProgressAutoStatus() {
+  const progressEl = document.getElementById('dp-progress');
+  const statusEl = document.getElementById('dp-status');
+  if (!progressEl || !statusEl) return;
+  // 先移除旧绑定避免重复
+  progressEl.oninput = null;
+  progressEl.onchange = null;
+  const handler = () => {
+    const v = progressEl.value.replace('%', '');
+    const num = parseInt(v);
+    if (isNaN(num)) return; // 非数字不自动推导
+    if (num >= 100) statusEl.value = 'completed';
+    else if (num < 0) statusEl.value = 'cancelled';
+    else statusEl.value = 'active';
+  };
+  progressEl.oninput = handler;
+  progressEl.onchange = handler;
+  // 立即应用一次（编辑时已有值的情况）
+  handler();
 }
 
 // 根据 dp-event-type 切换日计划表单字段的可见性。
@@ -2575,7 +2743,7 @@ function onPlanManDaysChanged() {
   });
 }
 
-function saveDailyPlan() {
+async function saveDailyPlan() {
   console.log('[日计划] saveDailyPlan 开始', { editingPlanId, projectId: currentProjectId });
   const startDate = document.getElementById('dp-start-date').value;
   const endDate = document.getElementById('dp-end-date').value;
@@ -2628,7 +2796,6 @@ function saveDailyPlan() {
     taskName: process,
     owner,
     progress: fixProgress(progress) || '0%',
-    status: parseInt(String(fixProgress(progress)).replace('%','')) >= 100 ? 'completed' : status,
     laborRequirements,
     totalManDays,
     materials: materials ? materials.split('\n').filter(m => m.trim()) : [],
@@ -2642,6 +2809,16 @@ function saveDailyPlan() {
     console.log('[日计划] 初始化项目计划数组', currentProjectId);
     M.PLANS[currentProjectId] = [];
   }
+
+  // 根据进度自动推导状态
+  const finalStatus = (() => {
+    const progNum = parseInt(String(fixProgress(progress)).replace('%', ''));
+    if (isNaN(progNum)) return status; // 非数字进度保持原状态
+    if (progNum >= 100) return 'completed';
+    if (progNum < 0) return 'cancelled';
+    return 'active';
+  })();
+  plan.status = finalStatus;
   
   console.log('[日计划] 保存前长度:', M.PLANS[currentProjectId].length);
   
@@ -2653,6 +2830,35 @@ function saveDailyPlan() {
       plan.createdAt = existing.createdAt;
       plan.updatedAt = new Date().toISOString();
       M.PLANS[currentProjectId][idx] = plan;
+      // 先单独保存当前编辑的计划到后端（确保数据一致）
+      try {
+        const STD_FIELDS = new Set(['id','projectId','date','startDate','endDate','description','taskName','progress','status','laborSchedule','laborRequirements','areaTargets','createdAt','updatedAt']);
+        const extra = {};
+        for (const k of Object.keys(plan)) { if (!STD_FIELDS.has(k)) extra[k] = plan[k]; }
+        const resp = await fetch('/api/plans', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: plan.id,
+            projectId: plan.projectId || currentProjectId,
+            date: plan.date || plan.startDate || null,
+            startDate: plan.startDate,
+            endDate: plan.endDate,
+            description: plan.description || plan.taskName || '',
+            taskName: plan.taskName,
+            progress: plan.progress || '0%',
+            status: plan.status || 'active',
+            laborSchedule: plan.laborRequirements || plan.laborSchedule || [],
+            areaTargets: plan.areaTargets || [],
+            totalManDays: plan.totalManDays || 0,
+            extra,
+            createdAt: plan.createdAt,
+            updatedAt: plan.updatedAt
+          })
+        });
+        console.log('[日计划] 直接POST结果:', resp.status, plan.id, plan.progress, plan.status);
+      } catch(e) {
+        console.warn('[日计划] 直接POST失败:', e.message);
+      }
     }
     editingPlanId = null;
     document.querySelector('#modalDailyPlan .modal-title').textContent = '📋 新建日计划';
@@ -2665,8 +2871,8 @@ function saveDailyPlan() {
         if (plan.areaId) e.areaId = plan.areaId;
       }
     });
-    if (M.savePlansToStorage) M.savePlansToStorage();
-    if (M.saveEventsToStorage) M.saveEventsToStorage();
+    if (M.savePlansToStorage) await M.savePlansToStorage();
+    if (M.saveEventsToStorage) await M.saveEventsToStorage();
     renderFilteredEvents();
     showToast('日计划已更新', 'success');
   } else {
@@ -2681,10 +2887,9 @@ function saveDailyPlan() {
     showToast('日计划已保存', 'success');
   }
   
-  console.log('[日计划] 保存后长度:', M.PLANS[currentProjectId].length, '计划ID:', plan.id);
-  
-  if (M.savePlansToStorage) M.savePlansToStorage();
-  try { localStorage.setItem('daily_plans', JSON.stringify(M.PLANS)); } catch(e) { console.warn('[localStorage] 写计划失败:', e.message); }
+  console.log('[日计划] 保存后长度:', M.PLANS[currentProjectId].length, '计划ID:', plan.id, 'status:', plan.status, 'progress:', plan.progress);
+
+  if (M.savePlansToStorage) await M.savePlansToStorage();
   
   updateCalendarPlanMarks();
   closeModal('modalDailyPlan');
@@ -2789,6 +2994,8 @@ function editDailyPlan(planId) {
 
   showModal('modalDailyPlan');
   filterPlanFormByType();
+  // 进度变化时自动更新状态下拉
+  _bindProgressAutoStatus();
 }
 
 async function deleteDailyPlan(planId) {
@@ -8416,7 +8623,7 @@ function renderMappingPage08() {
   // 09 图纸深化：今日完成的图纸深化工作（不是计划）
   // 数据源：M.EVENTS，type='drawing' AND date=TODAY
   const allEvents = (M.EVENTS && M.EVENTS.length > 0 ? M.EVENTS : (M.HISTORY_EVENTS || []));
-  const today = (typeof M !== 'undefined' && M.TODAY) || new Date().toISOString().slice(0, 10);
+  const today = (typeof M !== 'undefined' && M.TODAY) || getBeijingDateStr();
   const rows = allEvents.filter(e =>
     e.projectId === currentProjectId &&
     e.type === 'drawing' &&
@@ -8478,7 +8685,7 @@ function renderMappingPage09() {
     const nextMonday = new Date();
     nextMonday.setDate(nextMonday.getDate() + ((1 + 7 - nextMonday.getDay()) % 7 || 7));
     const wr = typeof getWeekRangeForDate === 'function'
-      ? getWeekRangeForDate(nextMonday.toISOString().slice(0, 10))
+      ? getWeekRangeForDate(getBeijingDateStr())
       : (() => {
           const d = new Date(nextMonday);
           const day = d.getDay();
@@ -9107,17 +9314,24 @@ async function _persistActiveCustomModel(activeId) {
 }
 
 // 页面加载时调用：从后端拉最新的自定义模型列表和激活 id 覆盖 localStorage
+// 注意：只在后端有有效值（非空）时才覆盖 localStorage，避免后端空值覆盖用户的本地选择
 // 如果后端失败，保留 localStorage 不动
 async function _bootstrapCustomModelsFromBackend() {
   try {
     const r = await fetch('/api/llm/custom-models');
     if (!r.ok) return;
     const data = await r.json();
+    console.log('[bootstrap] backend data:', JSON.stringify(data));
     if (Array.isArray(data.models)) {
       localStorage.setItem('customLLMModels', JSON.stringify(data.models));
+      console.log('[bootstrap] set customLLMModels from backend:', data.models.length, 'models');
     }
-    if (typeof data.activeId === 'string' || typeof data.activeId === 'number') {
-      localStorage.setItem('activeCustomModel', String(data.activeId || ''));
+    // 只有后端有非空 activeId 时才覆盖
+    if (data.activeId && String(data.activeId).trim() !== '') {
+      localStorage.setItem('activeCustomModel', String(data.activeId));
+      console.log('[bootstrap] set activeCustomModel from backend:', data.activeId);
+    } else {
+      console.log('[bootstrap] backend activeId is empty, keeping localStorage');
     }
   } catch (e) {
     console.warn('[LLM设置] 从后端加载自定义模型失败，使用本地缓存:', e.message);
@@ -10382,6 +10596,8 @@ let _messageCache = {};        // { sessionId: [ {role, content}, ... ] }
 // WebSocket
 let _ws = null;
 let _unreadRemindersByProject = {};
+let _lastRefreshTime = 0;
+const REFRESH_COOLDOWN = 3000; // 3秒内不重复刷新
 
 function getUnreadCount(pid) { return _unreadRemindersByProject[pid] || 0; }
 function setUnreadCount(pid, n) { _unreadRemindersByProject[pid] = n; }
@@ -10398,6 +10614,25 @@ function initChatWebSocket() {
       try {
         const msg = JSON.parse(e.data);
         if (msg.type === 'reminders' && msg.reminders) handleProactiveReminders(msg.reminders);
+        if (msg.type === 'task-progress') handleTaskProgress(msg);
+        // P17: LLM 执行了写操作 → 自动刷新前端数据
+        if (msg.type === 'data-refresh') {
+          const now = Date.now();
+          if (now - _lastRefreshTime < REFRESH_COOLDOWN) return; // 防抖
+          _lastRefreshTime = now;
+          const pid = typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan';
+          if (msg.projectId === pid || msg.projectId === 'baicaoyuan') {
+            console.log('[data-refresh] LLM 更新了数据，自动重载...');
+            loadDataFromAPI().then(() => {
+              renderFilteredEvents();
+              renderStats();
+              if (typeof updateCalendar === 'function') updateCalendar();
+              if (typeof renderDailyPlanCard === 'function') renderDailyPlanCard();
+              if (typeof renderIssues === 'function') renderIssues();
+              showToast('数据已同步', 'success');
+            }).catch(err => console.warn('[data-refresh] 重载失败:', err.message));
+          }
+        }
       } catch (_) {}
     };
     _ws.onclose = () => { if (!_wsPolling) setTimeout(initChatWebSocket, 15000); };
@@ -10813,9 +11048,12 @@ async function _callChatLLM(text) {
     let chatProtocol = '';
     try {
       const activeId = localStorage.getItem('activeCustomModel');
+      console.log('[chat] activeCustomModel from localStorage:', activeId);
       if (activeId) {
         const models = JSON.parse(localStorage.getItem('customLLMModels') || '[]');
+        console.log('[chat] customLLMModels count:', models.length);
         const m = models.find(x => String(x.id) === String(activeId));
+        console.log('[chat] found model:', m ? m.name : 'NOT FOUND');
         if (m) {
           if (m.modelId) chatModel = m.modelId;
           if (m.baseUrl) chatBaseUrl = m.baseUrl;
@@ -10830,6 +11068,7 @@ async function _callChatLLM(text) {
         }
       }
     } catch (_) {}
+    console.log('[chat] final override: model=', chatModel, 'baseUrl=', chatBaseUrl, 'protocol=', chatProtocol);
 
     try {
       const res = await fetch('/api/chat', {
@@ -10930,7 +11169,13 @@ async function _callChatLLM(text) {
           scrollChatToBottom();
         }
       }
+
+      // ===== Agent 模式: 渲染任务列表卡片 =====
+      if (data.isAgent && data.tasks && data.tasks.length > 0) {
+        renderTaskListInBubble(bubble, data.tasks, data.taskId);
+      }
     }
+
   // 自动执行结果（安全操作）
     if (data.results && data.results.length > 0) {
       data.results.forEach(r => {
@@ -11127,6 +11372,110 @@ async function triggerInspection() {
     appendChatMessage('ai-proactive', '✅ 巡检完成，结果已通过徽章通知');
   } catch (e) {
     appendChatMessage('ai-proactive', '❌ 巡检失败: ' + e.message);
+  }
+}
+
+// ============================================================
+// Agent 模式 — 任务列表渲染 + WebSocket 进度更新 + 中止
+// ============================================================
+
+// 活跃的任务 ID → 对应 DOM 容器的映射
+var _activeAgentTasks = {};
+
+/**
+ * 在消息气泡内渲染任务列表卡片
+ */
+function renderTaskListInBubble(bubble, tasks, taskId) {
+  _activeAgentTasks[taskId] = { tasks: tasks, bubble: bubble };
+
+  var statusLabel = { pending: '未开始', in_progress: '进行中', completed: '已完成', failed: '失败' };
+  var itemsHtml = tasks.map(function(t) {
+    return '<div class="task-item" data-task-id="' + t.id + '" data-task-id-key="' + taskId + '-' + t.id + '">' +
+      '<span class="task-num">#' + t.id + '</span>' +
+      '<span class="task-title">' + _escapeHtml(t.title) + '</span>' +
+      '<span class="task-status-badge ' + t.status + '" id="badge-' + taskId + '-' + t.id + '">' + statusLabel[t.status] + '</span>' +
+      '</div>';
+  }).join('');
+
+  var html = '<div class="task-list" id="tasklist-' + taskId + '">' +
+    '<div class="task-list-header"><span class="icon">🤖</span><span>Agent 任务 (' + tasks.length + ')</span></div>' +
+    '<div class="task-list-items">' + itemsHtml + '</div>' +
+    '<button class="btn-abort-task" id="abort-' + taskId + '" onclick="abortAgentTask(\'' + taskId + '\')">⏹ 中止任务</button>' +
+    '</div>';
+
+  bubble.insertAdjacentHTML('beforeend', html);
+  scrollChatToBottom();
+}
+
+/**
+ * 更新任务列表中某个任务的状态
+ */
+function updateTaskStatus(taskId, taskIndex, newStatus) {
+  var key = taskId + '-' + (taskIndex + 1);
+  var badge = document.getElementById('badge-' + key);
+  if (badge) {
+    var statusLabel = { pending: '未开始', in_progress: '进行中', completed: '已完成', failed: '失败' };
+    badge.className = 'task-status-badge ' + newStatus;
+    badge.textContent = statusLabel[newStatus] || newStatus;
+  }
+}
+
+/**
+ * 更新整个任务列表（从 WebSocket 推送）
+ */
+function handleTaskProgress(data) {
+  var taskId = data.taskId;
+  var tasks = data.tasks || [];
+
+  if (!tasks.length) return;
+
+  tasks.forEach(function(t, i) {
+    updateTaskStatus(taskId, i, t.status);
+  });
+
+  // 如果有最终回复，追加到气泡
+  if (data.reply && _activeAgentTasks[taskId]) {
+    var bubble = _activeAgentTasks[taskId].bubble;
+    if (bubble) {
+      var replyHtml = '<div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06);font-size:13px;color:#e2e8f0;">' + renderMarkdownInline(data.reply) + '</div>';
+      bubble.insertAdjacentHTML('beforeend', replyHtml);
+      scrollChatToBottom();
+    }
+  }
+
+  // 检查是否全部完成或被中止，隐藏中止按钮
+  var allDone = tasks.every(function(t) { return t.status === 'completed' || t.status === 'failed'; });
+  var hasAborted = data.reply === '任务已中止';
+  var abortBtn = document.getElementById('abort-' + taskId);
+  if (abortBtn && (allDone || hasAborted)) {
+    abortBtn.style.display = 'none';
+  }
+}
+
+/**
+ * 用户点击中止按钮
+ */
+async function abortAgentTask(taskId) {
+  var btn = document.getElementById('abort-' + taskId);
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳ 正在中止...';
+  }
+
+  try {
+    var res = await fetch('/api/chat/tasks/' + encodeURIComponent(taskId) + '/abort', { method: 'POST' });
+    var data = await res.json();
+    if (data.ok) {
+      appendChatMessage('system', '⏹ 任务中止请求已发送', false, null);
+    } else {
+      appendChatMessage('system', '❌ 中止失败: ' + (data.error || '未知错误'), false, null);
+    }
+  } catch (e) {
+    appendChatMessage('system', '❌ 中止请求失败: ' + e.message, false, null);
+  }
+
+  if (btn) {
+    btn.textContent = '⏹ 已中止';
   }
 }
 
@@ -11725,8 +12074,8 @@ function executeChatAction(action) {
 function createEventFromChat(data) {
   if (typeof M === 'undefined' || !M.EVENTS) return;
   const projectId = typeof currentProjectId !== 'undefined' ? currentProjectId : 'baicaoyuan';
-  const today = M.TODAY || new Date().toISOString().slice(0, 10);
-  const ev = { id: 'E' + String(Date.now()).slice(-3), projectId, date: today, time: new Date().toTimeString().slice(0, 5), type: data.type || 'progress', areaId: data.areaId || null, planId: data.planId || undefined, payload: { taskName: data.taskName || '', owner: data.owner || '', progress: typeof data.progress === 'string' ? data.progress : (data.progress != null ? data.progress + '%' : ''), headcount: data.headcount || 0, description: data.note || '' }, submitter: '张明', source: 'chat', confidence: 0.9, status: 'confirmed', note: data.note || '' };
+  const today = M.TODAY || getBeijingDateStr();
+  const ev = { id: 'E' + String(Date.now()).slice(-3), projectId, date: today, time: getBeijingHHMM(), type: data.type || 'progress', areaId: data.areaId || null, planId: data.planId || undefined, payload: { taskName: data.taskName || '', owner: data.owner || '', progress: typeof data.progress === 'string' ? data.progress : (data.progress != null ? data.progress + '%' : ''), headcount: data.headcount || 0, description: data.note || '' }, submitter: '张明', source: 'chat', confidence: 0.9, status: 'confirmed', note: data.note || '' };
   if (data.photos && data.photos.length) ev.photos = data.photos;
   M.EVENTS.unshift(ev);
   if (M.saveEventsToStorage) M.saveEventsToStorage();

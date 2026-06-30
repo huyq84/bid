@@ -11,7 +11,7 @@ const path = require('path');
 const url = require('url');
 const os = require('os');
 
-const PORT = 8088;
+const PORT = 8089;
 const BACKEND_PORT = 3010;
 const ROOT_DIR = __dirname;
 
