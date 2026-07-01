@@ -535,6 +535,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }, 3000);
     
     initCustomAreas();
+    initCustomBuildings();
+    initCustomFloors();
     initCustomTypes();
     initProject();
     initCalendarWithToday();
@@ -649,6 +651,8 @@ function switchProject(projectId) {
     renderIssues();
     renderStats();
     populateAreaSelects();
+    refreshBuildingSelectors();
+    refreshFloorSelectors();
     updateCalendar();
     renderFilteredEvents();
     renderDailyPlanCard();
@@ -1391,8 +1395,6 @@ function openEventEdit() {
   document.getElementById('edit-type').value = event.type;
   document.getElementById('edit-date').value = event.date;
   document.getElementById('edit-time').value = event.time;
-  document.getElementById('edit-building-no').value = event.buildingNo || '';
-  document.getElementById('edit-floor-no').value = event.floorNo || '';
   document.getElementById('edit-note').value = event.note || '';
 
   // 关联计划 + 完成类型
@@ -1409,6 +1411,16 @@ function openEventEdit() {
   planSelect.onchange = () => onEditPlanChange(planSelect.value);
   document.getElementById('edit-completion-type').value = event.completionType || (event.planId ? 'planned' : 'unplanned');
 
+  // 楼号/施工段下拉
+  const bldSelect = document.getElementById('edit-building-no');
+  if (bldSelect) {
+    renderBuildingOptions('edit-building-no', event.buildingNo || '');
+  }
+  // 层号下拉
+  const flrSelect = document.getElementById('edit-floor-no');
+  if (flrSelect) {
+    renderFloorOptions('edit-floor-no', event.floorNo || '');
+  }
   // 区域下拉（包含预置区域 + 自定义区域）
   const areaSelect = document.getElementById('edit-area');
   const areas = getProjectAreas();
@@ -2408,10 +2420,17 @@ function renderAreaSelect(selectId) {
   const html = '<option value="">请选择区域</option>' +
     areas.map(a => `<option value="${a.id}">${a.name}${a.custom ? ' ★' : ''}</option>`).join('') +
     '<option value="_custom">其他（自定义）</option>';
-  
+
   const select = document.getElementById(selectId);
   if (select) {
     select.innerHTML = html;
+    // 绑定 _custom 选项的变更事件：弹出输入框创建新区域
+    select.onchange = function() {
+      if (this.value === '_custom') {
+        addCustomArea(selectId);
+        this.value = ''; // 重置为默认选项
+      }
+    };
   }
 }
 
@@ -2433,6 +2452,17 @@ function populateAreaSelects() {
   // 隐藏所有自定义输入框
   document.querySelectorAll('.custom-area-input').forEach(input => {
     input.style.display = 'none';
+  });
+}
+
+// 下拉框搜索过滤
+function filterSelectOptions(selectId, query) {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  const filter = query.toLowerCase();
+  Array.from(select.options).forEach(opt => {
+    if (!opt.value) { opt.style.display = ''; return; }
+    opt.style.display = opt.text.toLowerCase().includes(filter) ? '' : 'none';
   });
 }
 
@@ -2495,8 +2525,6 @@ function openDailyPlanForm() {
   try { lastType = localStorage.getItem('dp_last_event_type') || 'progress'; } catch(e) {}
   document.getElementById('dp-event-type').value = lastType;
   document.getElementById('dp-status').value = 'active';
-  document.getElementById('dp-building-no').value = '';
-  document.getElementById('dp-floor-no').value = '';
   document.getElementById('dp-process').value = '';
   document.getElementById('dp-owner').value = '';
   document.getElementById('dp-progress').value = '';
@@ -2509,7 +2537,9 @@ function openDailyPlanForm() {
   document.getElementById('dp-zone-images-preview').innerHTML = '';
   document.getElementById('dp-zone-images').value = '';
   
-  // 渲染区域选择
+  // 渲染区域/楼号/层号选择
+  renderBuildingSelect('dp-building-no');
+  renderFloorSelect('dp-floor-no');
   renderAreaSelect('dp-area');
   
   // 初始化工种行
@@ -2909,7 +2939,9 @@ function editDailyPlan(planId) {
   document.getElementById('dp-end-date').value = plan.endDate || plan.date || M.TODAY;
   document.getElementById('dp-event-type').value = plan.type || plan.eventType || 'progress';
   document.getElementById('dp-status').value = plan.status || 'active';
+  renderBuildingSelect('dp-building-no');
   document.getElementById('dp-building-no').value = plan.buildingNo || '';
+  renderFloorSelect('dp-floor-no');
   document.getElementById('dp-floor-no').value = plan.floorNo || '';
   renderAreaSelect('dp-area');
   document.getElementById('dp-area').value = plan.areaId || plan.area || '';
@@ -3062,6 +3094,44 @@ function saveCustomAreas() {
 // 获取当前项目所有区域（合并 mock + 用户新增）
 function getProjectAreas() {
   return customAreas[currentProjectId] || [];
+}
+
+// ============================================================
+// 楼号/施工段列表（可写）
+// ============================================================
+let customBuildings = {};
+
+function initCustomBuildings() {
+  try {
+    const saved = localStorage.getItem('customBuildings');
+    if (saved) customBuildings = JSON.parse(saved);
+  } catch (e) { /* ignore */ }
+  if (!customBuildings[currentProjectId]) customBuildings[currentProjectId] = [];
+}
+function saveCustomBuildings() {
+  try { localStorage.setItem('customBuildings', JSON.stringify(customBuildings)); } catch (e) { /* ignore */ }
+}
+function getProjectBuildings() {
+  return customBuildings[currentProjectId] || [];
+}
+
+// ============================================================
+// 层号列表（可写）
+// ============================================================
+let customFloors = {};
+
+function initCustomFloors() {
+  try {
+    const saved = localStorage.getItem('customFloors');
+    if (saved) customFloors = JSON.parse(saved);
+  } catch (e) { /* ignore */ }
+  if (!customFloors[currentProjectId]) customFloors[currentProjectId] = [];
+}
+function saveCustomFloors() {
+  try { localStorage.setItem('customFloors', JSON.stringify(customFloors)); } catch (e) { /* ignore */ }
+}
+function getProjectFloors() {
+  return customFloors[currentProjectId] || [];
 }
 
 // 事件类型列表（可写）
@@ -3350,6 +3420,16 @@ function refreshAreaSelectors() {
     const cur = document.getElementById('m-area').value;
     renderAreaOptions('m-area', cur);
   }
+  // 编辑日计划
+  if (document.getElementById('dp-area')) {
+    const cur = document.getElementById('dp-area').value;
+    renderAreaOptions('dp-area', cur);
+  }
+  // 事件编辑
+  if (document.getElementById('edit-area')) {
+    const cur = document.getElementById('edit-area').value;
+    renderAreaOptions('edit-area', cur);
+  }
   if (document.getElementById('m-area-hint')) {
     document.getElementById('m-area-hint').style.display = 'none';
   }
@@ -3365,6 +3445,7 @@ function renderAreasList() {
   const projectName = M.PROJECTS.find(p => p.id === currentProjectId)?.name || currentProjectId;
   document.getElementById('areasProjectName').textContent = `项目：${projectName}`;
   const areas = getProjectAreas();
+  console.log('[区域管理] renderAreasList: project=', currentProjectId, 'areas=', areas);
   const container = document.getElementById('areasListContainer');
   if (areas.length === 0) {
     container.innerHTML = '<div style="padding:20px; text-align:center; color:#94a3b8;">暂无区域</div>';
@@ -3378,6 +3459,10 @@ function renderAreasList() {
       <button class="btn btn-sm btn-danger" onclick="removeArea('${a.id}')" title="删除">🗑</button>
     </div>
   `).join('');
+  console.log('[区域管理] renderAreasList 渲染后 container.innerHTML 长度:', container.innerHTML.length);
+  console.log('[区域管理] container 可见性: display=', getComputedStyle(container).display, 'visibility=', getComputedStyle(container).visibility, 'opacity=', getComputedStyle(container).opacity);
+  // 强制重绘
+  container.offsetHeight;
 }
 
 // 从管理界面添加
@@ -3393,6 +3478,7 @@ function addAreaFromManager() {
     return;
   }
   const areas = getProjectAreas();
+  console.log('[\u533a\u57df\u7ba1\u7406] addAreaFromManager \u524d areas=', areas);
   let newId = customId || name.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'A';
   let suffix = 0;
   let baseId = newId;
@@ -3403,12 +3489,233 @@ function addAreaFromManager() {
   const newArea = { id: newId, name, custom: true };
   if (!customAreas[currentProjectId]) customAreas[currentProjectId] = [];
   customAreas[currentProjectId].push(newArea);
+  console.log('[\u533a\u57df\u7ba1\u7406] \u5df2 push\uff0ccustomAreas[currentProjectId]=', customAreas[currentProjectId]);
   saveCustomAreas();
   renderAreasList();
   refreshAreaSelectors();
+  // 额外刷新日计划表单中的区域下拉框（如果正在编辑）
+  if (document.getElementById('dp-area')) {
+    renderAreaSelect('dp-area');
+  }
   document.getElementById('newAreaName').value = '';
   document.getElementById('newAreaId').value = '';
   showToast(`已新增：${name}（${newId}）`, 'success');
+}
+
+// ============================================================
+// 楼号/施工段渲染 & 管理
+// ============================================================
+function renderBuildingSelect(selectId) {
+  const items = getProjectBuildings();
+  const html = '<option value="">请选择楼号/施工段</option>' +
+    items.map(a => `<option value="${a.id}">${a.name}${a.custom ? ' ★' : ''}</option>`).join('') +
+    '<option value="_custom">其他（自定义）</option>';
+  const select = document.getElementById(selectId);
+  if (select) {
+    select.innerHTML = html;
+    select.onchange = function() {
+      if (this.value === '_custom') addCustomBuilding(selectId);
+    };
+  }
+}
+function renderBuildingOptions(selectId, selectedId = '') {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  const items = getProjectBuildings();
+  select.innerHTML = '<option value="">请选择楼号/施工段</option>' +
+    items.map(a => `<option value="${a.id}" ${a.id === selectedId ? 'selected' : ''}>${a.name}${a.custom ? ' ★' : ''}</option>`).join('');
+}
+function addCustomBuilding(selectId) {
+  const name = prompt('请输入新楼号/施工段名称（如：1号楼、A区）：');
+  if (!name || !name.trim()) return;
+  const items = getProjectBuildings();
+  if (items.find(a => a.name === name.trim())) { showToast(`"${name}" 已存在`, 'error'); return; }
+  let newId = name.trim().replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'B';
+  let suffix = 0, baseId = newId;
+  while (items.find(a => a.id === newId)) { suffix++; newId = baseId + suffix; }
+  const item = { id: newId, name: name.trim(), custom: true };
+  if (!customBuildings[currentProjectId]) customBuildings[currentProjectId] = [];
+  customBuildings[currentProjectId].push(item);
+  saveCustomBuildings();
+  renderBuildingOptions(selectId, newId);
+  refreshBuildingSelectors();
+  showToast(`已新增楼号：${name}（${newId}）`, 'success');
+}
+function manageBuildings() {
+  showModal('modalBuildings');
+  renderBuildingsList();
+}
+function renderBuildingsList() {
+  const container = document.getElementById('buildingsListContainer');
+  const items = getProjectBuildings();
+  if (!container) return;
+  if (items.length === 0) {
+    container.innerHTML = '<div style="padding:20px; text-align:center; color:#94a3b8;">暂无楼号/施工段</div>';
+    return;
+  }
+  container.innerHTML = items.map(a => `
+    <div style="display:flex; align-items:center; gap:6px; padding:6px 10px; border-bottom:1px solid #f1f5f9;">
+      <span style="flex:0 0 60px; font-family:monospace; font-size:11px; color:#64748b;">${a.id}</span>
+      <span style="flex:1; font-size:12px;">${a.name}${a.custom ? ' <span style="color:#f59e0b; font-size:10px;">★自定义</span>' : ''}</span>
+      <button class="btn btn-sm btn-ghost" onclick="renameBuilding('${a.id}')" title="重命名">✏️</button>
+      <button class="btn btn-sm btn-danger" onclick="removeBuilding('${a.id}')" title="删除">🗑</button>
+    </div>
+  `).join('');
+}
+function addBuildingFromManager() {
+  const name = document.getElementById('newBuildingName').value.trim();
+  if (!name) { showToast('请输入楼号/施工段名称', 'error'); return; }
+  const items = getProjectBuildings();
+  if (items.find(a => a.name === name)) { showToast(`"${name}" 已存在`, 'error'); return; }
+  let newId = name.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'B';
+  let suffix = 0, baseId = newId;
+  while (items.find(a => a.id === newId)) { suffix++; newId = baseId + suffix; }
+  if (!customBuildings[currentProjectId]) customBuildings[currentProjectId] = [];
+  customBuildings[currentProjectId].push({ id: newId, name, custom: true });
+  saveCustomBuildings();
+  renderBuildingsList();
+  refreshBuildingSelectors();
+  document.getElementById('newBuildingName').value = '';
+  showToast(`已新增：${name}（${newId}）`, 'success');
+}
+async function removeBuilding(areaId) {
+  const name = getProjectBuildings().find(a => a.id === areaId)?.name || areaId;
+  const confirmed = await showConfirm(`确定删除楼号/施工段 "${name}"？`);
+  if (!confirmed) return;
+  if (!customBuildings[currentProjectId]) return;
+  customBuildings[currentProjectId] = customBuildings[currentProjectId].filter(a => a.id !== areaId);
+  saveCustomBuildings();
+  refreshBuildingSelectors();
+  renderBuildingsList();
+  showToast('已删除', 'success');
+}
+async function renameBuilding(areaId) {
+  const item = getProjectBuildings().find(a => a.id === areaId);
+  if (!item) return;
+  const newName = await showPrompt('修改名称：', item.name);
+  if (!newName || !newName.trim() || newName === item.name) return;
+  if (getProjectBuildings().find(a => a.name === newName.trim())) { showToast(`"${newName}" 已存在`, 'error'); return; }
+  item.name = newName.trim();
+  saveCustomBuildings();
+  refreshBuildingSelectors();
+  renderBuildingsList();
+  showToast('已重命名', 'success');
+}
+function refreshBuildingSelectors() {
+  ['dp-building-no', 'm-building-no', 'edit-building-no'].forEach(id => {
+    if (document.getElementById(id)) {
+      const cur = document.getElementById(id).value;
+      renderBuildingOptions(id, cur);
+    }
+  });
+}
+
+// ============================================================
+// 层号渲染 & 管理
+// ============================================================
+function renderFloorSelect(selectId) {
+  const items = getProjectFloors();
+  const html = '<option value="">请选择层号</option>' +
+    items.map(a => `<option value="${a.id}">${a.name}${a.custom ? ' ★' : ''}</option>`).join('') +
+    '<option value="_custom">其他（自定义）</option>';
+  const select = document.getElementById(selectId);
+  if (select) {
+    select.innerHTML = html;
+    select.onchange = function() {
+      if (this.value === '_custom') addCustomFloor(selectId);
+    };
+  }
+}
+function renderFloorOptions(selectId, selectedId = '') {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  const items = getProjectFloors();
+  select.innerHTML = '<option value="">请选择层号</option>' +
+    items.map(a => `<option value="${a.id}" ${a.id === selectedId ? 'selected' : ''}>${a.name}${a.custom ? ' ★' : ''}</option>`).join('');
+}
+function addCustomFloor(selectId) {
+  const name = prompt('请输入新层号（如：F1、B2）：');
+  if (!name || !name.trim()) return;
+  const items = getProjectFloors();
+  if (items.find(a => a.name === name.trim())) { showToast(`"${name}" 已存在`, 'error'); return; }
+  let newId = name.trim().replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'F';
+  let suffix = 0, baseId = newId;
+  while (items.find(a => a.id === newId)) { suffix++; newId = baseId + suffix; }
+  const item = { id: newId, name: name.trim(), custom: true };
+  if (!customFloors[currentProjectId]) customFloors[currentProjectId] = [];
+  customFloors[currentProjectId].push(item);
+  saveCustomFloors();
+  renderFloorOptions(selectId, newId);
+  refreshFloorSelectors();
+  showToast(`已新增层号：${name}（${newId}）`, 'success');
+}
+function manageFloors() {
+  showModal('modalFloors');
+  renderFloorsList();
+}
+function renderFloorsList() {
+  const container = document.getElementById('floorsListContainer');
+  const items = getProjectFloors();
+  if (!container) return;
+  if (items.length === 0) {
+    container.innerHTML = '<div style="padding:20px; text-align:center; color:#94a3b8;">暂无层号</div>';
+    return;
+  }
+  container.innerHTML = items.map(a => `
+    <div style="display:flex; align-items:center; gap:6px; padding:6px 10px; border-bottom:1px solid #f1f5f9;">
+      <span style="flex:0 0 60px; font-family:monospace; font-size:11px; color:#64748b;">${a.id}</span>
+      <span style="flex:1; font-size:12px;">${a.name}${a.custom ? ' <span style="color:#f59e0b; font-size:10px;">★自定义</span>' : ''}</span>
+      <button class="btn btn-sm btn-ghost" onclick="renameFloor('${a.id}')" title="重命名">✏️</button>
+      <button class="btn btn-sm btn-danger" onclick="removeFloor('${a.id}')" title="删除">🗑</button>
+    </div>
+  `).join('');
+}
+function addFloorFromManager() {
+  const name = document.getElementById('newFloorName').value.trim();
+  if (!name) { showToast('请输入层号', 'error'); return; }
+  const items = getProjectFloors();
+  if (items.find(a => a.name === name)) { showToast(`"${name}" 已存在`, 'error'); return; }
+  let newId = name.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'F';
+  let suffix = 0, baseId = newId;
+  while (items.find(a => a.id === newId)) { suffix++; newId = baseId + suffix; }
+  if (!customFloors[currentProjectId]) customFloors[currentProjectId] = [];
+  customFloors[currentProjectId].push({ id: newId, name, custom: true });
+  saveCustomFloors();
+  renderFloorsList();
+  refreshFloorSelectors();
+  document.getElementById('newFloorName').value = '';
+  showToast(`已新增：${name}（${newId}）`, 'success');
+}
+async function removeFloor(areaId) {
+  const name = getProjectFloors().find(a => a.id === areaId)?.name || areaId;
+  const confirmed = await showConfirm(`确定删除层号 "${name}"？`);
+  if (!confirmed) return;
+  if (!customFloors[currentProjectId]) return;
+  customFloors[currentProjectId] = customFloors[currentProjectId].filter(a => a.id !== areaId);
+  saveCustomFloors();
+  refreshFloorSelectors();
+  renderFloorsList();
+  showToast('已删除', 'success');
+}
+async function renameFloor(areaId) {
+  const item = getProjectFloors().find(a => a.id === areaId);
+  if (!item) return;
+  const newName = await showPrompt('修改名称：', item.name);
+  if (!newName || !newName.trim() || newName === item.name) return;
+  if (getProjectFloors().find(a => a.name === newName.trim())) { showToast(`"${newName}" 已存在`, 'error'); return; }
+  item.name = newName.trim();
+  saveCustomFloors();
+  refreshFloorSelectors();
+  renderFloorsList();
+  showToast('已重命名', 'success');
+}
+function refreshFloorSelectors() {
+  ['dp-floor-no', 'm-floor-no', 'edit-floor-no'].forEach(id => {
+    if (document.getElementById(id)) {
+      const cur = document.getElementById(id).value;
+      renderFloorOptions(id, cur);
+    }
+  });
 }
 
 // ============================================================
@@ -4709,6 +5016,8 @@ function openUnifiedInput(mode = 'manual', planId) {
   // 渲染计划列表和动态表单
   renderPlanSelect(defaultDate);
   renderManualForm();
+  renderBuildingOptions('m-building-no', '');
+  renderFloorOptions('m-floor-no', '');
   renderAreaOptions('m-area', '');
 
   if (planId) {

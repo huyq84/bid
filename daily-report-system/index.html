@@ -648,11 +648,21 @@
         <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 2fr;gap:10px;">
           <div class="form-group" data-dp-show="progress,material,safety,coordination,attendance">
             <label class="form-label">楼号/施工段</label>
-            <input class="form-input" type="text" id="m-building-no" placeholder="如：1号楼">
+            <div style="display:flex;gap:4px;align-items:center;">
+              <select class="form-select" id="m-building-no" style="flex:1;">
+                <option value="">请选择楼号/施工段</option>
+              </select>
+              <button class="btn btn-xs btn-ghost" onclick="manageBuildings()" title="管理楼号">⚙️</button>
+            </div>
           </div>
           <div class="form-group" data-dp-show="progress,material,safety,coordination,attendance">
             <label class="form-label">层号</label>
-            <input class="form-input" type="text" id="m-floor-no" placeholder="如：F1">
+            <div style="display:flex;gap:4px;align-items:center;">
+              <select class="form-select" id="m-floor-no" style="flex:1;">
+                <option value="">请选择层号</option>
+              </select>
+              <button class="btn btn-xs btn-ghost" onclick="manageFloors()" title="管理层号">⚙️</button>
+            </div>
           </div>
           <div class="form-group" data-dp-show="progress,material,safety,coordination,attendance">
             <label class="form-label">所属区域 <span class="req">*</span></label>
@@ -921,17 +931,30 @@
         <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 2fr;gap:10px;">
           <div class="form-group" data-dp-show="progress,material,safety,coordination,attendance">
             <label class="form-label">楼号/施工段</label>
-            <input class="form-input" type="text" id="edit-building-no" placeholder="如：1号楼">
+            <div style="display:flex;gap:4px;align-items:center;">
+              <select class="form-select" id="edit-building-no" style="flex:1;">
+                <option value="">请选择楼号/施工段</option>
+              </select>
+              <button class="btn btn-xs btn-ghost" onclick="manageBuildings()" title="管理楼号">⚙️</button>
+            </div>
           </div>
           <div class="form-group" data-dp-show="progress,material,safety,coordination,attendance">
             <label class="form-label">层号</label>
-            <input class="form-input" type="text" id="edit-floor-no" placeholder="如：F1">
+            <div style="display:flex;gap:4px;align-items:center;">
+              <select class="form-select" id="edit-floor-no" style="flex:1;">
+                <option value="">请选择层号</option>
+              </select>
+              <button class="btn btn-xs btn-ghost" onclick="manageFloors()" title="管理层号">⚙️</button>
+            </div>
           </div>
           <div class="form-group" data-dp-show="progress,material,safety,coordination,attendance">
             <label class="form-label">所属区域 <span class="req">*</span></label>
-            <select class="form-select" id="edit-area">
-              <option value="">请选择区域</option>
-            </select>
+            <div style="display:flex;gap:4px;align-items:center;">
+              <select class="form-select" id="edit-area" style="flex:1;">
+                <option value="">请选择区域</option>
+              </select>
+              <button class="btn btn-xs btn-ghost" onclick="manageAreas()" title="管理区域">⚙️</button>
+            </div>
           </div>
         </div>
         <div id="editDynamicForm"></div>
@@ -997,17 +1020,39 @@
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">楼号/施工段</label>
-              <input class="form-input" type="text" id="dp-building-no" placeholder="如：1号楼、A区">
+              <div style="display:flex;flex-direction:column;gap:2px;">
+                <input class="form-input" type="text" id="dp-building-no-filter" placeholder="🔍 搜索楼号..." style="font-size:11px;padding:2px 6px;" oninput="filterSelectOptions('dp-building-no',this.value)">
+                <div style="display:flex;gap:4px;align-items:center;">
+                  <select class="form-select" id="dp-building-no" style="flex:1;">
+                    <option value="">请选择楼号/施工段</option>
+                  </select>
+                  <button class="btn btn-sm btn-ghost" onclick="manageBuildings()" title="管理楼号（增删改）" style="white-space:nowrap;">⚙️</button>
+                </div>
+              </div>
             </div>
             <div class="form-group">
               <label class="form-label">层号</label>
-              <input class="form-input" type="text" id="dp-floor-no" placeholder="如：F1、B2">
+              <div style="display:flex;flex-direction:column;gap:2px;">
+                <input class="form-input" type="text" id="dp-floor-no-filter" placeholder="🔍 搜索层号..." style="font-size:11px;padding:2px 6px;" oninput="filterSelectOptions('dp-floor-no',this.value)">
+                <div style="display:flex;gap:4px;align-items:center;">
+                  <select class="form-select" id="dp-floor-no" style="flex:1;">
+                    <option value="">请选择层号</option>
+                  </select>
+                  <button class="btn btn-sm btn-ghost" onclick="manageFloors()" title="管理层号（增删改）" style="white-space:nowrap;">⚙️</button>
+                </div>
+              </div>
             </div>
             <div class="form-group">
               <label class="form-label">区域</label>
-              <select class="form-select" id="dp-area">
-                <option value="">请选择区域</option>
-              </select>
+              <div style="display:flex;flex-direction:column;gap:2px;">
+                <input class="form-input" type="text" id="dp-area-filter" placeholder="🔍 搜索区域..." style="font-size:11px;padding:2px 6px;" oninput="filterSelectOptions('dp-area',this.value)">
+                <div style="display:flex;gap:4px;align-items:center;">
+                  <select class="form-select" id="dp-area" style="flex:1;">
+                    <option value="">请选择区域</option>
+                  </select>
+                  <button class="btn btn-sm btn-ghost" onclick="manageAreas()" title="管理区域（增删改）" style="white-space:nowrap;">⚙️</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1132,6 +1177,48 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-primary" onclick="closeModal('modalAreas')">完成</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== 模态框：楼号/施工段管理 ============== -->
+  <div class="modal-mask" id="modalBuildings">
+    <div class="modal" style="max-width:480px;">
+      <div class="modal-header">
+        <div class="modal-title">🏗️ 楼号/施工段管理</div>
+        <button class="modal-close" onclick="closeModal('modalBuildings')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="font-size:11px; color:#64748b; margin-bottom:8px;">管理当前项目的楼号/施工段</div>
+        <div class="form-group" style="display:flex; gap:4px;">
+          <input class="form-input" type="text" id="newBuildingName" placeholder="如：1号楼、A区" style="flex:1;">
+          <button class="btn btn-primary" onclick="addBuildingFromManager()">➕ 添加</button>
+        </div>
+        <div id="buildingsListContainer" style="max-height:300px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:4px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="closeModal('modalBuildings')">完成</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== 模态框：层号管理 ============== -->
+  <div class="modal-mask" id="modalFloors">
+    <div class="modal" style="max-width:480px;">
+      <div class="modal-header">
+        <div class="modal-title">🏗️ 层号管理</div>
+        <button class="modal-close" onclick="closeModal('modalFloors')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="font-size:11px; color:#64748b; margin-bottom:8px;">管理当前项目的层号</div>
+        <div class="form-group" style="display:flex; gap:4px;">
+          <input class="form-input" type="text" id="newFloorName" placeholder="如：F1、B2" style="flex:1;">
+          <button class="btn btn-primary" onclick="addFloorFromManager()">➕ 添加</button>
+        </div>
+        <div id="floorsListContainer" style="max-height:300px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:4px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="closeModal('modalFloors')">完成</button>
       </div>
     </div>
   </div>
@@ -1689,7 +1776,7 @@
 
   <!-- 引入脚本 -->
   <script src="mock-data.js?v=4"></script>
-  <script src="app.v3.js?v=6"></script>
+  <script src="app.v3.js?v=13"></script>
   <script>
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closePhotoLightbox(); });
   </script>
